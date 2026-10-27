@@ -3,8 +3,14 @@ import { StyleSheet } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
+import { useThemeColors } from '@/hooks/useThemeColors';
+import { useThemeContext } from '@/contexts/ThemeContext';
 
 export default function ModalScreen() {
+  const themeColors = useThemeColors();
+  const { accentColor } = useThemeContext();
+  const { background: backgroundColor, card: cardColor, text: textColor, border: borderColor, primaryGold: GOLD_COLOR, subtitle: subtitleColor } = themeColors;
+
   return (
     <ThemedView style={styles.container}>
       <ThemedText type="title">This is a modal</ThemedText>

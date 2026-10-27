@@ -8,8 +8,14 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { Fonts } from '@/constants/theme';
+import { useThemeColors } from '@/hooks/useThemeColors';
+import { useThemeContext } from '@/contexts/ThemeContext';
 
 export default function TabTwoScreen() {
+  const themeColors = useThemeColors();
+  const { accentColor } = useThemeContext();
+  const { background: backgroundColor, card: cardColor, text: textColor, border: borderColor, primaryGold: GOLD_COLOR, subtitle: subtitleColor } = themeColors;
+
   return (
     <ParallaxScrollView
       headerBackgroundColor={{ light: '#D0D0D0', dark: '#353636' }}

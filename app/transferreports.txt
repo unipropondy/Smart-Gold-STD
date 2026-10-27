@@ -1,0 +1,363 @@
+Imports CrystalDecisions.CrystalReports.Engine
+Imports CrystalDecisions.Shared
+Public Class frmTransferReports
+    Dim dm As New DataManager
+    Dim objClsCompany As New clsCompany1
+    Private Sub btnClose_Click(sender As System.Object, e As System.EventArgs) Handles btnClose.Click
+        Me.Dispose()
+    End Sub
+
+    Private Sub frmTransferReports_KeyDown(sender As Object, e As System.Windows.Forms.KeyEventArgs) Handles Me.KeyDown
+        Select Case e.KeyCode
+            Case Keys.F7
+                btnOK_Click(sender, e)
+            Case Keys.Escape
+                btnClose_Click(sender, e)
+            Case Keys.Return
+                SendKeys.Send("{Tab}")
+            Case Keys.Down
+                SendKeys.Send("{Tab}")
+            Case Keys.Up
+                SendKeys.Send("+{Tab}")
+        End Select
+    End Sub
+
+    Private Sub btnOK_Click(sender As System.Object, e As System.EventArgs) Handles btnOK.Click
+        Dim sSql As String
+        Dim sCompanyname, sAddress, sReportTitle, sPath, sPhone, sFax, sSelectFormula, sPrintFDate, sPrintTDate, sFromDate, sToDate As String
+        Dim CR As New ReportDocument
+        Dim frmRep As New frmReports
+        Dim SDateFrom As String
+        Dim SDateTo As String
+        Dim sSelectFld As String
+        Dim sExecSql As String
+        Dim ReportTitle As String
+
+        SDateFrom = (txtfyear.Text & "," & txtfMon.Text & "," & txtFday.Text)
+        SDateTo = (txtTYear.Text & "," & txtTmon.Text & "," & txtTday.Text)
+        If SDateFrom.Trim.Length > 2 Then
+            If Not IsDate(SDateFrom.Trim) Then
+                MsgBox("Enter valid data for From DATE ! ", MsgBoxStyle.Information)
+                txtFday.Focus()
+                Exit Sub
+            End If
+        End If
+        If SDateTo.Trim.Length > 2 Then
+            If Not IsDate(SDateTo.Trim) Then
+                MsgBox("Enter valid data for To DATE ! ", MsgBoxStyle.Information)
+                txtTday.Focus()
+                Exit Sub
+            End If
+        Else
+            If SDateFrom.Trim.Length > 2 Then
+                SDateTo = SDateFrom
+            End If
+        End If
+
+        Me.Cursor.Current = System.Windows.Forms.Cursors.WaitCursor
+        SDateFrom = Trim(txtfyear.Text) + "," + txtfMon.Text + "," + txtFday.Text
+        SDateTo = Trim(txtTYear.Text + "," + txtTmon.Text + "," + txtTday.Text)
+        Try
+            ReportTitle = ""
+            If optTransferOut.Checked = True And optSummary.Checked = True Then
+                ReportTitle = "Transfer Out Summary"
+                sPath = Application.StartupPath & "\Reports\rptTransferOutSummary.rpt"
+
+                If IsDate(SDateFrom) And IsDate(SDateTo) Then
+                    ' sSql = sSql & " And "
+                    sSql = sSql & " {tblInventoryTransferHeader.TransferDate} >= date(" & SDateFrom & ") " & _
+                                " and {tblInventoryTransferHeader.TransferDate} <= date(" & SDateTo & ") "
+                    ReportTitle = ReportTitle & " From " & Format(CDate(SDateFrom), "dd/MM/yyyy") & " To " & Format(CDate(SDateTo), "dd/MM/yyyy")
+                End If
+                If Trim$(cboFromLocationCode.Text) <> "" And Trim$(cboFromLocationCode.Text) <> "ALL" Then
+                    sSql = sSql & " And "
+                    sSql = sSql & " {tblInventoryTransferHeader. FromLocation } = " & Trim$(fncFormatSQLText(cboFromLocationCode.Text))
+                    sSelectFld = sSelectFld & "FromLocation : " & Trim$(cboFromLocationCode.Text)
+                End If
+                If Trim$(cboToLocationCode.Text) <> "" And Trim$(cboToLocationCode.Text) <> "ALL" Then
+                    sSql = sSql & " And "
+                    sSql = sSql & " {tblInventoryTransferHeader.ToLocation } = " & Trim$(fncFormatSQLText(cboToLocationCode.Text))
+                    sSelectFld = sSelectFld & " ToLocation : " & Trim$(cboToLocationCode.Text)
+                End If
+
+                If Trim(cboStatus.Text) = "PENDING" Then
+                    sSql = sSql & " And "
+                    sSql = sSql & " {tblInventoryTransferHeader.ToLocStatus } =  " & Trim$(fncFormatSQLText("0"))
+                ElseIf Trim(cboStatus.Text) = "ACCEPTED" Then
+                    sSql = sSql & " And "
+                    sSql = sSql & " {tblInventoryTransferHeader.ToLocStatus } =  " & Trim$(fncFormatSQLText("2"))
+                End If
+
+            ElseIf optTransferOut.Checked = True And optDetail.Checked = True Then
+                ReportTitle = "Transfer Out Detail"
+                sPath = Application.StartupPath & "\Reports\rptTransferOutDetail.rpt"
+
+                If IsDate(SDateFrom) And IsDate(SDateTo) Then
+                    ' sSql = sSql & " And "
+                    sSql = sSql & " {tblInventoryTransferHeader.TransferDate} >= date(" & SDateFrom & ") " & _
+                                " and {tblInventoryTransferHeader.TransferDate} <= date(" & SDateTo & ") "
+                    ReportTitle = ReportTitle & " From " & Format(CDate(SDateFrom), "dd/MM/yyyy") & " To " & Format(CDate(SDateTo), "dd/MM/yyyy")
+                End If
+                If Trim$(cboFromLocationCode.Text) <> "" And Trim$(cboFromLocationCode.Text) <> "ALL" Then
+                    sSql = sSql & " And "
+                    sSql = sSql & " {tblInventoryTransferHeader. FromLocation } = " & Trim$(fncFormatSQLText(cboFromLocationCode.Text))
+                    sSelectFld = sSelectFld & "FromLocation : " & Trim$(cboFromLocationCode.Text)
+                End If
+                If Trim$(cboToLocationCode.Text) <> "" And Trim$(cboToLocationCode.Text) <> "ALL" Then
+                    sSql = sSql & " And "
+                    sSql = sSql & " {tblInventoryTransferHeader.ToLocation } = " & Trim$(fncFormatSQLText(cboToLocationCode.Text))
+                    sSelectFld = sSelectFld & " ToLocation : " & Trim$(cboToLocationCode.Text)
+                End If
+
+                If Trim(cboStatus.Text) = "PENDING" Then
+                    sSql = sSql & " And "
+                    sSql = sSql & " {tblInventoryTransferHeader.ToLocStatus } =  " & Trim$(fncFormatSQLText("0"))
+                ElseIf Trim(cboStatus.Text) = "ACCEPTED" Then
+                    sSql = sSql & " And "
+                    sSql = sSql & " {tblInventoryTransferHeader.ToLocStatus } =  " & Trim$(fncFormatSQLText("2"))
+                End If
+            ElseIf optTransferIn.Checked = True And optSummary.Checked = True Then
+                ReportTitle = "Transfer In Summary"
+                sPath = Application.StartupPath & "\Reports\rptTransferInSummary.rpt"
+
+                If IsDate(SDateFrom) And IsDate(SDateTo) Then
+                    '   sSql = sSql & " And "
+                    sSql = sSql & " {tblInventoryTransferHeader.TransferDate} >= date(" & SDateFrom & ") " & _
+                                " and {tblInventoryTransferHeader.TransferDate} <= date(" & SDateTo & ") "
+                    ReportTitle = ReportTitle & " From " & Format(CDate(SDateFrom), "dd/MM/yyyy") & " To " & Format(CDate(SDateTo), "dd/MM/yyyy")
+                End If
+                If Trim$(cboFromLocationCode.Text) <> "" And Trim$(cboFromLocationCode.Text) <> "ALL" Then
+                    sSql = sSql & " And "
+                    sSql = sSql & " {tblInventoryTransferHeader. FromLocation } = " & Trim$(fncFormatSQLText(cboFromLocationCode.Text))
+                    sSelectFld = sSelectFld & "FromLocation : " & Trim$(cboFromLocationCode.Text)
+                End If
+                If Trim$(cboToLocationCode.Text) <> "" And Trim$(cboToLocationCode.Text) <> "ALL" Then
+                    sSql = sSql & " And "
+                    sSql = sSql & " {tblInventoryTransferHeader.ToLocation } = " & Trim$(fncFormatSQLText(cboToLocationCode.Text))
+                    sSelectFld = sSelectFld & " ToLocation : " & Trim$(cboToLocationCode.Text)
+                End If
+            ElseIf optTransferIn.Checked = True And optDetail.Checked = True Then
+                ReportTitle = "Transfer In Summary"
+                sPath = Application.StartupPath & "\Reports\rptTransferInDetail.rpt"
+
+                If IsDate(SDateFrom) And IsDate(SDateTo) Then
+                    '  sSql = sSql & " And "
+                    sSql = sSql & " {tblInventoryTransferHeader.TransferDate} >= date(" & SDateFrom & ") " & _
+                                " and {tblInventoryTransferHeader.TransferDate} <= date(" & SDateTo & ") "
+                    ReportTitle = ReportTitle & " From " & Format(CDate(SDateFrom), "dd/MM/yyyy") & " To " & Format(CDate(SDateTo), "dd/MM/yyyy")
+                End If
+                If Trim$(cboFromLocationCode.Text) <> "" And Trim$(cboFromLocationCode.Text) <> "ALL" Then
+                    sSql = sSql & " And "
+                    sSql = sSql & " {tblInventoryTransferHeader.FromLocation } = " & Trim$(fncFormatSQLText(cboFromLocationCode.Text))
+                    sSelectFld = sSelectFld & "FromLocation : " & Trim$(cboFromLocationCode.Text)
+                End If
+                If Trim$(cboToLocationCode.Text) <> "" And Trim$(cboToLocationCode.Text) <> "ALL" Then
+                    sSql = sSql & " And "
+                    sSql = sSql & " {tblInventoryTransferHeader.ToLocation } = " & Trim$(fncFormatSQLText(cboToLocationCode.Text))
+                    sSelectFld = sSelectFld & " ToLocation : " & Trim$(cboToLocationCode.Text)
+                End If
+            ElseIf optTradeInTransferOut.Checked = True And optSummary.Checked = True Then
+                ReportTitle = "TradeIn Transfer Out Summary"
+                sPath = Application.StartupPath & "\Reports\rptTradeInTransferOutSummary.rpt"
+
+                If IsDate(SDateFrom) And IsDate(SDateTo) Then
+                    ' sSql = sSql & " And "
+                    sSql = sSql & " {tblInventoryTransferHeader.TransferDate} >= date(" & SDateFrom & ") " & _
+                                " and {tblInventoryTransferHeader.TransferDate} <= date(" & SDateTo & ") "
+                    ReportTitle = ReportTitle & " From " & Format(CDate(SDateFrom), "dd/MM/yyyy") & " To " & Format(CDate(SDateTo), "dd/MM/yyyy")
+                End If
+                'If Trim$(cboFromLocationCode.Text) <> "" And Trim$(cboFromLocationCode.Text) <> "ALL" Then
+                '    sSql = sSql & " And "
+                '    sSql = sSql & " {tblInventoryTransferHeader. FromLocation } = " & Trim$(fncFormatSQLText(cboFromLocationCode.Text))
+                '    sSelectFld = sSelectFld & "FromLocation : " & Trim$(cboFromLocationCode.Text)
+                'End If
+                'If Trim$(cboToLocationCode.Text) <> "" And Trim$(cboToLocationCode.Text) <> "ALL" Then
+                '    sSql = sSql & " And "
+                '    sSql = sSql & " {tblInventoryTransferHeader.ToLocation } = " & Trim$(fncFormatSQLText(cboToLocationCode.Text))
+                '    sSelectFld = sSelectFld & " ToLocation : " & Trim$(cboToLocationCode.Text)
+                'End If
+
+                'If Trim(cboStatus.Text) = "PENDING" Then
+                '    sSql = sSql & " And "
+                '    sSql = sSql & " {tblInventoryTransferHeader.ToLocStatus } =  " & Trim$(fncFormatSQLText("0"))
+                'ElseIf Trim(cboStatus.Text) = "ACCEPTED" Then
+                '    sSql = sSql & " And "
+                '    sSql = sSql & " {tblInventoryTransferHeader.ToLocStatus } =  " & Trim$(fncFormatSQLText("2"))
+                'End If
+
+            ElseIf optTradeInTransferOut.Checked = True And optDetail.Checked = True Then
+                ReportTitle = "Transfer Out Detail"
+                sPath = Application.StartupPath & "\Reports\rptTradeInTransferOutDetail.rpt"
+
+                If IsDate(SDateFrom) And IsDate(SDateTo) Then
+                    ' sSql = sSql & " And "
+                    sSql = sSql & " {tblInventoryTransferHeader.TransferDate} >= date(" & SDateFrom & ") " & _
+                                " and {tblInventoryTransferHeader.TransferDate} <= date(" & SDateTo & ") "
+                    ReportTitle = ReportTitle & " From " & Format(CDate(SDateFrom), "dd/MM/yyyy") & " To " & Format(CDate(SDateTo), "dd/MM/yyyy")
+                End If
+                'If Trim$(cboFromLocationCode.Text) <> "" And Trim$(cboFromLocationCode.Text) <> "ALL" Then
+                '    sSql = sSql & " And "
+                '    sSql = sSql & " {tblInventoryTransferHeader. FromLocation } = " & Trim$(fncFormatSQLText(cboFromLocationCode.Text))
+                '    sSelectFld = sSelectFld & "FromLocation : " & Trim$(cboFromLocationCode.Text)
+                'End If
+                'If Trim$(cboToLocationCode.Text) <> "" And Trim$(cboToLocationCode.Text) <> "ALL" Then
+                '    sSql = sSql & " And "
+                '    sSql = sSql & " {tblInventoryTransferHeader.ToLocation } = " & Trim$(fncFormatSQLText(cboToLocationCode.Text))
+                '    sSelectFld = sSelectFld & " ToLocation : " & Trim$(cboToLocationCode.Text)
+                'End If
+
+                'If Trim(cboStatus.Text) = "PENDING" Then
+                '    sSql = sSql & " And "
+                '    sSql = sSql & " {tblInventoryTransferHeader.ToLocStatus } =  " & Trim$(fncFormatSQLText("0"))
+                'ElseIf Trim(cboStatus.Text) = "ACCEPTED" Then
+                '    sSql = sSql & " And "
+                '    sSql = sSql & " {tblInventoryTransferHeader.ToLocStatus } =  " & Trim$(fncFormatSQLText("2"))
+                'End If
+            End If
+
+
+
+            '======== General ======================
+            DS = objClsCompany.getCompanyName
+            If DS.Tables("GetCompanyName").Rows.Count > 0 Then
+                sCompanyname = Trim(DS.Tables("GetCompanyName").Rows(0)("Name") & "")
+                sAddress = Trim(DS.Tables("GetCompanyName").Rows(0)("Address1") & "") & " " & _
+                             Trim(DS.Tables("GetCompanyName").Rows(0)("Address2") & "") & " " & _
+                             Trim(DS.Tables("GetCompanyName").Rows(0)("Country") & "")
+                sPhone = Trim(DS.Tables("GetCompanyName").Rows(0)("Phone") & "")
+                sFax = Trim(DS.Tables("GetCompanyName").Rows(0)("Fax") & "")
+            End If
+            CR.Load(sPath)
+            If Not ReportLogOnToServer(CR) Then
+                Exit Sub
+            End If
+            'ReportLogOnToServer(CR)
+            CR.DataDefinition.FormulaFields("CompAddress1").Text = fncFormatSQLText(sCompanyname)
+            CR.DataDefinition.FormulaFields("CompAddress2").Text = fncFormatSQLText(sAddress)
+            CR.DataDefinition.FormulaFields("ReportTitle").Text = fncFormatSQLText(ReportTitle)
+            CR.DataDefinition.FormulaFields("RPTSELECTION").Text = fncFormatSQLText(sSelectFld)
+            CR.DataDefinition.FormulaFields("CompAddress3").Text = fncFormatSQLText(sPhone)
+            CR.DataDefinition.FormulaFields("CompAddress4").Text = fncFormatSQLText(sFax)
+            CR.DataDefinition.RecordSelectionFormula = sSql
+            CR.Refresh()
+            frmRep.ReportViewer.ReportSource = CR
+
+            '==== Print/ Preview Option========
+
+
+            frmRep.ShowDialog()
+            frmRep.ReportViewer.Visible = True
+            frmRep.ReportViewer.CloseView(False)
+            frmRep.WindowState = FormWindowState.Maximized
+
+        Catch ex As Exception
+            MsgBox(Err.Description)
+        Finally
+            Err.Clear()
+            CR.Close()
+            CR = Nothing
+            Cursor.Current = System.Windows.Forms.Cursors.Default
+        End Try
+    End Sub
+
+    Private Sub frmTransferReports_Load(sender As Object, e As System.EventArgs) Handles Me.Load
+        getCurrentDate()
+        AddItemstoComboFromLoc()
+        AddItemstoComboToLoc()
+        LoadLocationcode()
+        cboStatus.SelectedIndex = 0
+    End Sub
+    Private Sub getCurrentDate()
+        txtFday.Text = Format(ServerDate, "dd")
+        txtfMon.Text = Format(ServerDate, "MM")
+        txtfyear.Text = Format(ServerDate, "yyyy")
+        txtTday.Text = Format(ServerDate, "dd")
+        txtTmon.Text = Format(ServerDate, "MM")
+        txtTYear.Text = Format(ServerDate, "yyyy")
+    End Sub
+    'Public Sub AddItemstoCombo()
+    '    dm.SetMasterDataSet(" Select * from tblSupplier", "tblSupplier")
+    '    dm.FillDatasToComboListWithFilter(cboSupplierCode, "tblSupplier", "SupplierCode", "SupplierName")
+    'End Sub
+ 
+
+    Public Sub AddItemstoComboFromLoc()
+        'dm.SetMasterDataSetLoc("Select rtrim(LocationCode)LocationCode,rtrim(LocationName)LocationName from tblLocation Order by SortCode", "tbllocation")
+        'dm.FillDatasToComboListWithFilters(cboFromLocationCode, "tbllocation", "LocationCode", "LocationName")
+
+        dm.SetMasterDataSetLoc("Select 'ALL' LocationCode,'ALL' LocationName Union Select LocationCode,LocationName from tblLocation", "tbllocation")
+        dm.FillDatasToComboListWithFilters(cboFromLocationCode, "tbllocation", "LocationCode", "LocationName")
+    End Sub
+    Public Sub AddItemstoComboToLoc()
+        'dm.SetMasterDataSetLoc("Select rtrim(LocationCode)LocationCode,rtrim(LocationName)LocationName from tblLocation Order by SortCode", "tbllocation")
+        'dm.FillDatasToComboListWithFilters(cboToLocationCode, "tbllocation", "LocationCode", "LocationName")
+
+        dm.SetMasterDataSetLoc("Select 'ALL' LocationCode,'ALL' LocationName Union Select LocationCode,LocationName from tblLocation", "tbllocation")
+        dm.FillDatasToComboListWithFilters(cboToLocationCode, "tbllocation", "LocationCode", "LocationName")
+    End Sub
+    Public Sub LoadLocationcode()
+        If gthisLocationType = "HQ" Then
+            If cboFromLocationCode.Items.Count > 0 Then cboFromLocationCode.SelectedIndex = -1
+            cboFromLocationCode.Text = gthisLocation
+            If cboToLocationCode.Items.Count > 0 Then cboToLocationCode.SelectedIndex = -1
+            cboToLocationCode.Text = gthisLocation
+        Else
+            'If cboFromLocationCode.Items.Count > 0 Then cboFromLocationCode.Text = gthisLocation
+            'If cboToLocationCode.Items.Count > 0 Then cboToLocationCode.Text = gthisLocation
+            If cboFromLocationCode.Items.Count > 0 Then cboFromLocationCode.SelectedIndex = -1
+            cboFromLocationCode.Text = gthisLocation
+            If cboToLocationCode.Items.Count > 0 Then cboToLocationCode.SelectedIndex = -1
+            cboToLocationCode.Text = gthisLocation
+        End If
+    End Sub
+End Class
+
+
+----------------------------------------------------------------------------------------------
+Transfer Out Summary	
+rptTransferOutSummary.rpt
+
+SELECT "tblInventoryTransferHeader"."TransferNo", "tblInventoryTransferHeader"."Totalweight", "tblInventoryTransferHeader"."TotalPCS", "tblInventoryTransferHeader"."TotalCost", "tblInventoryTransferHeader"."ToLocation", "tblInventoryTransferHeader"."FromLocation", "tblInventoryTransferHeader"."FromLocStatus", "tblInventoryTransferHeader"."ToLocStatus"
+ FROM   "SmartGold"."dbo"."tblInventoryTransferHeader" "tblInventoryTransferHeader"
+ ORDER BY "tblInventoryTransferHeader"."FromLocation", "tblInventoryTransferHeader"."ToLocation", "tblInventoryTransferHeader"."TransferNo"
+ 
+Transfer Out Detail	
+rptTransferOutDetail.rpt
+ 
+ 
+ SELECT "tblInventoryTransferDetail"."TotalCost", "tblInventoryTransferDetail"."PCS", "tblInventoryTransferDetail"."Weight", "tblInventoryTransferDetail"."Description", "tblInventoryTransferDetail"."TransferNo", "tblInventory"."DiamondDescription", "tblInventory"."SupplierCode", "tblInventoryTransferDetail"."InventoryCode", "tblInventory"."SizeCode", "tblInventory"."SizeType", "tblInventoryTransferHeader"."ToLocation", "tblInventoryTransferHeader"."FromLocation", "tblInventory"."Weight", "tblInventory"."StoneWeight", "tblInventoryTransferHeader"."TransferDate", "tblInventoryTransferHeader"."TransferNo", "tblInventoryTransferHeader"."Remarks"
+ FROM   ("SmartGold"."dbo"."tblInventoryTransferDetail" "tblInventoryTransferDetail" INNER JOIN "SmartGold"."dbo"."tblInventoryTransferHeader" "tblInventoryTransferHeader" ON "tblInventoryTransferDetail"."TransferNo"="tblInventoryTransferHeader"."TransferNo") INNER JOIN "SmartGold"."dbo"."tblInventory" "tblInventory" ON ("tblInventoryTransferDetail"."InventoryCode"="tblInventory"."InventoryCode") AND ("tblInventoryTransferHeader"."FromLocation"="tblInventory"."LocationCode")
+ ORDER BY "tblInventoryTransferDetail"."TransferNo", "tblInventoryTransferDetail"."InventoryCode"
+ 
+ Transfer In Summary	
+ rptTransferInSummary.rpt
+ 
+ SELECT "tblInventoryTransferDetail"."TotalCost", "tblInventoryTransferDetail"."PCS", "tblInventoryTransferDetail"."Weight", "tblInventoryTransferDetail"."Description", "tblInventoryTransferDetail"."TransferNo", "tblInventoryTransferDetail"."InventoryCode", "tblInventoryTransferDetail"."QtyOnHand"
+ FROM   "SmartGold"."dbo"."localinventorytransferdetail" "tblInventoryTransferDetail"
+ ORDER BY "tblInventoryTransferDetail"."TransferNo", "tblInventoryTransferDetail"."InventoryCode"
+ 
+ Transfer In Detail	
+ rptTransferInDetail.rpt
+ 
+ 
+ SELECT "tblInventoryTransferDetail"."TotalCost", "tblInventoryTransferDetail"."PCS", "tblInventoryTransferDetail"."Weight", "tblInventoryTransferDetail"."Description", "tblInventoryTransferDetail"."TransferNo", "tblInventoryTransferDetail"."InventoryCode", "tblInventoryTransferDetail"."QtyOnHand"
+ FROM   "SmartGold"."dbo"."localinventorytransferdetail" "tblInventoryTransferDetail"
+ ORDER BY "tblInventoryTransferDetail"."TransferNo", "tblInventoryTransferDetail"."InventoryCode"
+ 
+ TradeIn Transfer Out Summary	
+ rptTradeInTransferOutSummary.rpt
+ 
+ SELECT "tblInventoryTransferHeader"."TransferNo", "tblInventoryTransferHeader"."Totalweight", "tblInventoryTransferHeader"."TotalPCS", "tblInventoryTransferHeader"."TotalCost", "tblInventoryTransferHeader"."ToLocation", "tblInventoryTransferHeader"."FromLocation", "tblInventoryTransferHeader"."FromLocStatus", "tblInventoryTransferHeader"."ToLocStatus"
+ FROM   "SmartGoldTest"."dbo"."tblInventoryTradeInTransferHeader" "tblInventoryTransferHeader"
+ ORDER BY "tblInventoryTransferHeader"."FromLocation", "tblInventoryTransferHeader"."ToLocation", "tblInventoryTransferHeader"."TransferNo"
+
+TradeIn Transfer Out Detail	
+rptTradeInTransferOutDetail.rpt
+
+SELECT "tblInventoryTransferDetail"."TotalCost", "tblInventoryTransferDetail"."PCS", "tblInventoryTransferDetail"."Weight", "tblInventoryTransferDetail"."Description", "tblInventoryTransferDetail"."TransferNo", "tblInventory"."DiamondDescription", "tblInventory"."SupplierCode", "tblInventoryTransferDetail"."InventoryCode", "tblInventory"."SizeCode", "tblInventory"."SizeType", "tblInventoryTransferHeader"."ToLocation", "tblInventoryTransferHeader"."FromLocation", "tblInventory"."Weight", "tblInventory"."StoneWeight", "tblInventoryTransferHeader"."TransferDate", "tblInventoryTransferHeader"."TransferNo", "tblInventoryTransferHeader"."Remarks"
+ FROM   ("SmartGoldTest"."dbo"."tblInventoryTradeInTransferDetail" "tblInventoryTransferDetail" INNER JOIN "SmartGoldTest"."dbo"."tblInventoryTradeInTransferHeader" "tblInventoryTransferHeader" ON "tblInventoryTransferDetail"."TransferNo"="tblInventoryTransferHeader"."TransferNo") INNER JOIN "SmartGoldTest"."dbo"."tblInventory" "tblInventory" ON ("tblInventoryTransferDetail"."InventoryCode"="tblInventory"."InventoryCode") AND ("tblInventoryTransferHeader"."FromLocation"="tblInventory"."LocationCode")
+ ORDER BY "tblInventoryTransferDetail"."TransferNo", "tblInventoryTransferDetail"."InventoryCode"
+
+ 
+ 
+

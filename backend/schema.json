@@ -1,0 +1,547 @@
+[
+  {
+    "COLUMN_NAME": "CompanyID",
+    "CHARACTER_MAXIMUM_LENGTH": 15,
+    "DATA_TYPE": "char"
+  },
+  {
+    "COLUMN_NAME": "Name",
+    "CHARACTER_MAXIMUM_LENGTH": 50,
+    "DATA_TYPE": "varchar"
+  },
+  {
+    "COLUMN_NAME": "Address1",
+    "CHARACTER_MAXIMUM_LENGTH": 50,
+    "DATA_TYPE": "char"
+  },
+  {
+    "COLUMN_NAME": "Address2",
+    "CHARACTER_MAXIMUM_LENGTH": 50,
+    "DATA_TYPE": "char"
+  },
+  {
+    "COLUMN_NAME": "City",
+    "CHARACTER_MAXIMUM_LENGTH": 50,
+    "DATA_TYPE": "char"
+  },
+  {
+    "COLUMN_NAME": "State",
+    "CHARACTER_MAXIMUM_LENGTH": 50,
+    "DATA_TYPE": "char"
+  },
+  {
+    "COLUMN_NAME": "Country",
+    "CHARACTER_MAXIMUM_LENGTH": 50,
+    "DATA_TYPE": "char"
+  },
+  {
+    "COLUMN_NAME": "PostalCode",
+    "CHARACTER_MAXIMUM_LENGTH": 10,
+    "DATA_TYPE": "char"
+  },
+  {
+    "COLUMN_NAME": "Phone",
+    "CHARACTER_MAXIMUM_LENGTH": 35,
+    "DATA_TYPE": "char"
+  },
+  {
+    "COLUMN_NAME": "Fax",
+    "CHARACTER_MAXIMUM_LENGTH": 15,
+    "DATA_TYPE": "char"
+  },
+  {
+    "COLUMN_NAME": "Email",
+    "CHARACTER_MAXIMUM_LENGTH": 50,
+    "DATA_TYPE": "char"
+  },
+  {
+    "COLUMN_NAME": "Url",
+    "CHARACTER_MAXIMUM_LENGTH": 50,
+    "DATA_TYPE": "char"
+  },
+  {
+    "COLUMN_NAME": "LocationCode",
+    "CHARACTER_MAXIMUM_LENGTH": 10,
+    "DATA_TYPE": "varchar"
+  },
+  {
+    "COLUMN_NAME": "MainLocationCode",
+    "CHARACTER_MAXIMUM_LENGTH": 10,
+    "DATA_TYPE": "varchar"
+  },
+  {
+    "COLUMN_NAME": "DateFormat",
+    "CHARACTER_MAXIMUM_LENGTH": 25,
+    "DATA_TYPE": "char"
+  },
+  {
+    "COLUMN_NAME": "TimeFormat",
+    "CHARACTER_MAXIMUM_LENGTH": 25,
+    "DATA_TYPE": "char"
+  },
+  {
+    "COLUMN_NAME": "CurrencySign",
+    "CHARACTER_MAXIMUM_LENGTH": 3,
+    "DATA_TYPE": "char"
+  },
+  {
+    "COLUMN_NAME": "DefaultCurrency",
+    "CHARACTER_MAXIMUM_LENGTH": 3,
+    "DATA_TYPE": "char"
+  },
+  {
+    "COLUMN_NAME": "GSTRegNo",
+    "CHARACTER_MAXIMUM_LENGTH": 25,
+    "DATA_TYPE": "char"
+  },
+  {
+    "COLUMN_NAME": "NextMailID",
+    "CHARACTER_MAXIMUM_LENGTH": null,
+    "DATA_TYPE": "numeric"
+  },
+  {
+    "COLUMN_NAME": "NextPosNo",
+    "CHARACTER_MAXIMUM_LENGTH": null,
+    "DATA_TYPE": "numeric"
+  },
+  {
+    "COLUMN_NAME": "NextInvoice",
+    "CHARACTER_MAXIMUM_LENGTH": null,
+    "DATA_TYPE": "numeric"
+  },
+  {
+    "COLUMN_NAME": "NextInsAgreementNo",
+    "CHARACTER_MAXIMUM_LENGTH": null,
+    "DATA_TYPE": "numeric"
+  },
+  {
+    "COLUMN_NAME": "NextInstallmentNo",
+    "CHARACTER_MAXIMUM_LENGTH": null,
+    "DATA_TYPE": "numeric"
+  },
+  {
+    "COLUMN_NAME": "NextJobSheetNo",
+    "CHARACTER_MAXIMUM_LENGTH": null,
+    "DATA_TYPE": "numeric"
+  },
+  {
+    "COLUMN_NAME": "NextGoldBarPurchaseNo",
+    "CHARACTER_MAXIMUM_LENGTH": null,
+    "DATA_TYPE": "numeric"
+  },
+  {
+    "COLUMN_NAME": "NextGoldBarIssueNo",
+    "CHARACTER_MAXIMUM_LENGTH": null,
+    "DATA_TYPE": "numeric"
+  },
+  {
+    "COLUMN_NAME": "NextPaymentNo",
+    "CHARACTER_MAXIMUM_LENGTH": null,
+    "DATA_TYPE": "numeric"
+  },
+  {
+    "COLUMN_NAME": "NextOrderEntryNo",
+    "CHARACTER_MAXIMUM_LENGTH": null,
+    "DATA_TYPE": "numeric"
+  },
+  {
+    "COLUMN_NAME": "NextGSTRefundNo",
+    "CHARACTER_MAXIMUM_LENGTH": null,
+    "DATA_TYPE": "numeric"
+  },
+  {
+    "COLUMN_NAME": "NextTradeIssueNo",
+    "CHARACTER_MAXIMUM_LENGTH": null,
+    "DATA_TYPE": "numeric"
+  },
+  {
+    "COLUMN_NAME": "GstPerc",
+    "CHARACTER_MAXIMUM_LENGTH": null,
+    "DATA_TYPE": "numeric"
+  },
+  {
+    "COLUMN_NAME": "GstType",
+    "CHARACTER_MAXIMUM_LENGTH": 1,
+    "DATA_TYPE": "char"
+  },
+  {
+    "COLUMN_NAME": "Message1",
+    "CHARACTER_MAXIMUM_LENGTH": 50,
+    "DATA_TYPE": "char"
+  },
+  {
+    "COLUMN_NAME": "Message2",
+    "CHARACTER_MAXIMUM_LENGTH": 50,
+    "DATA_TYPE": "char"
+  },
+  {
+    "COLUMN_NAME": "DisplayMessage1",
+    "CHARACTER_MAXIMUM_LENGTH": 20,
+    "DATA_TYPE": "char"
+  },
+  {
+    "COLUMN_NAME": "DisplayMessage2",
+    "CHARACTER_MAXIMUM_LENGTH": 20,
+    "DATA_TYPE": "char"
+  },
+  {
+    "COLUMN_NAME": "DisplayComport",
+    "CHARACTER_MAXIMUM_LENGTH": 1,
+    "DATA_TYPE": "char"
+  },
+  {
+    "COLUMN_NAME": "NextPaymentVoucherNo",
+    "CHARACTER_MAXIMUM_LENGTH": null,
+    "DATA_TYPE": "numeric"
+  },
+  {
+    "COLUMN_NAME": "NextPosCreditNo",
+    "CHARACTER_MAXIMUM_LENGTH": null,
+    "DATA_TYPE": "numeric"
+  },
+  {
+    "COLUMN_NAME": "NextReciptNo",
+    "CHARACTER_MAXIMUM_LENGTH": null,
+    "DATA_TYPE": "numeric"
+  },
+  {
+    "COLUMN_NAME": "NextAvilableRange",
+    "CHARACTER_MAXIMUM_LENGTH": null,
+    "DATA_TYPE": "numeric"
+  },
+  {
+    "COLUMN_NAME": "NextTransNo",
+    "CHARACTER_MAXIMUM_LENGTH": null,
+    "DATA_TYPE": "numeric"
+  },
+  {
+    "COLUMN_NAME": "NextReferenceNo",
+    "CHARACTER_MAXIMUM_LENGTH": null,
+    "DATA_TYPE": "numeric"
+  },
+  {
+    "COLUMN_NAME": "MaxDiscountAllowed",
+    "CHARACTER_MAXIMUM_LENGTH": null,
+    "DATA_TYPE": "numeric"
+  },
+  {
+    "COLUMN_NAME": "MaxPriceChangeAllowed",
+    "CHARACTER_MAXIMUM_LENGTH": null,
+    "DATA_TYPE": "numeric"
+  },
+  {
+    "COLUMN_NAME": "BarCodeCOMPort",
+    "CHARACTER_MAXIMUM_LENGTH": null,
+    "DATA_TYPE": "numeric"
+  },
+  {
+    "COLUMN_NAME": "InventoryAutoManual",
+    "CHARACTER_MAXIMUM_LENGTH": null,
+    "DATA_TYPE": "bit"
+  },
+  {
+    "COLUMN_NAME": "ExpiredTime",
+    "CHARACTER_MAXIMUM_LENGTH": null,
+    "DATA_TYPE": "numeric"
+  },
+  {
+    "COLUMN_NAME": "NextPONo",
+    "CHARACTER_MAXIMUM_LENGTH": null,
+    "DATA_TYPE": "numeric"
+  },
+  {
+    "COLUMN_NAME": "NextAverageCostPercentage",
+    "CHARACTER_MAXIMUM_LENGTH": null,
+    "DATA_TYPE": "numeric"
+  },
+  {
+    "COLUMN_NAME": "TaxIN",
+    "CHARACTER_MAXIMUM_LENGTH": null,
+    "DATA_TYPE": "bit"
+  },
+  {
+    "COLUMN_NAME": "NextTransferNo",
+    "CHARACTER_MAXIMUM_LENGTH": null,
+    "DATA_TYPE": "numeric"
+  },
+  {
+    "COLUMN_NAME": "NextEODDate",
+    "CHARACTER_MAXIMUM_LENGTH": null,
+    "DATA_TYPE": "smalldatetime"
+  },
+  {
+    "COLUMN_NAME": "NextPurReNo",
+    "CHARACTER_MAXIMUM_LENGTH": null,
+    "DATA_TYPE": "numeric"
+  },
+  {
+    "COLUMN_NAME": "SalesReturnRefNo",
+    "CHARACTER_MAXIMUM_LENGTH": null,
+    "DATA_TYPE": "numeric"
+  },
+  {
+    "COLUMN_NAME": "InstallmentRetRefNo",
+    "CHARACTER_MAXIMUM_LENGTH": null,
+    "DATA_TYPE": "numeric"
+  },
+  {
+    "COLUMN_NAME": "TaxTaken",
+    "CHARACTER_MAXIMUM_LENGTH": 1,
+    "DATA_TYPE": "char"
+  },
+  {
+    "COLUMN_NAME": "HQTransNo",
+    "CHARACTER_MAXIMUM_LENGTH": null,
+    "DATA_TYPE": "numeric"
+  },
+  {
+    "COLUMN_NAME": "BillPrint",
+    "CHARACTER_MAXIMUM_LENGTH": 1,
+    "DATA_TYPE": "char"
+  },
+  {
+    "COLUMN_NAME": "UseSalesQty",
+    "CHARACTER_MAXIMUM_LENGTH": 10,
+    "DATA_TYPE": "char"
+  },
+  {
+    "COLUMN_NAME": "Member",
+    "CHARACTER_MAXIMUM_LENGTH": null,
+    "DATA_TYPE": "bit"
+  },
+  {
+    "COLUMN_NAME": "CompanyShortCode",
+    "CHARACTER_MAXIMUM_LENGTH": 3,
+    "DATA_TYPE": "char"
+  },
+  {
+    "COLUMN_NAME": "AllowMultipleDiscount",
+    "CHARACTER_MAXIMUM_LENGTH": null,
+    "DATA_TYPE": "bit"
+  },
+  {
+    "COLUMN_NAME": "Rental",
+    "CHARACTER_MAXIMUM_LENGTH": null,
+    "DATA_TYPE": "bit"
+  },
+  {
+    "COLUMN_NAME": "NextRentalNo",
+    "CHARACTER_MAXIMUM_LENGTH": null,
+    "DATA_TYPE": "numeric"
+  },
+  {
+    "COLUMN_NAME": "NextDepositNo",
+    "CHARACTER_MAXIMUM_LENGTH": null,
+    "DATA_TYPE": "numeric"
+  },
+  {
+    "COLUMN_NAME": "NextDepositRefundNo",
+    "CHARACTER_MAXIMUM_LENGTH": null,
+    "DATA_TYPE": "numeric"
+  },
+  {
+    "COLUMN_NAME": "NextRentalReturnNo",
+    "CHARACTER_MAXIMUM_LENGTH": null,
+    "DATA_TYPE": "numeric"
+  },
+  {
+    "COLUMN_NAME": "RentalNextTranNo",
+    "CHARACTER_MAXIMUM_LENGTH": null,
+    "DATA_TYPE": "numeric"
+  },
+  {
+    "COLUMN_NAME": "NextDirectPurchaseNo",
+    "CHARACTER_MAXIMUM_LENGTH": null,
+    "DATA_TYPE": "numeric"
+  },
+  {
+    "COLUMN_NAME": "NextMiscNo",
+    "CHARACTER_MAXIMUM_LENGTH": null,
+    "DATA_TYPE": "numeric"
+  },
+  {
+    "COLUMN_NAME": "NextConsignmentNo",
+    "CHARACTER_MAXIMUM_LENGTH": null,
+    "DATA_TYPE": "numeric"
+  },
+  {
+    "COLUMN_NAME": "TradeinLimit",
+    "CHARACTER_MAXIMUM_LENGTH": null,
+    "DATA_TYPE": "numeric"
+  },
+  {
+    "COLUMN_NAME": "NextTradeInSalesNo",
+    "CHARACTER_MAXIMUM_LENGTH": null,
+    "DATA_TYPE": "numeric"
+  },
+  {
+    "COLUMN_NAME": "ServiceCharge",
+    "CHARACTER_MAXIMUM_LENGTH": null,
+    "DATA_TYPE": "numeric"
+  },
+  {
+    "COLUMN_NAME": "PurchaseCostingGL",
+    "CHARACTER_MAXIMUM_LENGTH": 1,
+    "DATA_TYPE": "char"
+  },
+  {
+    "COLUMN_NAME": "PurWtVarPerc",
+    "CHARACTER_MAXIMUM_LENGTH": null,
+    "DATA_TYPE": "numeric"
+  },
+  {
+    "COLUMN_NAME": "NextJSFixCostNo",
+    "CHARACTER_MAXIMUM_LENGTH": null,
+    "DATA_TYPE": "numeric"
+  },
+  {
+    "COLUMN_NAME": "GSTSCHand",
+    "CHARACTER_MAXIMUM_LENGTH": null,
+    "DATA_TYPE": "numeric"
+  },
+  {
+    "COLUMN_NAME": "GSTSCPost",
+    "CHARACTER_MAXIMUM_LENGTH": null,
+    "DATA_TYPE": "numeric"
+  },
+  {
+    "COLUMN_NAME": "SkyJewel",
+    "CHARACTER_MAXIMUM_LENGTH": 1,
+    "DATA_TYPE": "char"
+  },
+  {
+    "COLUMN_NAME": "NextConsignmentSalesNo",
+    "CHARACTER_MAXIMUM_LENGTH": 10,
+    "DATA_TYPE": "char"
+  },
+  {
+    "COLUMN_NAME": "NextConsignmentSalesReturnNo",
+    "CHARACTER_MAXIMUM_LENGTH": 10,
+    "DATA_TYPE": "char"
+  },
+  {
+    "COLUMN_NAME": "CreateUser",
+    "CHARACTER_MAXIMUM_LENGTH": 10,
+    "DATA_TYPE": "char"
+  },
+  {
+    "COLUMN_NAME": "CreateDate",
+    "CHARACTER_MAXIMUM_LENGTH": null,
+    "DATA_TYPE": "smalldatetime"
+  },
+  {
+    "COLUMN_NAME": "ModifyUser",
+    "CHARACTER_MAXIMUM_LENGTH": 10,
+    "DATA_TYPE": "char"
+  },
+  {
+    "COLUMN_NAME": "ModifyDate",
+    "CHARACTER_MAXIMUM_LENGTH": null,
+    "DATA_TYPE": "smalldatetime"
+  },
+  {
+    "COLUMN_NAME": "MemberModule",
+    "CHARACTER_MAXIMUM_LENGTH": 1,
+    "DATA_TYPE": "char"
+  },
+  {
+    "COLUMN_NAME": "AccountsModule",
+    "CHARACTER_MAXIMUM_LENGTH": 1,
+    "DATA_TYPE": "char"
+  },
+  {
+    "COLUMN_NAME": "NextPVNo",
+    "CHARACTER_MAXIMUM_LENGTH": null,
+    "DATA_TYPE": "numeric"
+  },
+  {
+    "COLUMN_NAME": "NextOrderInventoryNo",
+    "CHARACTER_MAXIMUM_LENGTH": null,
+    "DATA_TYPE": "numeric"
+  },
+  {
+    "COLUMN_NAME": "NextOrderPaymentNo",
+    "CHARACTER_MAXIMUM_LENGTH": null,
+    "DATA_TYPE": "numeric"
+  },
+  {
+    "COLUMN_NAME": "NextTradeInRefNo",
+    "CHARACTER_MAXIMUM_LENGTH": null,
+    "DATA_TYPE": "decimal"
+  },
+  {
+    "COLUMN_NAME": "OutLetavailable",
+    "CHARACTER_MAXIMUM_LENGTH": 1,
+    "DATA_TYPE": "char"
+  },
+  {
+    "COLUMN_NAME": "IsDetailDiscountAllowed",
+    "CHARACTER_MAXIMUM_LENGTH": 1,
+    "DATA_TYPE": "char"
+  },
+  {
+    "COLUMN_NAME": "NextCreditInvoice",
+    "CHARACTER_MAXIMUM_LENGTH": null,
+    "DATA_TYPE": "numeric"
+  },
+  {
+    "COLUMN_NAME": "NextIPMInvoice",
+    "CHARACTER_MAXIMUM_LENGTH": null,
+    "DATA_TYPE": "numeric"
+  },
+  {
+    "COLUMN_NAME": "RFIDModule",
+    "CHARACTER_MAXIMUM_LENGTH": 1,
+    "DATA_TYPE": "char"
+  },
+  {
+    "COLUMN_NAME": "NextRepairEntryNo",
+    "CHARACTER_MAXIMUM_LENGTH": null,
+    "DATA_TYPE": "numeric"
+  },
+  {
+    "COLUMN_NAME": "NextScrapInventoryNo",
+    "CHARACTER_MAXIMUM_LENGTH": null,
+    "DATA_TYPE": "numeric"
+  },
+  {
+    "COLUMN_NAME": "NextPayOutNo",
+    "CHARACTER_MAXIMUM_LENGTH": null,
+    "DATA_TYPE": "numeric"
+  },
+  {
+    "COLUMN_NAME": "NextSalesOrderNo",
+    "CHARACTER_MAXIMUM_LENGTH": null,
+    "DATA_TYPE": "numeric"
+  },
+  {
+    "COLUMN_NAME": "NextOnlineTransferNo",
+    "CHARACTER_MAXIMUM_LENGTH": null,
+    "DATA_TYPE": "numeric"
+  },
+  {
+    "COLUMN_NAME": "NextTradeInventory",
+    "CHARACTER_MAXIMUM_LENGTH": null,
+    "DATA_TYPE": "numeric"
+  },
+  {
+    "COLUMN_NAME": "NextSupplierPayment",
+    "CHARACTER_MAXIMUM_LENGTH": null,
+    "DATA_TYPE": "numeric"
+  },
+  {
+    "COLUMN_NAME": "NextCreditSalesPaymentNo",
+    "CHARACTER_MAXIMUM_LENGTH": null,
+    "DATA_TYPE": "numeric"
+  },
+  {
+    "COLUMN_NAME": "NextCustomerDepositNumber",
+    "CHARACTER_MAXIMUM_LENGTH": null,
+    "DATA_TYPE": "numeric"
+  },
+  {
+    "COLUMN_NAME": "NextTradeInTransferNo",
+    "CHARACTER_MAXIMUM_LENGTH": null,
+    "DATA_TYPE": "numeric"
+  }
+]

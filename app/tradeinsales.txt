@@ -1,0 +1,2390 @@
+Imports CrystalDecisions.CrystalReports.Engine
+Imports CrystalDecisions.Shared
+Public Class frmTradeInOnly
+    Inherits System.Windows.Forms.Form
+    Dim dm As New DataManager
+    Friend WithEvents grdTrade As System.Windows.Forms.DataGridView
+    Friend WithEvents cItemNo As System.Windows.Forms.DataGridViewTextBoxColumn
+    Friend WithEvents cDescription As System.Windows.Forms.DataGridViewTextBoxColumn
+    Friend WithEvents cWeight As System.Windows.Forms.DataGridViewTextBoxColumn
+    Friend WithEvents cGoldLoss As System.Windows.Forms.DataGridViewTextBoxColumn
+    Friend WithEvents cCost As System.Windows.Forms.DataGridViewTextBoxColumn
+    Friend WithEvents cPMC As System.Windows.Forms.DataGridViewTextBoxColumn
+    Friend WithEvents cPCS As System.Windows.Forms.DataGridViewTextBoxColumn
+    Friend WithEvents cTotalCost As System.Windows.Forms.DataGridViewTextBoxColumn
+    Friend WithEvents cStoneDesc As System.Windows.Forms.DataGridViewTextBoxColumn
+    Friend WithEvents cStoneWt As System.Windows.Forms.DataGridViewTextBoxColumn
+    Dim objMember As New clsMember
+
+
+#Region " Windows Form Designer generated code "
+
+    Public Sub New()
+        MyBase.New()
+
+        'This call is required by the Windows Form Designer.
+        InitializeComponent()
+
+        'Add any initialization after the InitializeComponent() call
+
+    End Sub
+
+    'Form overrides dispose to clean up the component list.
+    Protected Overloads Overrides Sub Dispose(ByVal disposing As Boolean)
+        If disposing Then
+            If Not (components Is Nothing) Then
+                components.Dispose()
+            End If
+        End If
+        MyBase.Dispose(disposing)
+    End Sub
+
+    'Required by the Windows Form Designer
+    Private components As System.ComponentModel.IContainer
+
+    'NOTE: The following procedure is required by the Windows Form Designer
+    'It can be modified using the Windows Form Designer.  
+    'Do not modify it using the code editor.
+    Friend WithEvents Panel1 As System.Windows.Forms.Panel
+    Friend WithEvents txtCustomerName As System.Windows.Forms.TextBox
+    Friend WithEvents Label11 As System.Windows.Forms.Label
+    Friend WithEvents lblCustomerType As System.Windows.Forms.Label
+    Friend WithEvents txtLossPerc As System.Windows.Forms.TextBox
+    Friend WithEvents Label3 As System.Windows.Forms.Label
+    Friend WithEvents txtCostPerGram As System.Windows.Forms.TextBox
+    Friend WithEvents Label2 As System.Windows.Forms.Label
+    Friend WithEvents txtInvoiceNo As System.Windows.Forms.TextBox
+    Friend WithEvents Label1 As System.Windows.Forms.Label
+    Friend WithEvents btnCustomerCodeSearch As System.Windows.Forms.Button
+    Friend WithEvents Label13 As System.Windows.Forms.Label
+    Friend WithEvents Label5 As System.Windows.Forms.Label
+    Friend WithEvents txtRemarks As System.Windows.Forms.TextBox
+    Friend WithEvents txtAddress3 As System.Windows.Forms.TextBox
+    Friend WithEvents txtAddress2 As System.Windows.Forms.TextBox
+    Friend WithEvents txtAddress1 As System.Windows.Forms.TextBox
+    Friend WithEvents txtCustomerCode As System.Windows.Forms.TextBox
+    Friend WithEvents Label6 As System.Windows.Forms.Label
+    Friend WithEvents Label14 As System.Windows.Forms.Label
+    Friend WithEvents lblSalesAmount As System.Windows.Forms.Label
+    Friend WithEvents Label16 As System.Windows.Forms.Label
+    Friend WithEvents lblTradeInAmount As System.Windows.Forms.Label
+    Friend WithEvents Label12 As System.Windows.Forms.Label
+    Friend WithEvents lblBalanceAmount As System.Windows.Forms.Label
+    Friend WithEvents Label10 As System.Windows.Forms.Label
+    Friend WithEvents lblTradeInLimit As System.Windows.Forms.Label
+    Friend WithEvents btnUpdate As System.Windows.Forms.Button
+    Friend WithEvents btnClose As System.Windows.Forms.Button
+    Friend WithEvents btnFClear As System.Windows.Forms.Button
+    Friend WithEvents btnAdd As System.Windows.Forms.Button
+    Friend WithEvents btnDelete As System.Windows.Forms.Button
+    Friend WithEvents btnClear As System.Windows.Forms.Button
+    Friend WithEvents txtTotalCost As System.Windows.Forms.TextBox
+    Friend WithEvents txtCostPerGram1 As System.Windows.Forms.TextBox
+    Friend WithEvents txtGoldLoss As System.Windows.Forms.TextBox
+    Friend WithEvents txtStoneWeight As System.Windows.Forms.TextBox
+    Friend WithEvents txtWeight As System.Windows.Forms.TextBox
+    Friend WithEvents txtDiamondDescription As System.Windows.Forms.TextBox
+    Friend WithEvents txtDescription As System.Windows.Forms.TextBox
+    Friend WithEvents Label8 As System.Windows.Forms.Label
+    Friend WithEvents Label7 As System.Windows.Forms.Label
+    Friend WithEvents Label4 As System.Windows.Forms.Label
+    Friend WithEvents lblS As System.Windows.Forms.Label
+    Friend WithEvents lbl As System.Windows.Forms.Label
+    Friend WithEvents PnlReprint As System.Windows.Forms.Panel
+    Friend WithEvents btnReprintCancel As System.Windows.Forms.Button
+    Friend WithEvents btnReprintOK As System.Windows.Forms.Button
+    Friend WithEvents txtRePrintBillNo As System.Windows.Forms.TextBox
+    Friend WithEvents Label47 As System.Windows.Forms.Label
+    Friend WithEvents Label48 As System.Windows.Forms.Label
+    Friend WithEvents cmdReprint As System.Windows.Forms.Button
+    Friend WithEvents txtMemberCode As System.Windows.Forms.TextBox
+    Friend WithEvents pnlMember As System.Windows.Forms.Panel
+    Friend WithEvents btnNew As System.Windows.Forms.Button
+    Friend WithEvents btnOK As System.Windows.Forms.Button
+    Friend WithEvents btnCancel As System.Windows.Forms.Button
+    Friend WithEvents txtMemberCodeView As System.Windows.Forms.TextBox
+    Friend WithEvents Label79 As System.Windows.Forms.Label
+    Friend WithEvents btnMemberSearch As System.Windows.Forms.Button
+    Friend WithEvents btnNewCustomer As System.Windows.Forms.Button
+    Friend WithEvents PnlSalesManPwd As System.Windows.Forms.Panel
+    Friend WithEvents txtSalesManPWD As System.Windows.Forms.TextBox
+    Friend WithEvents Label21 As System.Windows.Forms.Label
+    Friend WithEvents lblLastBillAmount As System.Windows.Forms.Label
+    Friend WithEvents lblLastBillNo As System.Windows.Forms.Label
+    Friend WithEvents lblLastSalesMan As System.Windows.Forms.Label
+    Friend WithEvents lblLastBillAmountCap As System.Windows.Forms.Label
+    Friend WithEvents lblLastBillNoCap As System.Windows.Forms.Label
+    Friend WithEvents lbllastSalesManCap As System.Windows.Forms.Label
+    <System.Diagnostics.DebuggerStepThrough()> Private Sub InitializeComponent()
+        Dim resources As System.ComponentModel.ComponentResourceManager = New System.ComponentModel.ComponentResourceManager(GetType(frmTradeInOnly))
+        Dim DataGridViewCellStyle2 As System.Windows.Forms.DataGridViewCellStyle = New System.Windows.Forms.DataGridViewCellStyle()
+        Me.Panel1 = New System.Windows.Forms.Panel()
+        Me.btnNewCustomer = New System.Windows.Forms.Button()
+        Me.txtMemberCode = New System.Windows.Forms.TextBox()
+        Me.txtCustomerName = New System.Windows.Forms.TextBox()
+        Me.Label11 = New System.Windows.Forms.Label()
+        Me.lblCustomerType = New System.Windows.Forms.Label()
+        Me.txtLossPerc = New System.Windows.Forms.TextBox()
+        Me.Label3 = New System.Windows.Forms.Label()
+        Me.txtCostPerGram = New System.Windows.Forms.TextBox()
+        Me.Label2 = New System.Windows.Forms.Label()
+        Me.txtInvoiceNo = New System.Windows.Forms.TextBox()
+        Me.Label1 = New System.Windows.Forms.Label()
+        Me.btnCustomerCodeSearch = New System.Windows.Forms.Button()
+        Me.Label13 = New System.Windows.Forms.Label()
+        Me.Label5 = New System.Windows.Forms.Label()
+        Me.txtRemarks = New System.Windows.Forms.TextBox()
+        Me.txtAddress3 = New System.Windows.Forms.TextBox()
+        Me.txtAddress2 = New System.Windows.Forms.TextBox()
+        Me.txtAddress1 = New System.Windows.Forms.TextBox()
+        Me.txtCustomerCode = New System.Windows.Forms.TextBox()
+        Me.Label6 = New System.Windows.Forms.Label()
+        Me.Label14 = New System.Windows.Forms.Label()
+        Me.lblSalesAmount = New System.Windows.Forms.Label()
+        Me.Label16 = New System.Windows.Forms.Label()
+        Me.lblTradeInAmount = New System.Windows.Forms.Label()
+        Me.Label12 = New System.Windows.Forms.Label()
+        Me.lblBalanceAmount = New System.Windows.Forms.Label()
+        Me.Label10 = New System.Windows.Forms.Label()
+        Me.lblTradeInLimit = New System.Windows.Forms.Label()
+        Me.btnUpdate = New System.Windows.Forms.Button()
+        Me.btnClose = New System.Windows.Forms.Button()
+        Me.btnFClear = New System.Windows.Forms.Button()
+        Me.btnAdd = New System.Windows.Forms.Button()
+        Me.btnDelete = New System.Windows.Forms.Button()
+        Me.btnClear = New System.Windows.Forms.Button()
+        Me.txtTotalCost = New System.Windows.Forms.TextBox()
+        Me.txtCostPerGram1 = New System.Windows.Forms.TextBox()
+        Me.txtGoldLoss = New System.Windows.Forms.TextBox()
+        Me.txtStoneWeight = New System.Windows.Forms.TextBox()
+        Me.txtWeight = New System.Windows.Forms.TextBox()
+        Me.txtDiamondDescription = New System.Windows.Forms.TextBox()
+        Me.txtDescription = New System.Windows.Forms.TextBox()
+        Me.Label8 = New System.Windows.Forms.Label()
+        Me.Label7 = New System.Windows.Forms.Label()
+        Me.Label4 = New System.Windows.Forms.Label()
+        Me.lblS = New System.Windows.Forms.Label()
+        Me.lbl = New System.Windows.Forms.Label()
+        Me.PnlReprint = New System.Windows.Forms.Panel()
+        Me.btnReprintCancel = New System.Windows.Forms.Button()
+        Me.btnReprintOK = New System.Windows.Forms.Button()
+        Me.txtRePrintBillNo = New System.Windows.Forms.TextBox()
+        Me.Label47 = New System.Windows.Forms.Label()
+        Me.Label48 = New System.Windows.Forms.Label()
+        Me.cmdReprint = New System.Windows.Forms.Button()
+        Me.pnlMember = New System.Windows.Forms.Panel()
+        Me.btnMemberSearch = New System.Windows.Forms.Button()
+        Me.btnNew = New System.Windows.Forms.Button()
+        Me.btnOK = New System.Windows.Forms.Button()
+        Me.btnCancel = New System.Windows.Forms.Button()
+        Me.txtMemberCodeView = New System.Windows.Forms.TextBox()
+        Me.Label79 = New System.Windows.Forms.Label()
+        Me.PnlSalesManPwd = New System.Windows.Forms.Panel()
+        Me.txtSalesManPWD = New System.Windows.Forms.TextBox()
+        Me.Label21 = New System.Windows.Forms.Label()
+        Me.lblLastBillAmount = New System.Windows.Forms.Label()
+        Me.lblLastBillAmountCap = New System.Windows.Forms.Label()
+        Me.lblLastBillNo = New System.Windows.Forms.Label()
+        Me.lblLastBillNoCap = New System.Windows.Forms.Label()
+        Me.lblLastSalesMan = New System.Windows.Forms.Label()
+        Me.lbllastSalesManCap = New System.Windows.Forms.Label()
+        Me.grdTrade = New System.Windows.Forms.DataGridView()
+        Me.cItemNo = New System.Windows.Forms.DataGridViewTextBoxColumn()
+        Me.cDescription = New System.Windows.Forms.DataGridViewTextBoxColumn()
+        Me.cWeight = New System.Windows.Forms.DataGridViewTextBoxColumn()
+        Me.cGoldLoss = New System.Windows.Forms.DataGridViewTextBoxColumn()
+        Me.cCost = New System.Windows.Forms.DataGridViewTextBoxColumn()
+        Me.cPMC = New System.Windows.Forms.DataGridViewTextBoxColumn()
+        Me.cPCS = New System.Windows.Forms.DataGridViewTextBoxColumn()
+        Me.cTotalCost = New System.Windows.Forms.DataGridViewTextBoxColumn()
+        Me.cStoneDesc = New System.Windows.Forms.DataGridViewTextBoxColumn()
+        Me.cStoneWt = New System.Windows.Forms.DataGridViewTextBoxColumn()
+        Me.Panel1.SuspendLayout()
+        Me.PnlReprint.SuspendLayout()
+        Me.pnlMember.SuspendLayout()
+        Me.PnlSalesManPwd.SuspendLayout()
+        CType(Me.grdTrade, System.ComponentModel.ISupportInitialize).BeginInit()
+        Me.SuspendLayout()
+        '
+        'Panel1
+        '
+        Me.Panel1.BackColor = System.Drawing.Color.FromArgb(CType(CType(192, Byte), Integer), CType(CType(192, Byte), Integer), CType(CType(255, Byte), Integer))
+        Me.Panel1.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle
+        Me.Panel1.Controls.Add(Me.btnNewCustomer)
+        Me.Panel1.Controls.Add(Me.txtMemberCode)
+        Me.Panel1.Controls.Add(Me.txtCustomerName)
+        Me.Panel1.Controls.Add(Me.Label11)
+        Me.Panel1.Controls.Add(Me.lblCustomerType)
+        Me.Panel1.Controls.Add(Me.txtLossPerc)
+        Me.Panel1.Controls.Add(Me.Label3)
+        Me.Panel1.Controls.Add(Me.txtCostPerGram)
+        Me.Panel1.Controls.Add(Me.Label2)
+        Me.Panel1.Controls.Add(Me.txtInvoiceNo)
+        Me.Panel1.Controls.Add(Me.Label1)
+        Me.Panel1.Controls.Add(Me.btnCustomerCodeSearch)
+        Me.Panel1.Controls.Add(Me.Label13)
+        Me.Panel1.Controls.Add(Me.Label5)
+        Me.Panel1.Controls.Add(Me.txtRemarks)
+        Me.Panel1.Controls.Add(Me.txtAddress3)
+        Me.Panel1.Controls.Add(Me.txtAddress2)
+        Me.Panel1.Controls.Add(Me.txtAddress1)
+        Me.Panel1.Controls.Add(Me.txtCustomerCode)
+        Me.Panel1.Controls.Add(Me.Label6)
+        Me.Panel1.Location = New System.Drawing.Point(20, 80)
+        Me.Panel1.Name = "Panel1"
+        Me.Panel1.Size = New System.Drawing.Size(460, 192)
+        Me.Panel1.TabIndex = 1
+        '
+        'btnNewCustomer
+        '
+        Me.btnNewCustomer.BackColor = System.Drawing.Color.DarkOrange
+        Me.btnNewCustomer.Font = New System.Drawing.Font("Microsoft Sans Serif", 8.25!, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, CType(0, Byte))
+        Me.btnNewCustomer.Location = New System.Drawing.Point(8, 112)
+        Me.btnNewCustomer.Name = "btnNewCustomer"
+        Me.btnNewCustomer.Size = New System.Drawing.Size(56, 24)
+        Me.btnNewCustomer.TabIndex = 130
+        Me.btnNewCustomer.Text = "New"
+        Me.btnNewCustomer.UseVisualStyleBackColor = False
+        '
+        'txtMemberCode
+        '
+        Me.txtMemberCode.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle
+        Me.txtMemberCode.Font = New System.Drawing.Font("Arial", 8.25!, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, CType(0, Byte))
+        Me.txtMemberCode.ForeColor = System.Drawing.Color.Black
+        Me.txtMemberCode.Location = New System.Drawing.Point(200, 35)
+        Me.txtMemberCode.MaxLength = 20
+        Me.txtMemberCode.Name = "txtMemberCode"
+        Me.txtMemberCode.Size = New System.Drawing.Size(120, 20)
+        Me.txtMemberCode.TabIndex = 129
+        Me.txtMemberCode.Tag = ""
+        '
+        'txtCustomerName
+        '
+        Me.txtCustomerName.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle
+        Me.txtCustomerName.Font = New System.Drawing.Font("Arial", 8.25!, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, CType(0, Byte))
+        Me.txtCustomerName.ForeColor = System.Drawing.Color.Black
+        Me.txtCustomerName.Location = New System.Drawing.Point(72, 60)
+        Me.txtCustomerName.MaxLength = 20
+        Me.txtCustomerName.Name = "txtCustomerName"
+        Me.txtCustomerName.Size = New System.Drawing.Size(376, 20)
+        Me.txtCustomerName.TabIndex = 113
+        Me.txtCustomerName.Tag = ""
+        '
+        'Label11
+        '
+        Me.Label11.BackColor = System.Drawing.Color.FromArgb(CType(CType(192, Byte), Integer), CType(CType(192, Byte), Integer), CType(CType(255, Byte), Integer))
+        Me.Label11.Font = New System.Drawing.Font("Arial", 8.25!, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, CType(0, Byte))
+        Me.Label11.ForeColor = System.Drawing.Color.Black
+        Me.Label11.Location = New System.Drawing.Point(8, 60)
+        Me.Label11.Name = "Label11"
+        Me.Label11.Size = New System.Drawing.Size(66, 20)
+        Me.Label11.TabIndex = 128
+        Me.Label11.Text = "Name"
+        Me.Label11.TextAlign = System.Drawing.ContentAlignment.MiddleLeft
+        '
+        'lblCustomerType
+        '
+        Me.lblCustomerType.BackColor = System.Drawing.Color.FromArgb(CType(CType(192, Byte), Integer), CType(CType(192, Byte), Integer), CType(CType(255, Byte), Integer))
+        Me.lblCustomerType.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle
+        Me.lblCustomerType.Font = New System.Drawing.Font("Arial", 8.25!, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, CType(0, Byte))
+        Me.lblCustomerType.ForeColor = System.Drawing.Color.Red
+        Me.lblCustomerType.Location = New System.Drawing.Point(328, 35)
+        Me.lblCustomerType.Name = "lblCustomerType"
+        Me.lblCustomerType.Size = New System.Drawing.Size(120, 20)
+        Me.lblCustomerType.TabIndex = 127
+        Me.lblCustomerType.Text = "Customer Type"
+        Me.lblCustomerType.TextAlign = System.Drawing.ContentAlignment.MiddleCenter
+        '
+        'txtLossPerc
+        '
+        Me.txtLossPerc.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle
+        Me.txtLossPerc.Font = New System.Drawing.Font("Arial", 8.25!, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, CType(0, Byte))
+        Me.txtLossPerc.ForeColor = System.Drawing.Color.Black
+        Me.txtLossPerc.Location = New System.Drawing.Point(384, 8)
+        Me.txtLossPerc.MaxLength = 20
+        Me.txtLossPerc.Name = "txtLossPerc"
+        Me.txtLossPerc.ReadOnly = True
+        Me.txtLossPerc.Size = New System.Drawing.Size(64, 20)
+        Me.txtLossPerc.TabIndex = 125
+        Me.txtLossPerc.Tag = ""
+        '
+        'Label3
+        '
+        Me.Label3.BackColor = System.Drawing.Color.FromArgb(CType(CType(192, Byte), Integer), CType(CType(192, Byte), Integer), CType(CType(255, Byte), Integer))
+        Me.Label3.Font = New System.Drawing.Font("Arial", 8.25!, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, CType(0, Byte))
+        Me.Label3.ForeColor = System.Drawing.Color.Black
+        Me.Label3.Location = New System.Drawing.Point(328, 8)
+        Me.Label3.Name = "Label3"
+        Me.Label3.Size = New System.Drawing.Size(56, 20)
+        Me.Label3.TabIndex = 126
+        Me.Label3.Text = "Loss(%)"
+        Me.Label3.TextAlign = System.Drawing.ContentAlignment.MiddleLeft
+        '
+        'txtCostPerGram
+        '
+        Me.txtCostPerGram.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle
+        Me.txtCostPerGram.Font = New System.Drawing.Font("Arial", 8.25!, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, CType(0, Byte))
+        Me.txtCostPerGram.ForeColor = System.Drawing.Color.Black
+        Me.txtCostPerGram.Location = New System.Drawing.Point(248, 8)
+        Me.txtCostPerGram.MaxLength = 20
+        Me.txtCostPerGram.Name = "txtCostPerGram"
+        Me.txtCostPerGram.ReadOnly = True
+        Me.txtCostPerGram.Size = New System.Drawing.Size(72, 20)
+        Me.txtCostPerGram.TabIndex = 123
+        Me.txtCostPerGram.Tag = ""
+        '
+        'Label2
+        '
+        Me.Label2.BackColor = System.Drawing.Color.FromArgb(CType(CType(192, Byte), Integer), CType(CType(192, Byte), Integer), CType(CType(255, Byte), Integer))
+        Me.Label2.Font = New System.Drawing.Font("Arial", 8.25!, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, CType(0, Byte))
+        Me.Label2.ForeColor = System.Drawing.Color.Black
+        Me.Label2.Location = New System.Drawing.Point(176, 8)
+        Me.Label2.Name = "Label2"
+        Me.Label2.Size = New System.Drawing.Size(72, 20)
+        Me.Label2.TabIndex = 124
+        Me.Label2.Text = "Cost/ Gram"
+        Me.Label2.TextAlign = System.Drawing.ContentAlignment.MiddleLeft
+        '
+        'txtInvoiceNo
+        '
+        Me.txtInvoiceNo.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle
+        Me.txtInvoiceNo.Font = New System.Drawing.Font("Arial", 8.25!, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, CType(0, Byte))
+        Me.txtInvoiceNo.ForeColor = System.Drawing.Color.Black
+        Me.txtInvoiceNo.Location = New System.Drawing.Point(72, 8)
+        Me.txtInvoiceNo.MaxLength = 20
+        Me.txtInvoiceNo.Name = "txtInvoiceNo"
+        Me.txtInvoiceNo.Size = New System.Drawing.Size(96, 20)
+        Me.txtInvoiceNo.TabIndex = 121
+        Me.txtInvoiceNo.Tag = ""
+        '
+        'Label1
+        '
+        Me.Label1.BackColor = System.Drawing.Color.FromArgb(CType(CType(192, Byte), Integer), CType(CType(192, Byte), Integer), CType(CType(255, Byte), Integer))
+        Me.Label1.Font = New System.Drawing.Font("Arial", 8.25!, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, CType(0, Byte))
+        Me.Label1.ForeColor = System.Drawing.Color.Black
+        Me.Label1.Location = New System.Drawing.Point(6, 8)
+        Me.Label1.Name = "Label1"
+        Me.Label1.Size = New System.Drawing.Size(66, 20)
+        Me.Label1.TabIndex = 122
+        Me.Label1.Text = "Invoice No."
+        Me.Label1.TextAlign = System.Drawing.ContentAlignment.MiddleLeft
+        '
+        'btnCustomerCodeSearch
+        '
+        Me.btnCustomerCodeSearch.BackColor = System.Drawing.Color.FromArgb(CType(CType(255, Byte), Integer), CType(CType(128, Byte), Integer), CType(CType(0, Byte), Integer))
+        Me.btnCustomerCodeSearch.FlatStyle = System.Windows.Forms.FlatStyle.Flat
+        Me.btnCustomerCodeSearch.Font = New System.Drawing.Font("Arial", 8.25!, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, CType(0, Byte))
+        Me.btnCustomerCodeSearch.Location = New System.Drawing.Point(168, 35)
+        Me.btnCustomerCodeSearch.Name = "btnCustomerCodeSearch"
+        Me.btnCustomerCodeSearch.Size = New System.Drawing.Size(24, 20)
+        Me.btnCustomerCodeSearch.TabIndex = 120
+        Me.btnCustomerCodeSearch.Text = "..."
+        Me.btnCustomerCodeSearch.UseVisualStyleBackColor = False
+        '
+        'Label13
+        '
+        Me.Label13.BackColor = System.Drawing.Color.FromArgb(CType(CType(192, Byte), Integer), CType(CType(192, Byte), Integer), CType(CType(255, Byte), Integer))
+        Me.Label13.Font = New System.Drawing.Font("Arial", 8.25!, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, CType(0, Byte))
+        Me.Label13.ForeColor = System.Drawing.Color.Black
+        Me.Label13.Location = New System.Drawing.Point(6, 86)
+        Me.Label13.Name = "Label13"
+        Me.Label13.Size = New System.Drawing.Size(66, 20)
+        Me.Label13.TabIndex = 119
+        Me.Label13.Text = "Address"
+        Me.Label13.TextAlign = System.Drawing.ContentAlignment.MiddleLeft
+        '
+        'Label5
+        '
+        Me.Label5.BackColor = System.Drawing.Color.FromArgb(CType(CType(192, Byte), Integer), CType(CType(192, Byte), Integer), CType(CType(255, Byte), Integer))
+        Me.Label5.Font = New System.Drawing.Font("Arial", 8.25!, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, CType(0, Byte))
+        Me.Label5.ForeColor = System.Drawing.Color.Black
+        Me.Label5.Location = New System.Drawing.Point(6, 164)
+        Me.Label5.Name = "Label5"
+        Me.Label5.Size = New System.Drawing.Size(66, 20)
+        Me.Label5.TabIndex = 118
+        Me.Label5.Text = "Remarks"
+        Me.Label5.TextAlign = System.Drawing.ContentAlignment.MiddleLeft
+        '
+        'txtRemarks
+        '
+        Me.txtRemarks.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle
+        Me.txtRemarks.Font = New System.Drawing.Font("Arial", 8.25!, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, CType(0, Byte))
+        Me.txtRemarks.ForeColor = System.Drawing.Color.Black
+        Me.txtRemarks.Location = New System.Drawing.Point(72, 164)
+        Me.txtRemarks.MaxLength = 20
+        Me.txtRemarks.Name = "txtRemarks"
+        Me.txtRemarks.Size = New System.Drawing.Size(376, 20)
+        Me.txtRemarks.TabIndex = 117
+        Me.txtRemarks.Tag = ""
+        '
+        'txtAddress3
+        '
+        Me.txtAddress3.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle
+        Me.txtAddress3.Font = New System.Drawing.Font("Arial", 8.25!, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, CType(0, Byte))
+        Me.txtAddress3.ForeColor = System.Drawing.Color.Black
+        Me.txtAddress3.Location = New System.Drawing.Point(72, 138)
+        Me.txtAddress3.MaxLength = 20
+        Me.txtAddress3.Name = "txtAddress3"
+        Me.txtAddress3.Size = New System.Drawing.Size(376, 20)
+        Me.txtAddress3.TabIndex = 116
+        Me.txtAddress3.Tag = ""
+        '
+        'txtAddress2
+        '
+        Me.txtAddress2.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle
+        Me.txtAddress2.Font = New System.Drawing.Font("Arial", 8.25!, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, CType(0, Byte))
+        Me.txtAddress2.ForeColor = System.Drawing.Color.Black
+        Me.txtAddress2.Location = New System.Drawing.Point(72, 112)
+        Me.txtAddress2.MaxLength = 20
+        Me.txtAddress2.Name = "txtAddress2"
+        Me.txtAddress2.Size = New System.Drawing.Size(376, 20)
+        Me.txtAddress2.TabIndex = 115
+        Me.txtAddress2.Tag = ""
+        '
+        'txtAddress1
+        '
+        Me.txtAddress1.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle
+        Me.txtAddress1.Font = New System.Drawing.Font("Arial", 8.25!, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, CType(0, Byte))
+        Me.txtAddress1.ForeColor = System.Drawing.Color.Black
+        Me.txtAddress1.Location = New System.Drawing.Point(72, 86)
+        Me.txtAddress1.MaxLength = 20
+        Me.txtAddress1.Name = "txtAddress1"
+        Me.txtAddress1.Size = New System.Drawing.Size(376, 20)
+        Me.txtAddress1.TabIndex = 114
+        Me.txtAddress1.Tag = ""
+        '
+        'txtCustomerCode
+        '
+        Me.txtCustomerCode.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle
+        Me.txtCustomerCode.Font = New System.Drawing.Font("Arial", 8.25!, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, CType(0, Byte))
+        Me.txtCustomerCode.ForeColor = System.Drawing.Color.Black
+        Me.txtCustomerCode.Location = New System.Drawing.Point(72, 35)
+        Me.txtCustomerCode.MaxLength = 20
+        Me.txtCustomerCode.Name = "txtCustomerCode"
+        Me.txtCustomerCode.Size = New System.Drawing.Size(96, 20)
+        Me.txtCustomerCode.TabIndex = 111
+        Me.txtCustomerCode.Tag = ""
+        '
+        'Label6
+        '
+        Me.Label6.BackColor = System.Drawing.Color.FromArgb(CType(CType(192, Byte), Integer), CType(CType(192, Byte), Integer), CType(CType(255, Byte), Integer))
+        Me.Label6.Font = New System.Drawing.Font("Arial", 8.25!, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, CType(0, Byte))
+        Me.Label6.ForeColor = System.Drawing.Color.Black
+        Me.Label6.Location = New System.Drawing.Point(6, 34)
+        Me.Label6.Name = "Label6"
+        Me.Label6.Size = New System.Drawing.Size(66, 20)
+        Me.Label6.TabIndex = 112
+        Me.Label6.Text = "Customer "
+        Me.Label6.TextAlign = System.Drawing.ContentAlignment.MiddleLeft
+        '
+        'Label14
+        '
+        Me.Label14.BackColor = System.Drawing.Color.Navy
+        Me.Label14.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle
+        Me.Label14.Font = New System.Drawing.Font("Arial", 9.0!, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, CType(0, Byte))
+        Me.Label14.ForeColor = System.Drawing.Color.White
+        Me.Label14.Location = New System.Drawing.Point(480, 80)
+        Me.Label14.Name = "Label14"
+        Me.Label14.Size = New System.Drawing.Size(128, 24)
+        Me.Label14.TabIndex = 145
+        Me.Label14.Text = "Sales Amount"
+        Me.Label14.TextAlign = System.Drawing.ContentAlignment.MiddleCenter
+        '
+        'lblSalesAmount
+        '
+        Me.lblSalesAmount.BackColor = System.Drawing.Color.Yellow
+        Me.lblSalesAmount.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle
+        Me.lblSalesAmount.Font = New System.Drawing.Font("Arial", 9.0!, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, CType(0, Byte))
+        Me.lblSalesAmount.ForeColor = System.Drawing.Color.Black
+        Me.lblSalesAmount.Location = New System.Drawing.Point(480, 104)
+        Me.lblSalesAmount.Name = "lblSalesAmount"
+        Me.lblSalesAmount.Size = New System.Drawing.Size(128, 24)
+        Me.lblSalesAmount.TabIndex = 144
+        Me.lblSalesAmount.Text = "0.00"
+        Me.lblSalesAmount.TextAlign = System.Drawing.ContentAlignment.MiddleCenter
+        '
+        'Label16
+        '
+        Me.Label16.BackColor = System.Drawing.Color.Navy
+        Me.Label16.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle
+        Me.Label16.Font = New System.Drawing.Font("Arial", 9.0!, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, CType(0, Byte))
+        Me.Label16.ForeColor = System.Drawing.Color.White
+        Me.Label16.Location = New System.Drawing.Point(480, 128)
+        Me.Label16.Name = "Label16"
+        Me.Label16.Size = New System.Drawing.Size(128, 24)
+        Me.Label16.TabIndex = 143
+        Me.Label16.Text = "Trade In Amount"
+        Me.Label16.TextAlign = System.Drawing.ContentAlignment.MiddleCenter
+        '
+        'lblTradeInAmount
+        '
+        Me.lblTradeInAmount.BackColor = System.Drawing.Color.Yellow
+        Me.lblTradeInAmount.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle
+        Me.lblTradeInAmount.Font = New System.Drawing.Font("Arial", 9.0!, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, CType(0, Byte))
+        Me.lblTradeInAmount.ForeColor = System.Drawing.Color.Black
+        Me.lblTradeInAmount.Location = New System.Drawing.Point(480, 152)
+        Me.lblTradeInAmount.Name = "lblTradeInAmount"
+        Me.lblTradeInAmount.Size = New System.Drawing.Size(128, 24)
+        Me.lblTradeInAmount.TabIndex = 142
+        Me.lblTradeInAmount.Text = "0.00"
+        Me.lblTradeInAmount.TextAlign = System.Drawing.ContentAlignment.MiddleCenter
+        '
+        'Label12
+        '
+        Me.Label12.BackColor = System.Drawing.Color.Navy
+        Me.Label12.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle
+        Me.Label12.Font = New System.Drawing.Font("Arial", 9.0!, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, CType(0, Byte))
+        Me.Label12.ForeColor = System.Drawing.Color.White
+        Me.Label12.Location = New System.Drawing.Point(480, 176)
+        Me.Label12.Name = "Label12"
+        Me.Label12.Size = New System.Drawing.Size(128, 24)
+        Me.Label12.TabIndex = 141
+        Me.Label12.Text = "Balance Amount"
+        Me.Label12.TextAlign = System.Drawing.ContentAlignment.MiddleCenter
+        Me.Label12.Visible = False
+        '
+        'lblBalanceAmount
+        '
+        Me.lblBalanceAmount.BackColor = System.Drawing.Color.Yellow
+        Me.lblBalanceAmount.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle
+        Me.lblBalanceAmount.Font = New System.Drawing.Font("Arial", 9.0!, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, CType(0, Byte))
+        Me.lblBalanceAmount.ForeColor = System.Drawing.Color.Black
+        Me.lblBalanceAmount.Location = New System.Drawing.Point(480, 200)
+        Me.lblBalanceAmount.Name = "lblBalanceAmount"
+        Me.lblBalanceAmount.Size = New System.Drawing.Size(128, 24)
+        Me.lblBalanceAmount.TabIndex = 140
+        Me.lblBalanceAmount.Text = "0.00"
+        Me.lblBalanceAmount.TextAlign = System.Drawing.ContentAlignment.MiddleCenter
+        Me.lblBalanceAmount.Visible = False
+        '
+        'Label10
+        '
+        Me.Label10.BackColor = System.Drawing.Color.Navy
+        Me.Label10.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle
+        Me.Label10.Font = New System.Drawing.Font("Arial", 9.0!, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, CType(0, Byte))
+        Me.Label10.ForeColor = System.Drawing.Color.White
+        Me.Label10.Location = New System.Drawing.Point(480, 224)
+        Me.Label10.Name = "Label10"
+        Me.Label10.Size = New System.Drawing.Size(128, 24)
+        Me.Label10.TabIndex = 139
+        Me.Label10.Text = "Trade In Limit"
+        Me.Label10.TextAlign = System.Drawing.ContentAlignment.MiddleCenter
+        Me.Label10.Visible = False
+        '
+        'lblTradeInLimit
+        '
+        Me.lblTradeInLimit.BackColor = System.Drawing.Color.Yellow
+        Me.lblTradeInLimit.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle
+        Me.lblTradeInLimit.Font = New System.Drawing.Font("Arial", 9.0!, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, CType(0, Byte))
+        Me.lblTradeInLimit.ForeColor = System.Drawing.Color.Black
+        Me.lblTradeInLimit.Location = New System.Drawing.Point(480, 248)
+        Me.lblTradeInLimit.Name = "lblTradeInLimit"
+        Me.lblTradeInLimit.Size = New System.Drawing.Size(128, 24)
+        Me.lblTradeInLimit.TabIndex = 138
+        Me.lblTradeInLimit.Text = "0.00"
+        Me.lblTradeInLimit.TextAlign = System.Drawing.ContentAlignment.MiddleCenter
+        Me.lblTradeInLimit.Visible = False
+        '
+        'btnUpdate
+        '
+        Me.btnUpdate.BackColor = System.Drawing.Color.FromArgb(CType(CType(255, Byte), Integer), CType(CType(128, Byte), Integer), CType(CType(0, Byte), Integer))
+        Me.btnUpdate.Font = New System.Drawing.Font("Arial", 8.25!, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, CType(0, Byte))
+        Me.btnUpdate.Image = CType(resources.GetObject("btnUpdate.Image"), System.Drawing.Image)
+        Me.btnUpdate.Location = New System.Drawing.Point(417, 528)
+        Me.btnUpdate.Name = "btnUpdate"
+        Me.btnUpdate.Size = New System.Drawing.Size(94, 23)
+        Me.btnUpdate.TabIndex = 161
+        Me.btnUpdate.Text = "Update (F7)"
+        Me.btnUpdate.UseVisualStyleBackColor = False
+        '
+        'btnClose
+        '
+        Me.btnClose.BackColor = System.Drawing.Color.FromArgb(CType(CType(255, Byte), Integer), CType(CType(128, Byte), Integer), CType(CType(0, Byte), Integer))
+        Me.btnClose.DialogResult = System.Windows.Forms.DialogResult.Cancel
+        Me.btnClose.Font = New System.Drawing.Font("Arial", 8.25!, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, CType(0, Byte))
+        Me.btnClose.Image = CType(resources.GetObject("btnClose.Image"), System.Drawing.Image)
+        Me.btnClose.Location = New System.Drawing.Point(517, 528)
+        Me.btnClose.Name = "btnClose"
+        Me.btnClose.Size = New System.Drawing.Size(92, 23)
+        Me.btnClose.TabIndex = 163
+        Me.btnClose.Text = "Close(Esc)"
+        Me.btnClose.UseVisualStyleBackColor = False
+        '
+        'btnFClear
+        '
+        Me.btnFClear.BackColor = System.Drawing.Color.FromArgb(CType(CType(255, Byte), Integer), CType(CType(128, Byte), Integer), CType(CType(0, Byte), Integer))
+        Me.btnFClear.Font = New System.Drawing.Font("Arial", 8.25!, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, CType(0, Byte))
+        Me.btnFClear.Image = CType(resources.GetObject("btnFClear.Image"), System.Drawing.Image)
+        Me.btnFClear.Location = New System.Drawing.Point(215, 528)
+        Me.btnFClear.Name = "btnFClear"
+        Me.btnFClear.Size = New System.Drawing.Size(95, 23)
+        Me.btnFClear.TabIndex = 162
+        Me.btnFClear.Text = "Clear (F6)"
+        Me.btnFClear.UseVisualStyleBackColor = False
+        Me.btnFClear.Visible = False
+        '
+        'btnAdd
+        '
+        Me.btnAdd.BackColor = System.Drawing.Color.FromArgb(CType(CType(255, Byte), Integer), CType(CType(128, Byte), Integer), CType(CType(0, Byte), Integer))
+        Me.btnAdd.Font = New System.Drawing.Font("Arial", 8.25!, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, CType(0, Byte))
+        Me.btnAdd.Image = CType(resources.GetObject("btnAdd.Image"), System.Drawing.Image)
+        Me.btnAdd.Location = New System.Drawing.Point(371, 496)
+        Me.btnAdd.Name = "btnAdd"
+        Me.btnAdd.Size = New System.Drawing.Size(75, 23)
+        Me.btnAdd.TabIndex = 158
+        Me.btnAdd.Text = "Add "
+        Me.btnAdd.UseVisualStyleBackColor = False
+        '
+        'btnDelete
+        '
+        Me.btnDelete.BackColor = System.Drawing.Color.FromArgb(CType(CType(255, Byte), Integer), CType(CType(128, Byte), Integer), CType(CType(0, Byte), Integer))
+        Me.btnDelete.Font = New System.Drawing.Font("Arial", 8.25!, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, CType(0, Byte))
+        Me.btnDelete.Image = CType(resources.GetObject("btnDelete.Image"), System.Drawing.Image)
+        Me.btnDelete.Location = New System.Drawing.Point(452, 496)
+        Me.btnDelete.Name = "btnDelete"
+        Me.btnDelete.Size = New System.Drawing.Size(75, 23)
+        Me.btnDelete.TabIndex = 159
+        Me.btnDelete.Text = "Delete"
+        Me.btnDelete.UseVisualStyleBackColor = False
+        '
+        'btnClear
+        '
+        Me.btnClear.BackColor = System.Drawing.Color.FromArgb(CType(CType(255, Byte), Integer), CType(CType(128, Byte), Integer), CType(CType(0, Byte), Integer))
+        Me.btnClear.Font = New System.Drawing.Font("Arial", 8.25!, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, CType(0, Byte))
+        Me.btnClear.Image = CType(resources.GetObject("btnClear.Image"), System.Drawing.Image)
+        Me.btnClear.Location = New System.Drawing.Point(533, 496)
+        Me.btnClear.Name = "btnClear"
+        Me.btnClear.Size = New System.Drawing.Size(75, 23)
+        Me.btnClear.TabIndex = 160
+        Me.btnClear.Text = "Clear"
+        Me.btnClear.UseVisualStyleBackColor = False
+        '
+        'txtTotalCost
+        '
+        Me.txtTotalCost.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle
+        Me.txtTotalCost.Font = New System.Drawing.Font("Arial", 9.75!, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, CType(0, Byte))
+        Me.txtTotalCost.ForeColor = System.Drawing.Color.Black
+        Me.txtTotalCost.Location = New System.Drawing.Point(509, 464)
+        Me.txtTotalCost.MaxLength = 20
+        Me.txtTotalCost.Name = "txtTotalCost"
+        Me.txtTotalCost.Size = New System.Drawing.Size(99, 22)
+        Me.txtTotalCost.TabIndex = 157
+        Me.txtTotalCost.Tag = ""
+        '
+        'txtCostPerGram1
+        '
+        Me.txtCostPerGram1.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle
+        Me.txtCostPerGram1.Font = New System.Drawing.Font("Arial", 9.75!, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, CType(0, Byte))
+        Me.txtCostPerGram1.ForeColor = System.Drawing.Color.Black
+        Me.txtCostPerGram1.Location = New System.Drawing.Point(421, 464)
+        Me.txtCostPerGram1.MaxLength = 20
+        Me.txtCostPerGram1.Name = "txtCostPerGram1"
+        Me.txtCostPerGram1.Size = New System.Drawing.Size(88, 22)
+        Me.txtCostPerGram1.TabIndex = 156
+        Me.txtCostPerGram1.Tag = ""
+        '
+        'txtGoldLoss
+        '
+        Me.txtGoldLoss.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle
+        Me.txtGoldLoss.Font = New System.Drawing.Font("Arial", 9.75!, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, CType(0, Byte))
+        Me.txtGoldLoss.ForeColor = System.Drawing.Color.Black
+        Me.txtGoldLoss.Location = New System.Drawing.Point(333, 464)
+        Me.txtGoldLoss.MaxLength = 20
+        Me.txtGoldLoss.Name = "txtGoldLoss"
+        Me.txtGoldLoss.Size = New System.Drawing.Size(88, 22)
+        Me.txtGoldLoss.TabIndex = 155
+        Me.txtGoldLoss.Tag = ""
+        '
+        'txtStoneWeight
+        '
+        Me.txtStoneWeight.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle
+        Me.txtStoneWeight.Font = New System.Drawing.Font("Arial", 9.75!, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, CType(0, Byte))
+        Me.txtStoneWeight.ForeColor = System.Drawing.Color.Black
+        Me.txtStoneWeight.Location = New System.Drawing.Point(245, 488)
+        Me.txtStoneWeight.MaxLength = 20
+        Me.txtStoneWeight.Name = "txtStoneWeight"
+        Me.txtStoneWeight.Size = New System.Drawing.Size(88, 22)
+        Me.txtStoneWeight.TabIndex = 154
+        Me.txtStoneWeight.Tag = ""
+        '
+        'txtWeight
+        '
+        Me.txtWeight.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle
+        Me.txtWeight.Font = New System.Drawing.Font("Arial", 9.75!, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, CType(0, Byte))
+        Me.txtWeight.ForeColor = System.Drawing.Color.Black
+        Me.txtWeight.Location = New System.Drawing.Point(245, 464)
+        Me.txtWeight.MaxLength = 20
+        Me.txtWeight.Name = "txtWeight"
+        Me.txtWeight.Size = New System.Drawing.Size(88, 22)
+        Me.txtWeight.TabIndex = 153
+        Me.txtWeight.Tag = ""
+        '
+        'txtDiamondDescription
+        '
+        Me.txtDiamondDescription.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle
+        Me.txtDiamondDescription.Font = New System.Drawing.Font("Arial", 9.75!, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, CType(0, Byte))
+        Me.txtDiamondDescription.ForeColor = System.Drawing.Color.Black
+        Me.txtDiamondDescription.Location = New System.Drawing.Point(21, 488)
+        Me.txtDiamondDescription.MaxLength = 20
+        Me.txtDiamondDescription.Name = "txtDiamondDescription"
+        Me.txtDiamondDescription.Size = New System.Drawing.Size(220, 22)
+        Me.txtDiamondDescription.TabIndex = 152
+        Me.txtDiamondDescription.Tag = ""
+        '
+        'txtDescription
+        '
+        Me.txtDescription.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle
+        Me.txtDescription.Font = New System.Drawing.Font("Arial", 9.75!, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, CType(0, Byte))
+        Me.txtDescription.ForeColor = System.Drawing.Color.Black
+        Me.txtDescription.Location = New System.Drawing.Point(21, 464)
+        Me.txtDescription.MaxLength = 20
+        Me.txtDescription.Name = "txtDescription"
+        Me.txtDescription.Size = New System.Drawing.Size(220, 22)
+        Me.txtDescription.TabIndex = 151
+        Me.txtDescription.Tag = ""
+        '
+        'Label8
+        '
+        Me.Label8.BackColor = System.Drawing.Color.Navy
+        Me.Label8.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle
+        Me.Label8.Font = New System.Drawing.Font("Arial", 9.0!, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, CType(0, Byte))
+        Me.Label8.ForeColor = System.Drawing.Color.White
+        Me.Label8.Location = New System.Drawing.Point(509, 432)
+        Me.Label8.Name = "Label8"
+        Me.Label8.Size = New System.Drawing.Size(99, 32)
+        Me.Label8.TabIndex = 150
+        Me.Label8.Text = "Total Cost"
+        Me.Label8.TextAlign = System.Drawing.ContentAlignment.MiddleCenter
+        '
+        'Label7
+        '
+        Me.Label7.BackColor = System.Drawing.Color.Navy
+        Me.Label7.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle
+        Me.Label7.Font = New System.Drawing.Font("Arial", 9.0!, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, CType(0, Byte))
+        Me.Label7.ForeColor = System.Drawing.Color.White
+        Me.Label7.Location = New System.Drawing.Point(421, 432)
+        Me.Label7.Name = "Label7"
+        Me.Label7.Size = New System.Drawing.Size(88, 32)
+        Me.Label7.TabIndex = 149
+        Me.Label7.Text = "Cost Per Gram"
+        Me.Label7.TextAlign = System.Drawing.ContentAlignment.MiddleCenter
+        '
+        'Label4
+        '
+        Me.Label4.BackColor = System.Drawing.Color.Navy
+        Me.Label4.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle
+        Me.Label4.Font = New System.Drawing.Font("Arial", 9.0!, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, CType(0, Byte))
+        Me.Label4.ForeColor = System.Drawing.Color.White
+        Me.Label4.Location = New System.Drawing.Point(333, 432)
+        Me.Label4.Name = "Label4"
+        Me.Label4.Size = New System.Drawing.Size(88, 32)
+        Me.Label4.TabIndex = 148
+        Me.Label4.Text = "Gold Loss"
+        Me.Label4.TextAlign = System.Drawing.ContentAlignment.MiddleCenter
+        '
+        'lblS
+        '
+        Me.lblS.BackColor = System.Drawing.Color.Navy
+        Me.lblS.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle
+        Me.lblS.Font = New System.Drawing.Font("Arial", 9.0!, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, CType(0, Byte))
+        Me.lblS.ForeColor = System.Drawing.Color.White
+        Me.lblS.Location = New System.Drawing.Point(245, 432)
+        Me.lblS.Name = "lblS"
+        Me.lblS.Size = New System.Drawing.Size(88, 32)
+        Me.lblS.TabIndex = 147
+        Me.lblS.Text = "Weight"
+        Me.lblS.TextAlign = System.Drawing.ContentAlignment.MiddleCenter
+        '
+        'lbl
+        '
+        Me.lbl.BackColor = System.Drawing.Color.Navy
+        Me.lbl.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle
+        Me.lbl.Font = New System.Drawing.Font("Arial", 9.0!, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, CType(0, Byte))
+        Me.lbl.ForeColor = System.Drawing.Color.White
+        Me.lbl.Location = New System.Drawing.Point(21, 432)
+        Me.lbl.Name = "lbl"
+        Me.lbl.Size = New System.Drawing.Size(220, 32)
+        Me.lbl.TabIndex = 146
+        Me.lbl.Text = "Description"
+        Me.lbl.TextAlign = System.Drawing.ContentAlignment.MiddleCenter
+        '
+        'PnlReprint
+        '
+        Me.PnlReprint.BackColor = System.Drawing.Color.FromArgb(CType(CType(255, Byte), Integer), CType(CType(255, Byte), Integer), CType(CType(192, Byte), Integer))
+        Me.PnlReprint.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle
+        Me.PnlReprint.Controls.Add(Me.btnReprintCancel)
+        Me.PnlReprint.Controls.Add(Me.btnReprintOK)
+        Me.PnlReprint.Controls.Add(Me.txtRePrintBillNo)
+        Me.PnlReprint.Controls.Add(Me.Label47)
+        Me.PnlReprint.Controls.Add(Me.Label48)
+        Me.PnlReprint.Location = New System.Drawing.Point(192, 235)
+        Me.PnlReprint.Name = "PnlReprint"
+        Me.PnlReprint.Size = New System.Drawing.Size(248, 88)
+        Me.PnlReprint.TabIndex = 166
+        Me.PnlReprint.Visible = False
+        '
+        'btnReprintCancel
+        '
+        Me.btnReprintCancel.BackColor = System.Drawing.Color.FromArgb(CType(CType(255, Byte), Integer), CType(CType(128, Byte), Integer), CType(CType(0, Byte), Integer))
+        Me.btnReprintCancel.Font = New System.Drawing.Font("Arial", 8.25!, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, CType(0, Byte))
+        Me.btnReprintCancel.Image = CType(resources.GetObject("btnReprintCancel.Image"), System.Drawing.Image)
+        Me.btnReprintCancel.Location = New System.Drawing.Point(168, 56)
+        Me.btnReprintCancel.Name = "btnReprintCancel"
+        Me.btnReprintCancel.Size = New System.Drawing.Size(64, 23)
+        Me.btnReprintCancel.TabIndex = 75
+        Me.btnReprintCancel.Text = "Cancel"
+        Me.btnReprintCancel.UseVisualStyleBackColor = False
+        '
+        'btnReprintOK
+        '
+        Me.btnReprintOK.BackColor = System.Drawing.Color.FromArgb(CType(CType(255, Byte), Integer), CType(CType(128, Byte), Integer), CType(CType(0, Byte), Integer))
+        Me.btnReprintOK.Font = New System.Drawing.Font("Arial", 8.25!, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, CType(0, Byte))
+        Me.btnReprintOK.Image = CType(resources.GetObject("btnReprintOK.Image"), System.Drawing.Image)
+        Me.btnReprintOK.Location = New System.Drawing.Point(96, 56)
+        Me.btnReprintOK.Name = "btnReprintOK"
+        Me.btnReprintOK.Size = New System.Drawing.Size(64, 23)
+        Me.btnReprintOK.TabIndex = 76
+        Me.btnReprintOK.Text = "OK"
+        Me.btnReprintOK.UseVisualStyleBackColor = False
+        '
+        'txtRePrintBillNo
+        '
+        Me.txtRePrintBillNo.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle
+        Me.txtRePrintBillNo.Font = New System.Drawing.Font("Arial", 8.25!, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, CType(0, Byte))
+        Me.txtRePrintBillNo.ForeColor = System.Drawing.Color.Black
+        Me.txtRePrintBillNo.Location = New System.Drawing.Point(96, 33)
+        Me.txtRePrintBillNo.MaxLength = 20
+        Me.txtRePrintBillNo.Name = "txtRePrintBillNo"
+        Me.txtRePrintBillNo.Size = New System.Drawing.Size(136, 20)
+        Me.txtRePrintBillNo.TabIndex = 73
+        Me.txtRePrintBillNo.Tag = ""
+        '
+        'Label47
+        '
+        Me.Label47.Font = New System.Drawing.Font("Arial", 8.25!, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, CType(0, Byte))
+        Me.Label47.ForeColor = System.Drawing.Color.Black
+        Me.Label47.Location = New System.Drawing.Point(32, 33)
+        Me.Label47.Name = "Label47"
+        Me.Label47.Size = New System.Drawing.Size(56, 15)
+        Me.Label47.TabIndex = 74
+        Me.Label47.Text = "Bill No"
+        '
+        'Label48
+        '
+        Me.Label48.Font = New System.Drawing.Font("Arial", 9.0!, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, CType(0, Byte))
+        Me.Label48.ForeColor = System.Drawing.Color.Black
+        Me.Label48.Location = New System.Drawing.Point(8, 8)
+        Me.Label48.Name = "Label48"
+        Me.Label48.Size = New System.Drawing.Size(82, 15)
+        Me.Label48.TabIndex = 72
+        Me.Label48.Text = "RePrint"
+        Me.Label48.TextAlign = System.Drawing.ContentAlignment.MiddleLeft
+        '
+        'cmdReprint
+        '
+        Me.cmdReprint.BackColor = System.Drawing.Color.FromArgb(CType(CType(255, Byte), Integer), CType(CType(128, Byte), Integer), CType(CType(0, Byte), Integer))
+        Me.cmdReprint.Font = New System.Drawing.Font("Arial", 8.25!, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, CType(0, Byte))
+        Me.cmdReprint.Image = CType(resources.GetObject("cmdReprint.Image"), System.Drawing.Image)
+        Me.cmdReprint.Location = New System.Drawing.Point(316, 528)
+        Me.cmdReprint.Name = "cmdReprint"
+        Me.cmdReprint.Size = New System.Drawing.Size(95, 23)
+        Me.cmdReprint.TabIndex = 167
+        Me.cmdReprint.Text = "Reprint (F6)"
+        Me.cmdReprint.UseVisualStyleBackColor = False
+        '
+        'pnlMember
+        '
+        Me.pnlMember.BackColor = System.Drawing.Color.FromArgb(CType(CType(255, Byte), Integer), CType(CType(255, Byte), Integer), CType(CType(192, Byte), Integer))
+        Me.pnlMember.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle
+        Me.pnlMember.Controls.Add(Me.btnMemberSearch)
+        Me.pnlMember.Controls.Add(Me.btnNew)
+        Me.pnlMember.Controls.Add(Me.btnOK)
+        Me.pnlMember.Controls.Add(Me.btnCancel)
+        Me.pnlMember.Controls.Add(Me.txtMemberCodeView)
+        Me.pnlMember.Controls.Add(Me.Label79)
+        Me.pnlMember.Location = New System.Drawing.Point(160, 227)
+        Me.pnlMember.Name = "pnlMember"
+        Me.pnlMember.Size = New System.Drawing.Size(312, 104)
+        Me.pnlMember.TabIndex = 168
+        Me.pnlMember.Visible = False
+        '
+        'btnMemberSearch
+        '
+        Me.btnMemberSearch.BackColor = System.Drawing.Color.FromArgb(CType(CType(255, Byte), Integer), CType(CType(128, Byte), Integer), CType(CType(0, Byte), Integer))
+        Me.btnMemberSearch.FlatStyle = System.Windows.Forms.FlatStyle.Flat
+        Me.btnMemberSearch.Font = New System.Drawing.Font("Arial", 8.25!, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, CType(0, Byte))
+        Me.btnMemberSearch.Location = New System.Drawing.Point(256, 24)
+        Me.btnMemberSearch.Name = "btnMemberSearch"
+        Me.btnMemberSearch.Size = New System.Drawing.Size(24, 20)
+        Me.btnMemberSearch.TabIndex = 120
+        Me.btnMemberSearch.Text = "..."
+        Me.btnMemberSearch.UseVisualStyleBackColor = False
+        '
+        'btnNew
+        '
+        Me.btnNew.BackColor = System.Drawing.Color.FromArgb(CType(CType(255, Byte), Integer), CType(CType(128, Byte), Integer), CType(CType(0, Byte), Integer))
+        Me.btnNew.Font = New System.Drawing.Font("Arial", 8.25!, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, CType(0, Byte))
+        Me.btnNew.Image = CType(resources.GetObject("btnNew.Image"), System.Drawing.Image)
+        Me.btnNew.Location = New System.Drawing.Point(72, 56)
+        Me.btnNew.Name = "btnNew"
+        Me.btnNew.Size = New System.Drawing.Size(64, 23)
+        Me.btnNew.TabIndex = 5
+        Me.btnNew.Text = "New"
+        Me.btnNew.UseVisualStyleBackColor = False
+        '
+        'btnOK
+        '
+        Me.btnOK.BackColor = System.Drawing.Color.FromArgb(CType(CType(255, Byte), Integer), CType(CType(128, Byte), Integer), CType(CType(0, Byte), Integer))
+        Me.btnOK.Font = New System.Drawing.Font("Arial", 8.25!, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, CType(0, Byte))
+        Me.btnOK.Image = CType(resources.GetObject("btnOK.Image"), System.Drawing.Image)
+        Me.btnOK.Location = New System.Drawing.Point(144, 56)
+        Me.btnOK.Name = "btnOK"
+        Me.btnOK.Size = New System.Drawing.Size(64, 23)
+        Me.btnOK.TabIndex = 3
+        Me.btnOK.Text = "OK"
+        Me.btnOK.UseVisualStyleBackColor = False
+        '
+        'btnCancel
+        '
+        Me.btnCancel.BackColor = System.Drawing.Color.FromArgb(CType(CType(255, Byte), Integer), CType(CType(128, Byte), Integer), CType(CType(0, Byte), Integer))
+        Me.btnCancel.Font = New System.Drawing.Font("Arial", 8.25!, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, CType(0, Byte))
+        Me.btnCancel.Image = CType(resources.GetObject("btnCancel.Image"), System.Drawing.Image)
+        Me.btnCancel.Location = New System.Drawing.Point(216, 56)
+        Me.btnCancel.Name = "btnCancel"
+        Me.btnCancel.Size = New System.Drawing.Size(64, 23)
+        Me.btnCancel.TabIndex = 4
+        Me.btnCancel.Text = "Cancel"
+        Me.btnCancel.UseVisualStyleBackColor = False
+        '
+        'txtMemberCodeView
+        '
+        Me.txtMemberCodeView.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle
+        Me.txtMemberCodeView.Font = New System.Drawing.Font("Arial", 8.25!, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, CType(0, Byte))
+        Me.txtMemberCodeView.Location = New System.Drawing.Point(120, 24)
+        Me.txtMemberCodeView.Name = "txtMemberCodeView"
+        Me.txtMemberCodeView.Size = New System.Drawing.Size(136, 20)
+        Me.txtMemberCodeView.TabIndex = 0
+        '
+        'Label79
+        '
+        Me.Label79.Font = New System.Drawing.Font("Arial", 8.25!, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, CType(0, Byte))
+        Me.Label79.Location = New System.Drawing.Point(8, 32)
+        Me.Label79.Name = "Label79"
+        Me.Label79.Size = New System.Drawing.Size(128, 24)
+        Me.Label79.TabIndex = 0
+        Me.Label79.Text = "MemberCode"
+        '
+        'PnlSalesManPwd
+        '
+        Me.PnlSalesManPwd.BackColor = System.Drawing.Color.Pink
+        Me.PnlSalesManPwd.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle
+        Me.PnlSalesManPwd.Controls.Add(Me.txtSalesManPWD)
+        Me.PnlSalesManPwd.Controls.Add(Me.Label21)
+        Me.PnlSalesManPwd.Location = New System.Drawing.Point(217, 235)
+        Me.PnlSalesManPwd.Name = "PnlSalesManPwd"
+        Me.PnlSalesManPwd.Size = New System.Drawing.Size(199, 88)
+        Me.PnlSalesManPwd.TabIndex = 0
+        Me.PnlSalesManPwd.Visible = False
+        '
+        'txtSalesManPWD
+        '
+        Me.txtSalesManPWD.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle
+        Me.txtSalesManPWD.Font = New System.Drawing.Font("Arial", 8.25!, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, CType(0, Byte))
+        Me.txtSalesManPWD.ForeColor = System.Drawing.Color.Black
+        Me.txtSalesManPWD.Location = New System.Drawing.Point(48, 40)
+        Me.txtSalesManPWD.MaxLength = 20
+        Me.txtSalesManPWD.Name = "txtSalesManPWD"
+        Me.txtSalesManPWD.PasswordChar = Global.Microsoft.VisualBasic.ChrW(42)
+        Me.txtSalesManPWD.Size = New System.Drawing.Size(136, 20)
+        Me.txtSalesManPWD.TabIndex = 0
+        Me.txtSalesManPWD.Tag = ""
+        '
+        'Label21
+        '
+        Me.Label21.Font = New System.Drawing.Font("Arial", 9.0!, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, CType(0, Byte))
+        Me.Label21.ForeColor = System.Drawing.Color.Black
+        Me.Label21.Location = New System.Drawing.Point(48, 14)
+        Me.Label21.Name = "Label21"
+        Me.Label21.Size = New System.Drawing.Size(128, 15)
+        Me.Label21.TabIndex = 74
+        Me.Label21.Text = "SalesMan Password"
+        Me.Label21.TextAlign = System.Drawing.ContentAlignment.MiddleCenter
+        '
+        'lblLastBillAmount
+        '
+        Me.lblLastBillAmount.BackColor = System.Drawing.Color.Navy
+        Me.lblLastBillAmount.Font = New System.Drawing.Font("Arial", 9.0!, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, CType(0, Byte))
+        Me.lblLastBillAmount.ForeColor = System.Drawing.Color.White
+        Me.lblLastBillAmount.Location = New System.Drawing.Point(344, 576)
+        Me.lblLastBillAmount.Name = "lblLastBillAmount"
+        Me.lblLastBillAmount.Size = New System.Drawing.Size(96, 24)
+        Me.lblLastBillAmount.TabIndex = 174
+        Me.lblLastBillAmount.Text = "0"
+        Me.lblLastBillAmount.TextAlign = System.Drawing.ContentAlignment.MiddleCenter
+        Me.lblLastBillAmount.Visible = False
+        '
+        'lblLastBillAmountCap
+        '
+        Me.lblLastBillAmountCap.BackColor = System.Drawing.Color.Yellow
+        Me.lblLastBillAmountCap.Font = New System.Drawing.Font("Arial", 9.0!, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, CType(0, Byte))
+        Me.lblLastBillAmountCap.ForeColor = System.Drawing.Color.Black
+        Me.lblLastBillAmountCap.Location = New System.Drawing.Point(344, 552)
+        Me.lblLastBillAmountCap.Name = "lblLastBillAmountCap"
+        Me.lblLastBillAmountCap.Size = New System.Drawing.Size(96, 24)
+        Me.lblLastBillAmountCap.TabIndex = 173
+        Me.lblLastBillAmountCap.Text = "Last Bill Amt"
+        Me.lblLastBillAmountCap.TextAlign = System.Drawing.ContentAlignment.MiddleCenter
+        Me.lblLastBillAmountCap.Visible = False
+        '
+        'lblLastBillNo
+        '
+        Me.lblLastBillNo.BackColor = System.Drawing.Color.Navy
+        Me.lblLastBillNo.Font = New System.Drawing.Font("Arial", 9.0!, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, CType(0, Byte))
+        Me.lblLastBillNo.ForeColor = System.Drawing.Color.White
+        Me.lblLastBillNo.Location = New System.Drawing.Point(248, 576)
+        Me.lblLastBillNo.Name = "lblLastBillNo"
+        Me.lblLastBillNo.Size = New System.Drawing.Size(96, 24)
+        Me.lblLastBillNo.TabIndex = 172
+        Me.lblLastBillNo.Text = "0"
+        Me.lblLastBillNo.TextAlign = System.Drawing.ContentAlignment.MiddleCenter
+        Me.lblLastBillNo.Visible = False
+        '
+        'lblLastBillNoCap
+        '
+        Me.lblLastBillNoCap.BackColor = System.Drawing.Color.Yellow
+        Me.lblLastBillNoCap.Font = New System.Drawing.Font("Arial", 9.0!, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, CType(0, Byte))
+        Me.lblLastBillNoCap.ForeColor = System.Drawing.Color.Black
+        Me.lblLastBillNoCap.Location = New System.Drawing.Point(248, 552)
+        Me.lblLastBillNoCap.Name = "lblLastBillNoCap"
+        Me.lblLastBillNoCap.Size = New System.Drawing.Size(96, 24)
+        Me.lblLastBillNoCap.TabIndex = 171
+        Me.lblLastBillNoCap.Text = "Last Bill No"
+        Me.lblLastBillNoCap.TextAlign = System.Drawing.ContentAlignment.MiddleCenter
+        Me.lblLastBillNoCap.Visible = False
+        '
+        'lblLastSalesMan
+        '
+        Me.lblLastSalesMan.BackColor = System.Drawing.Color.Navy
+        Me.lblLastSalesMan.Font = New System.Drawing.Font("Arial", 9.0!, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, CType(0, Byte))
+        Me.lblLastSalesMan.ForeColor = System.Drawing.Color.White
+        Me.lblLastSalesMan.Location = New System.Drawing.Point(136, 576)
+        Me.lblLastSalesMan.Name = "lblLastSalesMan"
+        Me.lblLastSalesMan.Size = New System.Drawing.Size(128, 24)
+        Me.lblLastSalesMan.TabIndex = 170
+        Me.lblLastSalesMan.Text = "0"
+        Me.lblLastSalesMan.TextAlign = System.Drawing.ContentAlignment.MiddleCenter
+        Me.lblLastSalesMan.Visible = False
+        '
+        'lbllastSalesManCap
+        '
+        Me.lbllastSalesManCap.BackColor = System.Drawing.Color.Yellow
+        Me.lbllastSalesManCap.Font = New System.Drawing.Font("Arial", 9.0!, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, CType(0, Byte))
+        Me.lbllastSalesManCap.ForeColor = System.Drawing.Color.Black
+        Me.lbllastSalesManCap.Location = New System.Drawing.Point(136, 552)
+        Me.lbllastSalesManCap.Name = "lbllastSalesManCap"
+        Me.lbllastSalesManCap.Size = New System.Drawing.Size(112, 24)
+        Me.lbllastSalesManCap.TabIndex = 169
+        Me.lbllastSalesManCap.Text = "Last SalesMan"
+        Me.lbllastSalesManCap.TextAlign = System.Drawing.ContentAlignment.MiddleCenter
+        Me.lbllastSalesManCap.Visible = False
+        '
+        'grdTrade
+        '
+        Me.grdTrade.AllowUserToAddRows = False
+        Me.grdTrade.AllowUserToDeleteRows = False
+        Me.grdTrade.AllowUserToResizeColumns = False
+        Me.grdTrade.AllowUserToResizeRows = False
+        DataGridViewCellStyle2.Alignment = System.Windows.Forms.DataGridViewContentAlignment.MiddleLeft
+        DataGridViewCellStyle2.BackColor = System.Drawing.Color.DarkOrange
+        DataGridViewCellStyle2.Font = New System.Drawing.Font("Microsoft Sans Serif", 8.25!, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, CType(0, Byte))
+        DataGridViewCellStyle2.ForeColor = System.Drawing.SystemColors.WindowText
+        DataGridViewCellStyle2.SelectionBackColor = System.Drawing.SystemColors.Highlight
+        DataGridViewCellStyle2.SelectionForeColor = System.Drawing.SystemColors.HighlightText
+        DataGridViewCellStyle2.WrapMode = System.Windows.Forms.DataGridViewTriState.[True]
+        Me.grdTrade.ColumnHeadersDefaultCellStyle = DataGridViewCellStyle2
+        Me.grdTrade.ColumnHeadersHeight = 30
+        Me.grdTrade.Columns.AddRange(New System.Windows.Forms.DataGridViewColumn() {Me.cItemNo, Me.cDescription, Me.cWeight, Me.cGoldLoss, Me.cCost, Me.cPMC, Me.cPCS, Me.cTotalCost, Me.cStoneDesc, Me.cStoneWt})
+        Me.grdTrade.Location = New System.Drawing.Point(21, 277)
+        Me.grdTrade.Name = "grdTrade"
+        Me.grdTrade.RowHeadersVisible = False
+        Me.grdTrade.SelectionMode = System.Windows.Forms.DataGridViewSelectionMode.FullRowSelect
+        Me.grdTrade.Size = New System.Drawing.Size(589, 151)
+        Me.grdTrade.TabIndex = 175
+        '
+        'cItemNo
+        '
+        Me.cItemNo.HeaderText = "Item No"
+        Me.cItemNo.Name = "cItemNo"
+        Me.cItemNo.Visible = False
+        '
+        'cDescription
+        '
+        Me.cDescription.HeaderText = "Description"
+        Me.cDescription.Name = "cDescription"
+        Me.cDescription.Width = 270
+        '
+        'cWeight
+        '
+        Me.cWeight.HeaderText = "Weight"
+        Me.cWeight.Name = "cWeight"
+        Me.cWeight.Width = 80
+        '
+        'cGoldLoss
+        '
+        Me.cGoldLoss.HeaderText = "Gold Loss"
+        Me.cGoldLoss.Name = "cGoldLoss"
+        Me.cGoldLoss.Width = 80
+        '
+        'cCost
+        '
+        Me.cCost.HeaderText = "Cost \ Gm"
+        Me.cCost.Name = "cCost"
+        Me.cCost.Width = 80
+        '
+        'cPMC
+        '
+        Me.cPMC.HeaderText = "PMC"
+        Me.cPMC.Name = "cPMC"
+        Me.cPMC.Visible = False
+        '
+        'cPCS
+        '
+        Me.cPCS.HeaderText = "PCS"
+        Me.cPCS.Name = "cPCS"
+        Me.cPCS.Visible = False
+        '
+        'cTotalCost
+        '
+        Me.cTotalCost.HeaderText = "Total Cost"
+        Me.cTotalCost.Name = "cTotalCost"
+        Me.cTotalCost.Width = 80
+        '
+        'cStoneDesc
+        '
+        Me.cStoneDesc.HeaderText = "Stone Description"
+        Me.cStoneDesc.Name = "cStoneDesc"
+        Me.cStoneDesc.Visible = False
+        '
+        'cStoneWt
+        '
+        Me.cStoneWt.HeaderText = "Stone weight"
+        Me.cStoneWt.Name = "cStoneWt"
+        Me.cStoneWt.Visible = False
+        '
+        'frmTradeInOnly
+        '
+        Me.AutoScaleBaseSize = New System.Drawing.Size(5, 13)
+        Me.BackColor = System.Drawing.Color.White
+        Me.ClientSize = New System.Drawing.Size(632, 605)
+        Me.Controls.Add(Me.lblLastBillAmount)
+        Me.Controls.Add(Me.lblLastBillAmountCap)
+        Me.Controls.Add(Me.lblLastBillNo)
+        Me.Controls.Add(Me.lblLastBillNoCap)
+        Me.Controls.Add(Me.lblLastSalesMan)
+        Me.Controls.Add(Me.lbllastSalesManCap)
+        Me.Controls.Add(Me.PnlSalesManPwd)
+        Me.Controls.Add(Me.pnlMember)
+        Me.Controls.Add(Me.cmdReprint)
+        Me.Controls.Add(Me.PnlReprint)
+        Me.Controls.Add(Me.btnUpdate)
+        Me.Controls.Add(Me.btnClose)
+        Me.Controls.Add(Me.btnFClear)
+        Me.Controls.Add(Me.btnAdd)
+        Me.Controls.Add(Me.btnDelete)
+        Me.Controls.Add(Me.btnClear)
+        Me.Controls.Add(Me.txtTotalCost)
+        Me.Controls.Add(Me.txtCostPerGram1)
+        Me.Controls.Add(Me.txtGoldLoss)
+        Me.Controls.Add(Me.txtStoneWeight)
+        Me.Controls.Add(Me.txtWeight)
+        Me.Controls.Add(Me.txtDiamondDescription)
+        Me.Controls.Add(Me.txtDescription)
+        Me.Controls.Add(Me.Label8)
+        Me.Controls.Add(Me.Label7)
+        Me.Controls.Add(Me.Label4)
+        Me.Controls.Add(Me.lblS)
+        Me.Controls.Add(Me.lbl)
+        Me.Controls.Add(Me.Label14)
+        Me.Controls.Add(Me.lblSalesAmount)
+        Me.Controls.Add(Me.Label16)
+        Me.Controls.Add(Me.lblTradeInAmount)
+        Me.Controls.Add(Me.Label12)
+        Me.Controls.Add(Me.lblBalanceAmount)
+        Me.Controls.Add(Me.Label10)
+        Me.Controls.Add(Me.lblTradeInLimit)
+        Me.Controls.Add(Me.Panel1)
+        Me.Controls.Add(Me.grdTrade)
+        Me.KeyPreview = True
+        Me.MaximizeBox = False
+        Me.MinimizeBox = False
+        Me.Name = "frmTradeInOnly"
+        Me.StartPosition = System.Windows.Forms.FormStartPosition.CenterParent
+        Me.Text = "Trade In Gold "
+        Me.Panel1.ResumeLayout(False)
+        Me.Panel1.PerformLayout()
+        Me.PnlReprint.ResumeLayout(False)
+        Me.PnlReprint.PerformLayout()
+        Me.pnlMember.ResumeLayout(False)
+        Me.pnlMember.PerformLayout()
+        Me.PnlSalesManPwd.ResumeLayout(False)
+        Me.PnlSalesManPwd.PerformLayout()
+        CType(Me.grdTrade, System.ComponentModel.ISupportInitialize).EndInit()
+        Me.ResumeLayout(False)
+        Me.PerformLayout()
+
+    End Sub
+
+#End Region
+    Public sinventorycode As String
+    Public sInvoiceDate As String
+    Dim objComp As New clsCompany
+    Public dWeightGrd, dPMCGrd, dSMCGrd, dTotalCostGrd, dGoldLossGrd As Double
+    Dim objSales As New ClsSales
+    Dim dCost As Double
+    Dim sItemNo As Long
+    Dim dLocalCost As Double
+    Dim dForeignCost As Double
+    Dim bEdited As Boolean
+    Dim CompName$, Address1$, Address2$, Country$, PhoneNo$, FaxNo$
+    Dim dTotalWeight, dTotalGoldLoss, dTotalMC, dTotalPCS, dTotalLocalCost, dTotalForeignCost As Double
+    Dim msPurchaseType$
+    Const GRDROWHT = 17.708
+    Public sInvoiceNo As String
+    Public sCustomerCode As String
+    Public sSalesAmount As Double
+    Dim sSalesType As String
+    Dim msPayMode$
+    Dim mbTransaction As Boolean
+    Dim mdCommission As Double
+    Dim mdTradeInAmt As Double
+    Public sCalledFrom As String
+    Dim sGSTType As String
+    Dim dGSTPerc As Double
+    Dim s24K As String
+    Dim s22K As String
+    Dim s20K As String
+    Dim s22S As String
+    Dim s999 As String
+    Dim s916 As String
+    Dim s835 As String
+    Dim msSalesManCode As String
+    Public oTSalesConn As New ADODB.Connection
+    Public oTSalesRs As New ADODB.Recordset
+
+    Private Function fncValidate() As Boolean
+        If UCase(txtCustomerCode.Text) = "CASH" And sMemberModule = "1" Then
+            If txtMemberCode.Text.Trim = "" Then
+                MsgBox("MemberCode is NOT entered !", MsgBoxStyle.Critical)
+                txtCustomerCode.Focus()
+                fncValidate = False
+                Exit Function
+            End If
+        ElseIf UCase(txtCustomerCode.Text) = "CASH" And sMemberModule = "0" Then
+            MessageBox.Show(" TradeIn Sales Not for CASH Customer!!!")
+            txtCustomerCode.Focus()
+            fncValidate = False
+            Exit Function
+        ElseIf Trim(txtCustomerCode.Text.Trim) = "" Then
+            MessageBox.Show(" Choose Customer!!!")
+            txtCustomerCode.Focus()
+            fncValidate = False
+            Exit Function
+        End If
+        If grdTrade.RowCount < 0 Then
+            MsgBox("Enter trade in item details!!", vbCritical)
+            fncValidate = False
+            Exit Function
+        End If
+
+        If Val(lblTradeInAmount.Text) <= 0 Then
+            MsgBox("TradeIn Amount has some Value!!!", vbCritical)
+            fncValidate = False
+            Exit Function
+        End If
+        fncValidate = True
+    End Function
+    Private Function fncSaveTradeIn() As Boolean
+        Dim SBll As New clsTradeIN
+        Dim SBlm As New clsInventory
+        Dim frmPm As New clsPayMode
+        Dim adoRS As ADODB.Recordset
+        Dim sError As String
+        Dim iRet As Boolean
+
+        Dim i As Long
+        Dim sSql As String
+        If fncGetInvoiceNo() = False Then
+            MessageBox.Show("Transaction failed!!!")
+            Exit Function
+        End If
+        iRet = SBll.TradeInDelete(oTSalesConn, oTSalesRs, Trim(sinventorycode), sError)
+        If Trim(sError) = "" Then
+            dPaidAmount = Val(fnGetdgvText(grdTrade, grdTrade.RowCount - 1, 7)) + (Val(fnGetdgvText(grdTrade, grdTrade.RowCount - 1, 7)) * 7) / 100
+            iRet = SBll.TradeInHeaderSave(oTSalesConn, oTSalesRs, Trim(sinventorycode), Trim$(sInvoiceNo), _
+                      gthisLocation, UCase(Trim(txtCustomerCode.Text)), Trim(txtMemberCode.Text), Trim(txtCustomerName.Text), Trim(txtAddress1.Text), _
+                      Trim(txtAddress2.Text), Trim(txtAddress3.Text), _
+                      Val(txtCostPerGram.Text), Val(fnGetdgvText(grdTrade, grdTrade.RowCount - 1, 2)), _
+                      Val(fnGetdgvText(grdTrade, grdTrade.RowCount - 1, 9)), _
+                      Val(fnGetdgvText(grdTrade, grdTrade.RowCount - 1, 5)), Val(fnGetdgvText(grdTrade, grdTrade.RowCount - 1, 6)), _
+                      Val(fnGetdgvText(grdTrade, grdTrade.RowCount - 1, 3)), Val(fnGetdgvText(grdTrade, grdTrade.RowCount - 1, 7)), _
+                      Val(dPaidAmount), "TRADEIN", "N", msSalesManCode, sError)
+            If Trim(sError) <> "" Then
+                MsgBox(sError, vbCritical)
+                fncSaveTradeIn = False
+                Exit Function
+            End If
+
+            For i = 0 To grdTrade.RowCount - 1
+                If Not Trim(fnGetdgvText(grdTrade, i, 1)) = "TOTAL:" Then
+                    iRet = SBll.TradeInDetailSave(oTSalesConn, oTSalesRs, gthisLocation, Trim(sinventorycode), i, Trim(fnGetdgvText(grdTrade, i, 1)), _
+                            Trim(fnGetdgvText(grdTrade, i, 8)), Val(fnGetdgvText(grdTrade, i, 2)), Val(fnGetdgvText(grdTrade, i, 9)), _
+                            Val(fnGetdgvText(grdTrade, i, 4)), Val(fnGetdgvText(grdTrade, i, 5)), Val(fnGetdgvText(grdTrade, i, 6)), _
+                            Val(fnGetdgvText(grdTrade, i, 3)), Val(fnGetdgvText(grdTrade, i, 7)), "TRADEIN", "TRADEIN", "TRADEIN", "TRADEIN", "", msSalesManCode, sError)
+
+
+
+                End If
+                If Trim(sError) <> "" Then
+                    MsgBox(sError, vbCritical)
+                    fncSaveTradeIn = False
+                    Exit Function
+                End If
+            Next
+            If Not fncPaymodeDetailSave(sInvoiceNo) Then
+                MessageBox.Show("Transaction not saved")
+                fncSaveTradeIn = False
+                Exit Function
+            End If
+
+            If Trim(sError) <> "" Then
+                MsgBox(sError, vbCritical)
+                fncSaveTradeIn = False
+                Exit Function
+            Else
+                fncSaveTradeIn = True
+                Exit Function
+            End If
+        Else
+            MsgBox(sError, vbCritical)
+            fncSaveTradeIn = False
+            Exit Function
+        End If
+        frmPm = Nothing
+
+    End Function
+    Private Sub subGetTradeInDetails()
+        Dim i As Long
+        Dim adoRS As DataSet
+        Dim SBll As New clsTradeIN
+
+        adoRS = SBll.GetTradeInList(sinventorycode)
+
+        grdTrade.RowCount = 0
+        For i = 0 To adoRS.Tables(0).Rows.Count - 1
+            grdTrade.Rows.Add()
+            Call fnSetdgvText(grdTrade, i, 0, i)
+            Call fnSetdgvText(grdTrade, i, 1, Trim(adoRS.Tables(0).Rows(i)("Description") & ""))
+            Call fnSetdgvText(grdTrade, i, 2, Trim(adoRS.Tables(0).Rows(i)("Weight") & ""))
+            Call fnSetdgvText(grdTrade, i, 3, Trim(adoRS.Tables(0).Rows(i)("GoldLoss") & ""))
+            Call fnSetdgvText(grdTrade, i, 4, Format(Val(adoRS.Tables(0).Rows(i)("CostperGram") & ""), "###0.000"))
+            Call fnSetdgvText(grdTrade, i, 5, Format(Val(adoRS.Tables(0).Rows(i)("Mc")), "###0.000"))
+            Call fnSetdgvText(grdTrade, i, 6, Val(adoRS.Tables(0).Rows(i)("Pcs") & ""))
+            Call fnSetdgvText(grdTrade, i, 7, Val(adoRS.Tables(0).Rows(i)("TotalCost") & ""))
+            Call fnSetdgvText(grdTrade, i, 8, Trim(adoRS.Tables(0).Rows(i)("DiamondDescription") & ""))
+            Call fnSetdgvText(grdTrade, i, 9, Val(adoRS.Tables(0).Rows(i)("StoneWeight") & ""))
+        Next i
+
+        'grdTrade.Row = grdTrade.MaxRows
+        'grdTrade.Col = 1
+        'grdTrade.Action = 0
+        subTotal()
+        adoRS = Nothing
+        SBll = Nothing
+
+
+    End Sub
+    Private Sub subClear()
+        sinventorycode = ""
+        txtCustomerCode.Text = ""
+        txtCustomerName.Text = ""
+        txtAddress1.Text = ""
+        txtAddress2.Text = ""
+        txtAddress3.Text = ""
+        txtRemarks.Text = ""
+        grdTrade.RowCount = 0
+    End Sub
+
+    'Private Sub subAddTradeInInventory()
+    '    Dim i As Long
+    '    grdTrade.ForeColor = System.Drawing.Color.Black
+    '    grdTrade.FontBold = False
+
+    '    If Not bEdited Then
+    '        If grdTrade.MaxRows = 0 Then
+    '            grdTrade.MaxRows = grdTrade.MaxRows + 1
+    '        Else
+    '            grdTrade.Row = grdTrade.MaxRows
+    '            grdTrade.Action = 5
+    '            grdTrade.MaxRows = grdTrade.MaxRows - 1
+    '            grdTrade.MaxRows = grdTrade.MaxRows + 1
+    '        End If
+
+    '        grdTrade.Row = grdTrade.MaxRows
+    '    Else
+    '        grdTrade.Row = grdTrade.ActiveRow
+    '    End If
+
+    '    Call SetText(grdTrade, grdTrade.Row, 1, grdTrade.Row)
+    '    Call SetText(grdTrade, grdTrade.Row, 2, Trim(txtDescription.Text))
+    '    Call SetText(grdTrade, grdTrade.Row, 9, Trim(txtDiamondDescription.Text))
+    '    Call SetText(grdTrade, grdTrade.Row, 3, Val(txtWeight.Text))
+    '    Call SetText(grdTrade, grdTrade.Row, 4, Val(txtGoldLoss.Text))
+    '    Call SetText(grdTrade, grdTrade.Row, 5, Format(Val(txtCostPerGram1.Text), "###0.000"))
+    '    Call SetText(grdTrade, grdTrade.Row, 8, Val(txtTotalCost.Text))
+    '    Call SetText(grdTrade, grdTrade.Row, 10, Trim(txtStoneWeight.Text))
+
+    '    'grdTrade.Row = grdTrade.MaxRows
+    '    'grdTrade.Col = 1
+    '    'grdTrade.Action = 0
+    '    subTotal()
+    '    subClearDetail()
+
+    'End Sub
+    Public Function subTotalFromGrid()
+        Dim icnt
+        Dim sinventorycode As String
+        dWeightGrd = 0
+        dGoldLossGrd = 0
+        dTotalCostGrd = 0
+        For icnt = 0 To grdTrade.RowCount - 1
+            sinventorycode = Trim(fnGetdgvText(grdTrade, icnt, 1))
+            If sinventorycode <> "TOTAL:" Then
+                dWeightGrd = Format(Val(dWeightGrd) + Val(fnGetdgvText(grdTrade, icnt, 2)), "0.00")
+                dGoldLossGrd = Format(Val(dGoldLossGrd) + Val(fnGetdgvText(grdTrade, icnt, 3)), "0.00")
+                dTotalCostGrd = Format(Val(dTotalCostGrd) + Val(fnGetdgvText(grdTrade, icnt, 7)), "0.00")
+            End If
+        Next
+    End Function
+    'Private Sub subTotal()
+
+    '    If Not bEdited Then
+    '        grdTrade.MaxRows = grdTrade.MaxRows + 1
+    '    End If
+
+    '    Call SetText(grdTrade, grdTrade.MaxRows, 1, "Total:")
+
+    '    grdTrade.ForeColor = System.Drawing.Color.Red
+    '    grdTrade.FontBold = True
+
+    '    grdTrade.Col = 3
+    '    grdTrade.Formula = "sum(c1:c" & grdTrade.MaxRows - 1 & ")"
+
+
+    '    grdTrade.ForeColor = System.Drawing.Color.Red
+    '    grdTrade.FontBold = True
+
+    '    grdTrade.Col = 4
+    '    grdTrade.Formula = "sum(d1:d" & grdTrade.MaxRows - 1 & ")"
+
+    '    grdTrade.ForeColor = System.Drawing.Color.Red
+    '    grdTrade.FontBold = True
+
+    '    grdTrade.Col = 6
+    '    grdTrade.Formula = "sum(f1:f" & grdTrade.MaxRows - 1 & ")"
+
+    '    grdTrade.ForeColor = System.Drawing.Color.Red
+    '    grdTrade.FontBold = True
+
+    '    grdTrade.Col = 7
+    '    grdTrade.Formula = "sum(g1:g" & grdTrade.MaxRows - 1 & ")"
+
+    '    grdTrade.ForeColor = System.Drawing.Color.Red
+    '    grdTrade.FontBold = True
+
+    '    grdTrade.Col = 8
+    '    'grdTrade.CellType = FPSpread.CellTypeConstants.CellTypeFloat
+    '    grdTrade.Formula = "sum(h1:h" & grdTrade.MaxRows - 1 & ")"
+
+    '    grdTrade.ForeColor = System.Drawing.Color.Red
+    '    grdTrade.FontBold = True
+
+    '    grdTrade.Col = 10
+    '    grdTrade.Formula = "sum(j1:j" & grdTrade.MaxRows - 1 & ")"
+
+    '    grdTrade.ForeColor = System.Drawing.Color.Red
+    '    grdTrade.FontBold = True
+
+    '    lblTradeInAmount.Text = Format(Val(GetText(grdTrade, grdTrade.MaxRows, 8)), "0.00")
+    '    lblBalanceAmount.Text = Format(Val(lblSalesAmount.Text) - Val(lblTradeInAmount.Text), "0.00")
+    'End Sub
+    Private Sub subTotal()
+        Try
+            If grdTrade.RowCount = 0 Then
+                Exit Sub
+            End If
+            If Not bEdited Then
+                'grdPurchase.MaxRows = grdPurchase.MaxRows + 1
+                grdTrade.Rows.Add()
+            End If
+
+
+
+            Call fnSetdgvText(grdTrade, grdTrade.RowCount - 1, 1, "TOTAL:")
+            Call fnSetdgvText(grdTrade, grdTrade.RowCount - 1, 2, Format(dWeightGrd, "0.00"))
+            Call fnSetdgvText(grdTrade, grdTrade.RowCount - 1, 3, Format(dGoldLossGrd, "0.00"))
+            Call fnSetdgvText(grdTrade, grdTrade.RowCount - 1, 7, Format(dTotalCostGrd, "0.00"))
+
+
+
+            Me.grdTrade.Rows(grdTrade.RowCount - 1).Cells(1).Style.ForeColor = Color.Red
+            Me.grdTrade.Rows(grdTrade.RowCount - 1).Cells(1).Style.Font = New Font(grdTrade.Font.FontFamily, 9, FontStyle.Bold)
+
+            Me.grdTrade.Rows(grdTrade.RowCount - 1).Cells(2).Style.ForeColor = Color.Red
+            Me.grdTrade.Rows(grdTrade.RowCount - 1).Cells(2).Style.Font = New Font(grdTrade.Font.FontFamily, 9, FontStyle.Bold)
+
+            Me.grdTrade.Rows(grdTrade.RowCount - 1).Cells(3).Style.ForeColor = Color.Red
+            Me.grdTrade.Rows(grdTrade.RowCount - 1).Cells(3).Style.Font = New Font(grdTrade.Font.FontFamily, 9, FontStyle.Bold)
+
+            Me.grdTrade.Rows(grdTrade.RowCount - 1).Cells(7).Style.ForeColor = Color.Red
+            Me.grdTrade.Rows(grdTrade.RowCount - 1).Cells(7).Style.Font = New Font(grdTrade.Font.FontFamily, 9, FontStyle.Bold)
+
+            lblTradeInAmount.Text = Format(Val(fnGetdgvText(grdTrade, grdTrade.RowCount - 1, 7)), "0.00")
+            lblBalanceAmount.Text = Format(Val(lblSalesAmount.Text) - Val(lblTradeInAmount.Text), "0.00")
+
+
+        Catch ex As Exception
+            MessageBox.Show(ex.Message, "GoldPOS")
+        Finally
+
+        End Try
+    End Sub
+
+    Private Sub subClearDetail()
+        On Error GoTo ErrorSub
+        bEdited = False
+        txtDescription.Text = ""
+        txtDiamondDescription.Text = ""
+        txtWeight.Text = ""
+        txtStoneWeight.Text = ""
+        txtGoldLoss.Text = ""
+        sItemNo = 0
+        txtTotalCost.Text = ""
+        If Val(txtCostPerGram.Text) <> 0 Then
+            txtCostPerGram1.Text = Val(txtCostPerGram.Text)
+        End If
+        Exit Sub
+ErrorSub:
+        Err.Clear()
+    End Sub
+    Private Function fncValidateTradeIn() As Boolean
+        If Trim(txtDescription.Text) = "" Then
+            MsgBox("Description Cannot be Blank ....")
+            txtDescription.Focus()
+            fncValidateTradeIn = False
+            Exit Function
+        End If
+
+        If IsNumeric(txtWeight.Text) = False Then
+            MsgBox("Weight is Invalid ....")
+            fncValidateTradeIn = False
+            txtWeight.Focus()
+            Exit Function
+        End If
+
+        If Val(txtWeight.Text) <= 0 Then
+            MsgBox("Weight is Invalid ....")
+            fncValidateTradeIn = False
+            txtWeight.Focus()
+            Exit Function
+        End If
+        If Trim(txtStoneWeight.Text) <> "" Then
+            If IsNumeric(txtStoneWeight.Text) = False Then
+                MsgBox("Stone Weight is Invalid ....")
+                fncValidateTradeIn = False
+                txtStoneWeight.Focus()
+                Exit Function
+            End If
+
+            If Val(txtStoneWeight.Text) < 0 Then
+                MsgBox("Stone Weight is Invalid ....")
+                fncValidateTradeIn = False
+                txtStoneWeight.Focus()
+                Exit Function
+            End If
+        End If
+        If Val(txtGoldLoss.Text) < 0 Then
+            MsgBox("Gold Loss is Invalid ....")
+            fncValidateTradeIn = False
+            txtGoldLoss.Focus()
+            Exit Function
+        End If
+
+        If IsNumeric(txtCostPerGram1.Text) = False Then
+            MsgBox("Cost/Gram is Invalid ....")
+            fncValidateTradeIn = False
+            txtCostPerGram1.Focus()
+            Exit Function
+        End If
+
+        If Val(txtCostPerGram1.Text) <= 0 Then
+            MsgBox("Cost Per Gram is Invalid ....")
+            fncValidateTradeIn = False
+            txtCostPerGram1.Focus()
+            Exit Function
+        End If
+        fncValidateTradeIn = True
+
+        Exit Function
+
+    End Function
+
+
+    Private Sub subAddGrid()
+        Dim i As Long
+        Dim dTotalCost As Double
+        Dim dCost As Double
+        Dim r As Integer
+        grdTrade.ForeColor = System.Drawing.Color.Black
+        ' grdTrade.FontBold = False
+
+
+        If Not bEdited Then
+            If grdTrade.RowCount = 0 Then
+                grdTrade.Rows.Add()
+            Else
+
+            End If
+            r = grdTrade.RowCount - 1
+        Else
+            r = grdTrade.CurrentRow.Index
+        End If
+
+        Me.grdTrade.Rows(grdTrade.RowCount - 1).Cells(1).Style.ForeColor = Color.Black
+        Me.grdTrade.Rows(grdTrade.RowCount - 1).Cells(1).Style.Font = New Font(grdTrade.Font.FontFamily, 8, FontStyle.Regular)
+
+        Me.grdTrade.Rows(grdTrade.RowCount - 1).Cells(2).Style.ForeColor = Color.Black
+        Me.grdTrade.Rows(grdTrade.RowCount - 1).Cells(2).Style.Font = New Font(grdTrade.Font.FontFamily, 8, FontStyle.Regular)
+
+        Me.grdTrade.Rows(grdTrade.RowCount - 1).Cells(3).Style.ForeColor = Color.Black
+        Me.grdTrade.Rows(grdTrade.RowCount - 1).Cells(3).Style.Font = New Font(grdTrade.Font.FontFamily, 8, FontStyle.Regular)
+
+        Me.grdTrade.Rows(grdTrade.RowCount - 1).Cells(7).Style.ForeColor = Color.Black
+        Me.grdTrade.Rows(grdTrade.RowCount - 1).Cells(7).Style.Font = New Font(grdTrade.Font.FontFamily, 8, FontStyle.Regular)
+
+        Call fnSetdgvText(grdTrade, r, 0, r)
+        Call fnSetdgvText(grdTrade, r, 1, Trim(txtDescription.Text))
+        Call fnSetdgvText(grdTrade, r, 2, Format(Val(txtWeight.Text), "0.00"))
+        Call fnSetdgvText(grdTrade, r, 3, Format(Val(txtGoldLoss.Text), "0.00"))
+        Call fnSetdgvText(grdTrade, r, 4, Format(Val(txtCostPerGram1.Text), "0.00"))
+        Dim sTotalCost As String
+        sTotalCost = Format(Val(txtTotalCost.Text), "#0.00")
+        dCost = Mid(sTotalCost, Len(sTotalCost) - 2, 3)
+        If dCost > 0 And dCost < 0.5 Then
+            dTotalCost = Math.Round(Val(txtTotalCost.Text)) - 1
+        ElseIf dCost >= 0.5 And dCost <= 0.99 Then
+            dTotalCost = Math.Round(Val(txtTotalCost.Text))
+        Else
+            dTotalCost = Val(txtTotalCost.Text)
+        End If
+
+        ' grdTrade.Col = 8
+        'grdTrade.CellType = FPSpread.CellTypeConstants.CellTypeFloat
+        Call fnSetdgvText(grdTrade, r, 7, Format(Val(dTotalCost), "0.00"))
+        Call fnSetdgvText(grdTrade, r, 8, Trim(txtDiamondDescription.Text))
+        Call fnSetdgvText(grdTrade, r, 9, Val(txtStoneWeight.Text))
+        'grdTrade.Row = grdTrade.MaxRows
+        'grdTrade.Col = 1
+        'grdTrade.Action = 0
+        subTotalFromGrid()
+        subTotal()
+        subClearDetail()
+    End Sub
+    Private Sub subGetCustomer()
+        On Error GoTo ErrorSub
+        Dim i As Long
+        Dim adoRS As DataSet
+        Dim SBll = New clsCustomer
+        adoRS = SBll.GetCustomerwithCode(Trim(txtCustomerCode.Text))
+        If adoRS.Tables(0).Rows.Count > 0 Then
+            txtCustomerName.Text = Trim(adoRS.Tables(0).Rows(0)("CustomerName") & "")
+            txtAddress1.Text = Trim(adoRS.Tables(0).Rows(0)("Address1") & "")
+            txtAddress2.Text = Trim(adoRS.Tables(0).Rows(0)("Address2") & "")
+            txtAddress3.Text = Trim(adoRS.Tables(0).Rows(0)("Address3") & "")
+            lblCustomerType.Text = Trim(adoRS.Tables(0).Rows(0)("CustomerType") & "")
+        End If
+        adoRS = Nothing
+        SBll = Nothing
+        Exit Sub
+ErrorSub:
+        Err.Clear()
+    End Sub
+
+    Private Sub subGetCostPerGram()
+        Dim adoRS As DataSet
+        Dim ssql As String
+        On Error GoTo ErrHandler
+        If sCompanyShortCode = "ES" Then
+            txtLossPerc.Text = 18
+        End If
+        ssql = "Select Rate from tblClass where ClassCode like '22%'"
+        'GetRecordset(gsConn, ssql, adoRS)
+        adoRS = dm.getDataSetWithSqlAdapter(ssql, "Table", "Table")
+        If adoRS.Tables(0).Rows.Count = 0 Then
+            ssql = "Select Rate from tblClass where ClassCode like '18K%'"
+            'GetRecordset(gsConn, ssql, adoRS)
+            adoRS = dm.getDataSetWithSqlAdapter(ssql, "Table", "Table")
+            If adoRS.Tables(0).Rows.Count = 0 Then
+                ssql = "Select Rate from tblClass"
+                'GetRecordset(gsConn, ssql, adoRS)
+                adoRS = dm.getDataSetWithSqlAdapter(ssql, "Table", "Table")
+                If adoRS.Tables(0).Rows.Count > 0 Then
+                    txtCostPerGram.Text = Val(adoRS.Tables(0).Rows(0)("Rate") & "")
+                    txtCostPerGram1.Text = Val(txtCostPerGram.Text) - (Val(txtCostPerGram.Text) * Val(txtLossPerc.Text) / 100)
+                End If
+            Else
+                txtCostPerGram.Text = Val(adoRS.Tables(0).Rows(0)("Rate") & "")
+                txtCostPerGram1.Text = Val(txtCostPerGram.Text) - (Val(txtCostPerGram.Text) * Val(txtLossPerc.Text) / 100)
+            End If
+        Else
+            txtCostPerGram.Text = Val(adoRS.Tables(0).Rows(0)("Rate") & "")
+            txtCostPerGram1.Text = Val(txtCostPerGram.Text) - (Val(txtCostPerGram.Text) * Val(txtLossPerc.Text) / 100)
+        End If
+        Exit Sub
+ErrHandler:
+        MsgBox(Err.Description)
+        Err.Clear()
+    End Sub
+
+
+    'Private Sub grdTrade_DblClick(ByVal sender As Object, ByVal e As AxFPSpread._DSpreadEvents_DblClickEvent)
+    '    If Trim(GetText(grdTrade, grdTrade.ActiveRow, 1)) <> "Total:" Then
+    '        bEdited = True
+    '        sItemNo = grdTrade.ActiveRow
+    '        txtDescription.Text = GetText(grdTrade, grdTrade.ActiveRow, 2)
+    '        txtDiamondDescription.Text = GetText(grdTrade, grdTrade.ActiveRow, 9)
+    '        txtWeight.Text = GetText(grdTrade, grdTrade.ActiveRow, 3)
+    '        txtStoneWeight.Text = GetText(grdTrade, grdTrade.ActiveRow, 10)
+    '        txtGoldLoss.Text = GetText(grdTrade, grdTrade.ActiveRow, 4)
+    '        txtCostPerGram1.Text = GetText(grdTrade, grdTrade.ActiveRow, 5)
+    '        txtTotalCost.Text = GetText(grdTrade, grdTrade.ActiveRow, 8)
+    '        Exit Sub
+    '    End If
+    'End Sub
+
+    Private Sub txtCustomerCode_Leave(ByVal sender As Object, ByVal e As System.EventArgs) Handles txtCustomerCode.Leave
+
+        Try
+
+            If UCase(txtCustomerCode.Text.Trim) = "CASH" Then
+                pnlMember.Visible = True
+                btnCustomerCodeSearch.Enabled = False
+                txtMemberCode.Visible = True
+                txtMemberCode.Text = ""
+                txtMemberCodeView.Clear()
+                txtMemberCodeView.Focus()
+            Else
+                pnlMember.Visible = False
+                btnCustomerCodeSearch.Enabled = True
+                txtMemberCode.Visible = False
+                txtMemberCode.Text = ""
+                txtMemberCodeView.Clear()
+                sCustomerCode = Trim(txtCustomerCode.Text)
+                subGetCustomer()
+            End If
+
+        Catch ex As Exception
+            MsgBox(ex.Message)
+
+        End Try
+    End Sub
+
+    Private Sub txtWeight_Leave(ByVal sender As Object, ByVal e As System.EventArgs) Handles txtWeight.Leave
+        If Val(txtWeight.Text) = 0 Then
+            ' txtWeight.SetFocus
+            Exit Sub
+        Else
+            dCost = (Val(txtWeight.Text) + Val(txtGoldLoss.Text)) * Val(txtCostPerGram1.Text) '+ Val(txtMC)
+            txtTotalCost.Text = Format(dCost, "0.00")
+        End If
+    End Sub
+
+    Private Sub txtLossPerc_TextChanged(ByVal sender As Object, ByVal e As System.EventArgs) Handles txtLossPerc.TextChanged
+        If Val(txtLossPerc.Text) And Val(txtLossPerc.Text) < 100 Then
+            txtCostPerGram1.Text = Val(txtCostPerGram.Text) - (Val(txtCostPerGram.Text) * Val(txtLossPerc.Text) / 100)
+        Else
+            MsgBox("Percwentage is more than 100 % !!!!", MsgBoxStyle.Exclamation)
+            txtLossPerc.Clear()
+            txtLossPerc.Focus()
+            Exit Sub
+        End If
+    End Sub
+
+    Private Sub txtGoldLoss_Leave(ByVal sender As Object, ByVal e As System.EventArgs) Handles txtGoldLoss.Leave
+        If Val(txtGoldLoss.Text) <> 0 Then
+            dCost = (Val(txtWeight.Text) + Val(txtGoldLoss.Text)) * Val(txtCostPerGram1.Text) '+ Val(txtMC)
+            txtTotalCost.Text = Format(dCost, "0.00")
+        End If
+    End Sub
+
+    Private Sub txtCostPerGram1_Leave(ByVal sender As Object, ByVal e As System.EventArgs) Handles txtCostPerGram1.Leave
+        If Val(txtCostPerGram1.Text) <> 0 Then
+            dCost = (Val(txtWeight.Text) + Val(txtGoldLoss.Text)) * Val(txtCostPerGram1.Text) '+ Val(txtMC)
+            txtTotalCost.Text = Format(dCost, "0.00")
+        End If
+    End Sub
+
+    Private Sub txtCostPerGram_Leave(ByVal sender As Object, ByVal e As System.EventArgs) Handles txtCostPerGram.Leave
+        If Val(txtCostPerGram.Text) <> 0 Then
+            txtCostPerGram1.Text = Val(txtCostPerGram.Text)
+        End If
+    End Sub
+
+    Private Sub frmTradeInOnly_Closed(ByVal sender As Object, ByVal e As System.EventArgs) Handles MyBase.Closed
+        If Not mbTransaction Then
+            If oTSalesConn.State = 1 Then oTSalesConn.RollbackTrans()
+        End If
+
+    End Sub
+
+    Private Sub frmTradeInOnly_Load(ByVal sender As Object, ByVal e As System.EventArgs) Handles MyBase.Load
+        Dim frmSalesInvoice As New frmGPOS
+        dNegBalance = False
+        grdTrade.RowCount = 0
+        sTradeInRefNo = ""
+        dTradeinAmount = 0.0
+        lblBalanceAmount.Text = 0.0
+        ChkTradeIn = False
+        lblTradeInLimit.Text = Format(dTradeinLimit, "0.00")
+        'subGridSetting(grdTrade)
+        PnlSalesManPwd.Visible = True
+        If PnlSalesManPwd.Enabled Then txtSalesManPWD.Focus()
+        bEdited = False
+        'lblSalesAmount.Text = Format(Val(sSalesAmount), "0.00")
+        subGetCostPerGram()
+        If Trim(sCompanyShortCode) = "RJ" Then
+            lbllastSalesManCap.Visible = True
+            lblLastBillAmountCap.Visible = True
+            lblLastBillNoCap.Visible = True
+            'lblNextInvoiceNoCap.Visible = True
+            'lblSManTotalCap.Visible = True
+            lblLastBillAmount.Visible = True
+            lblLastBillNo.Visible = True
+            lblLastSalesMan.Visible = True
+            'lblNextInvoiceNo.Visible = True
+            'lblSManTotal.Visible = True
+        Else
+            lbllastSalesManCap.Visible = False
+            lblLastBillAmountCap.Visible = False
+            lblLastBillNoCap.Visible = False
+            'lblNextInvoiceNoCap.Visible = True
+            'lblSManTotalCap.Visible = True
+            lblLastBillAmount.Visible = False
+            lblLastBillNo.Visible = False
+            lblLastSalesMan.Visible = False
+            'lblNextInvoiceNo.Visible = True
+            'lblSManTotal.Visible = True
+        End If
+    End Sub
+
+    Private Sub btnFClear_Click(ByVal sender As Object, ByVal e As System.EventArgs) Handles btnFClear.Click
+        subClearDetail()
+    End Sub
+
+    Private Sub btnAdd_GotFocus(ByVal sender As Object, ByVal e As System.EventArgs) Handles btnAdd.GotFocus
+        txtTotalCost.Text = (Val(txtWeight.Text) + Val(txtGoldLoss.Text)) * Val(txtCostPerGram1.Text) '+ Val(txtMC)
+    End Sub
+
+    Private Sub btnClose_Click(ByVal sender As Object, ByVal e As System.EventArgs) Handles btnClose.Click
+        'oTSalesConn.RollbackTrans()
+        Me.Close()
+    End Sub
+
+    Private Sub btnUpdate_Click(ByVal sender As Object, ByVal e As System.EventArgs) Handles btnUpdate.Click
+        Dim frmPayingmode As New frmPayingmode
+        bTradeinFlag = True
+
+        mbTransaction = False
+        If fncValidate() Then
+            dTradeinBalance = Val(lblBalanceAmount.Text)
+            sSalesType = "TradeIn"
+            nTotalNet = Format(Val(lblBalanceAmount.Text), "0.00")
+            If Not fncSaveTradeIn() Then
+                MsgBox("Transaction not saved")
+                oTSalesConn.RollbackTrans()
+            Else
+                MessageBox.Show("Please take note the Sales no " + sInvoiceNo)
+                subPrintBill(sInvoiceNo)
+                mbTransaction = True
+                subClearDetail()
+                Me.Close()
+            End If
+        End If
+    End Sub
+
+    Private Sub btnAdd_Click(ByVal sender As Object, ByVal e As System.EventArgs) Handles btnAdd.Click
+        If fncValidateTradeIn() Then
+            subAddGrid()
+            txtDescription.Focus()
+        End If
+    End Sub
+
+    Private Sub btnClear_Click(ByVal sender As Object, ByVal e As System.EventArgs) Handles btnClear.Click
+        subClearDetail()
+    End Sub
+
+    Private Sub btnDelete_Click(ByVal sender As Object, ByVal e As System.EventArgs) Handles btnDelete.Click
+        If bEdited Then
+            'grdTrade.Action = FPSpread.ActionConstants.ActionDeleteRow
+            'grdTrade.MaxRows = grdTrade.MaxRows - 1
+            'If grdTrade.MaxRows = 1 Then
+            '    grdTrade.MaxRows = 0
+            'Else
+            '    subTotal()
+            'End If
+            'subClearDetail()
+            grdTrade.Rows.RemoveAt(grdTrade.CurrentRow.Index)
+            If grdTrade.RowCount = 1 Then
+                grdTrade.RowCount = 0
+            Else
+                subTotalFromGrid()
+                subTotal()
+                'subGetJobSheetDetails()
+                btnClear_Click(Nothing, Nothing)
+            End If
+            'subClearCatalogue()
+            subClearDetail()
+        End If
+    End Sub
+
+    Private Sub frmTradeInOnly_KeyDown(ByVal sender As Object, ByVal e As System.Windows.Forms.KeyEventArgs) Handles MyBase.KeyDown
+        Select Case e.KeyCode
+            '''Case Keys.F6
+            '''    btnFClear_Click(sender, e)
+        Case Keys.F7
+                btnUpdate_Click(sender, e)
+            Case Keys.Escape
+                btnClose_Click(sender, e)
+            Case Keys.Return
+                SendKeys.Send("{Tab}")
+            Case Keys.Down
+                SendKeys.Send("{Tab}")
+            Case Keys.Up
+                SendKeys.Send("+{Tab}")
+            Case Keys.F6 'reprint               
+                subReprint()
+
+        End Select
+
+    End Sub
+
+
+
+    Private Sub btnCustomerCodeSearch_Click(ByVal sender As System.Object, ByVal e As System.EventArgs) Handles btnCustomerCodeSearch.Click
+        Try
+            Dim frmHelpCustomer As New frmHelpSearch(0, 0, "tblCustomer", "L", 4, "CustomerName", "", "CustomerCode", "CustomerCode", 80, "CustomerName", "CustomerName", 150, "Address1", "Address1", 90, "Address2", "Address2", 80)
+            frmHelpCustomer.ShowDialog()
+            txtCustomerCode.Text = frmHelpCustomer.Var1.Trim
+            txtCustomerName.Text = frmHelpCustomer.Var2.Trim
+            subGetCustomer()
+            sCustomerCode = Trim(txtCustomerCode.Text)
+        Catch ex As Exception
+            MessageBox.Show(ex.Message)
+        End Try
+    End Sub
+    Private Sub btnCustomerCodeSearch_LostFocus(ByVal sender As Object, ByVal e As System.EventArgs) Handles btnCustomerCodeSearch.LostFocus
+        Try
+            subGetCustomer()
+            sCustomerCode = Trim(txtCustomerCode.Text)
+        Catch ex As Exception
+            MessageBox.Show(ex.Message)
+        End Try
+    End Sub
+    Private Sub btnCustomerCodeSearch_KeyDown(ByVal sender As Object, ByVal e As System.Windows.Forms.KeyEventArgs) Handles btnCustomerCodeSearch.KeyDown
+        Try
+            If e.KeyCode = Keys.F1 Then btnCustomerCodeSearch_Click(sender, e)
+        Catch ex As Exception
+            MessageBox.Show(ex.Message)
+        End Try
+    End Sub
+    Private Function fncGetInvoiceNo() As Boolean
+        Dim dsComp As New DataSet
+        Dim dsInv As New DataSet
+        Try
+            dsComp = objComp.GetCompanyList()
+            If dsComp.Tables(0).Rows.Count > 0 Then
+                sCompanyCode = Trim(dsComp.Tables(0).Rows(0)("CompanyID") & "")
+                sLocationCode = gthisLocation
+                sTerminalCode = ""
+                sGSTType = Trim(dsComp.Tables(0).Rows(0)("GSTType") & "")
+                dGSTPerc = Val(dsComp.Tables(0).Rows(0)("GstPerc") & "")
+            Else
+                MsgBox("Locked")
+            End If
+
+            dsInv = objSales.GetUpdatePVNumber()
+            If dsInv.Tables(0).Rows.Count > 0 Then
+                sInvoiceNo = Trim(dsInv.Tables(0).Rows(0)("NextPVNo") & "")
+                txtInvoiceNo.Text = Trim(sInvoiceNo)
+                sinventorycode = "TI-" & Trim(sInvoiceNo)
+                fncGetInvoiceNo = True
+            Else
+                fncGetInvoiceNo = False
+            End If
+        Catch ex As Exception
+            MessageBox.Show(ex.Message)
+        Finally
+            dsComp = Nothing
+            dsInv = Nothing
+        End Try
+    End Function
+
+    Private Function fncPaymodeDetailSave(ByVal sInvoiceNo As String) As Boolean
+        Try
+            Dim bPayModeFlag As Boolean
+            Dim sDate As String
+            Dim objPaymode As New clsPayMode
+            Dim iCnt As Long
+            sDate = Format(ServerDate, "dd/MM/yyyy")
+            iRet = objPaymode.PayModeDetailSave(sInvoiceNo, sDate, "CASH", Val(lblBalanceAmount.Text), 0, "TradeIn", "TRADEIN")
+            If Not iRet Then
+                fncPaymodeDetailSave = False
+                Exit Function
+            End If
+            fncPaymodeDetailSave = True
+        Catch ex As Exception
+            MessageBox.Show(ex.Message)
+        End Try
+    End Function
+    Private Sub subPrintBill(ByVal sInvoiceNo As String)
+        Dim ReportTitle As String
+        Dim sSelection As String
+        Dim sSalesType$
+        Dim sReply As String
+        Dim dsSales As New DataSet
+        Dim frmrep As New frmReports
+        Dim CR As New ReportDocument
+        Dim j As Integer
+        Try
+            Cursor = Cursors.WaitCursor
+            sReply = MsgBox("Do you want to print Net Bill?", vbYesNoCancel + vbQuestion, "Print Option")
+            If sReply = vbYes Then
+
+                j = 1
+                For j = 1 To 2
+                    If UCase(sCompanyShortCode) = "ES" Then
+                        strpath = Application.StartupPath & "\Reports\rptTradeInGoldInvoice_ESP.rpt"
+                    ElseIf UCase(sCompanyShortCode) = "SSJ" Then
+                        strpath = Application.StartupPath & "\Reports\rptTradeInGoldInvoice_SSJ.rpt"
+                    ElseIf UCase(sCompanyShortCode) = "RJ" Then
+                        strpath = Application.StartupPath & "\Reports\rptTradeInGoldInvoice_RJ.rpt"
+                    ElseIf UCase(sCompanyShortCode) = "MJ" Then
+                        strpath = Application.StartupPath & "\Reports\rptTradeInGoldInvoice_MJ.rpt"
+                    End If
+
+                    CR.Load(strpath)
+                    ReportLogOnToServer(CR)
+                    CR.Refresh()
+                    frmrep.ReportViewer.ReportSource = CR
+                    sSelection = "{tblTradeInHeader.InvoiceNo} = " & fncFormatSQLText(Trim(sInvoiceNo))
+                    frmrep.ReportViewer.SelectionFormula = sSelection
+                    CR.DataDefinition.RecordSelectionFormula = sSelection
+                    'CR.PrintToPrinter(1, True, 0, 0)
+                    CR.DataDefinition.FormulaFields("CompAddress1").Text = fncFormatSQLText(CompName)
+                    CR.DataDefinition.FormulaFields("CompAddress2").Text = fncFormatSQLText(Address1 & " " & Address2 & " " & Country)
+                    CR.DataDefinition.FormulaFields("CompAddress3").Text = fncFormatSQLText(PhoneNo & " " & FaxNo)
+                    CR.DataDefinition.FormulaFields("Customer1").Text = fncFormatSQLText(txtCustomerName.Text)
+                    CR.DataDefinition.FormulaFields("Customer2").Text = fncFormatSQLText(txtAddress1.Text)
+                    CR.DataDefinition.FormulaFields("Customer3").Text = fncFormatSQLText(txtAddress2.Text)
+                    CR.DataDefinition.FormulaFields("Rate1").Text = fncFormatSQLText(s999)
+                    CR.DataDefinition.FormulaFields("Rate2").Text = fncFormatSQLText(s916)
+                    CR.DataDefinition.FormulaFields("Rate3").Text = fncFormatSQLText(s835)
+
+                    'frmrep.Show()
+                    'frmrep.ReportViewer.Visible = True
+                    'frmrep.ReportViewer.DisplayToolbar = True
+                    'frmrep.ReportViewer.CloseView(False)
+                    'frmrep.WindowState = FormWindowState.Maximized
+                    CR.PrintToPrinter(1, True, 0, 0)
+                    frmrep = Nothing
+                    frmrep = New frmReports
+                Next
+            End If
+
+            If sReply = vbNo Then
+                If UCase(sCompanyShortCode) = "ES" Then
+                    strpath = Application.StartupPath & "\Reports\rptTradeInGoldInvoice_ESP.rpt"
+                ElseIf UCase(sCompanyShortCode) = "GMT" Then
+                    strpath = Application.StartupPath & "\Reports\rptTradeInGoldInvoice_GMT.rpt"
+                End If
+                CR.Load(strpath)
+                ReportLogOnToServer(CR)
+                CR.Refresh()
+                frmrep.ReportViewer.ReportSource = CR
+                sSelection = "{tblTradeInHeader.InvoiceNo} = " & fncFormatSQLText(Trim(sInvoiceNo))
+                frmrep.ReportViewer.SelectionFormula = sSelection
+                CR.DataDefinition.FormulaFields("CompAddress1").Text = fncFormatSQLText(CompName)
+                CR.DataDefinition.FormulaFields("CompAddress2").Text = fncFormatSQLText(Address1 & " " & Address2 & " " & Country)
+                CR.DataDefinition.FormulaFields("CompAddress3").Text = fncFormatSQLText(PhoneNo & " " & FaxNo)
+                CR.DataDefinition.FormulaFields("Customer1").Text = fncFormatSQLText(txtCustomerName.Text)
+                CR.DataDefinition.FormulaFields("Customer2").Text = fncFormatSQLText(txtAddress1.Text)
+                CR.DataDefinition.FormulaFields("Customer3").Text = fncFormatSQLText(txtAddress2.Text)
+                CR.DataDefinition.FormulaFields("Rate1").Text = fncFormatSQLText(s999)
+                CR.DataDefinition.FormulaFields("Rate2").Text = fncFormatSQLText(s916)
+                CR.DataDefinition.FormulaFields("Rate3").Text = fncFormatSQLText(s835)
+
+                frmrep.Show()
+                frmrep.ReportViewer.Visible = True
+                frmrep.ReportViewer.DisplayToolbar = True
+                frmrep.ReportViewer.CloseView(False)
+                frmrep.WindowState = FormWindowState.Maximized
+                frmrep = Nothing
+                frmrep = New frmReports
+            End If
+
+            If sReply = vbCancel Then
+                Exit Sub
+            End If
+            If sReply = vbCancel Then
+                Exit Sub
+            End If
+
+        Catch ex As Exception
+            MessageBox.Show(ex.Message)
+        Finally
+            Cursor = Cursors.Default
+        End Try
+    End Sub
+    Private Sub subGetClassRate()
+        Dim objClassRate As New ClsClass
+        Dim dsClass As New DataSet
+        Dim i As Integer
+        Try
+            dsClass = objClassRate.GetClassRate()
+            If dsClass.Tables(0).Rows.Count > 0 Then
+                For i = 0 To dsClass.Tables(0).Rows.Count - 1
+                    If Trim(dsClass.Tables(0).Rows(i)("ClassCode") & "") = "22K" Then
+                        s916 = Format(Val(dsClass.Tables(0).Rows(i)("Rate") & ""), "#0.00")
+                    ElseIf Trim(dsClass.Tables(0).Rows(i)("ClassCode") & "") = "20KJ" Then
+                        s835 = Format(Val(dsClass.Tables(0).Rows(i)("Rate") & ""), "#0.00")
+                    ElseIf Trim(dsClass.Tables(0).Rows(i)("ClassCode") & "") = "24K" Then
+                        s999 = Format(Val(dsClass.Tables(0).Rows(i)("Rate") & ""), "#0.00")
+                    End If
+                Next i
+            End If
+        Catch ex As Exception
+            MessageBox.Show(ex.Message)
+        Finally
+            dsClass = Nothing
+        End Try
+    End Sub
+
+    Private Sub cmdReprint_Click(ByVal sender As System.Object, ByVal e As System.EventArgs) Handles cmdReprint.Click
+        subReprint()
+    End Sub
+    Private Sub subReprint()
+        Try
+            PnlReprint.Visible = True
+            txtRePrintBillNo.Text = ""
+            txtRePrintBillNo.Focus()
+        Catch ex As Exception
+            MessageBox.Show(ex.Message)
+        End Try
+    End Sub
+    Private Sub btnReprintOK_Click(ByVal sender As System.Object, ByVal e As System.EventArgs) Handles btnReprintOK.Click
+        Dim sDate As Date
+        Dim strDate As String
+        Dim dsInvoice As New DataSet
+        Try
+            If Trim(txtRePrintBillNo.Text) <> "" Then
+                Call subPrintBill(Trim(txtRePrintBillNo.Text))
+                PnlReprint.Visible = False
+                subClear()
+            Else
+                MessageBox.Show(" BillNo is not Correct!...")
+                PnlReprint.Visible = False
+                subClear()
+            End If
+
+        Catch ex As Exception
+            MessageBox.Show(ex.Message)
+        End Try
+    End Sub
+
+    Private Sub btnReprintCancel_Click(ByVal sender As System.Object, ByVal e As System.EventArgs) Handles btnReprintCancel.Click
+        Try
+            txtRePrintBillNo.Text = ""
+            PnlReprint.Visible = False
+        Catch ex As Exception
+            MessageBox.Show(ex.Message)
+        End Try
+    End Sub
+
+    Private Sub btnNew_Click(ByVal sender As System.Object, ByVal e As System.EventArgs) Handles btnNew.Click
+        sMemberCode = ""
+        Dim frmMem As New frmMember
+        frmMem.ShowDialog()
+        txtMemberCodeView.Text = sMemberCode.Trim
+        btnOK.Focus()
+        frmMem = Nothing
+
+
+    End Sub
+
+    Private Sub btnCancel_Click(ByVal sender As System.Object, ByVal e As System.EventArgs) Handles btnCancel.Click
+        pnlMember.Visible = False
+        btnCustomerCodeSearch.Enabled = True
+        txtCustomerCode.Focus()
+
+    End Sub
+
+    Private Sub btnOK_Click(ByVal sender As System.Object, ByVal e As System.EventArgs) Handles btnOK.Click
+        Dim ds As New DataSet
+        Try
+            If txtMemberCodeView.Text.Trim <> "" Then
+                ds = objMember.SubGetMemberCode(Trim(txtMemberCodeView.Text))
+                If ds.Tables(0).Rows.Count > 0 Then
+                    txtMemberCode.Text = Trim(ds.Tables(0).Rows(0)("MemberCode") & "")
+                    txtCustomerName.Text = Trim(ds.Tables(0).Rows(0)("MemberName") & "")
+                    lblCustomerType.Text = Trim(ds.Tables(0).Rows(0)("MemberType") & "")
+                    txtAddress1.Text = Trim(ds.Tables(0).Rows(0)("Address1") & "")
+                    txtAddress2.Text = Trim(ds.Tables(0).Rows(0)("Address2") & "")
+                    txtAddress3.Text = Trim(ds.Tables(0).Rows(0)("Address3") & "")
+                    pnlMember.Visible = False
+                    btnCustomerCodeSearch.Enabled = False
+                    txtCustomerName.Focus()
+                Else
+                    MsgBox("No such Member ! ", MsgBoxStyle.Critical)
+                    txtMemberCode.Text = ""
+                    txtCustomerName.Text = ""
+                    lblCustomerType.Text = ""
+                    txtAddress1.Text = ""
+                    txtAddress2.Text = ""
+                    txtAddress3.Text = ""
+                    txtMemberCodeView.Text = ""
+                    pnlMember.Visible = False
+                    btnCustomerCodeSearch.Enabled = True
+                    txtCustomerCode.Focus()
+
+                End If
+            Else
+                pnlMember.Visible = False
+                btnCustomerCodeSearch.Enabled = True
+                txtCustomerCode.Focus()
+            End If
+        Catch ex As Exception
+            MsgBox(ex.Message)
+        Finally
+            ds = Nothing
+        End Try
+
+    End Sub
+
+    Private Sub btnMemberSearch_Click(ByVal sender As System.Object, ByVal e As System.EventArgs) Handles btnMemberSearch.Click
+        Try
+            Dim frmHelpCustomer As New frmHelpSearch(0, 0, "tblMember", "L", 4, "MemberName", "", "MemberCode", "MemberCode", 80, "MemberName", "MemberName", 150, "Address1", "Address1", 90, "Address2", "Address2", 80)
+            frmHelpCustomer.ShowDialog()
+            txtMemberCodeView.Text = frmHelpCustomer.Var1.Trim
+            btnOK.Focus()
+        Catch ex As Exception
+            MessageBox.Show(ex.Message)
+        End Try
+    End Sub
+
+    
+    Private Sub btnNewCustomer_Click(ByVal sender As System.Object, ByVal e As System.EventArgs) Handles btnNewCustomer.Click
+        Dim frmCust As New frmCustomer
+        frmCust.ShowDialog()
+        frmCust = Nothing
+
+    End Sub
+
+  
+
+    Private Sub txtSalesManPWD_LostFocus(ByVal sender As Object, ByVal e As System.EventArgs) Handles txtSalesManPWD.LostFocus
+
+        Try
+            If txtSalesManPWD.Text.Trim <> "" Then
+                subGetPassword()
+            Else
+                Me.Close()
+            End If
+        Catch ex As Exception
+            MessageBox.Show(ex.Message, "GoldPOS")
+        End Try
+    End Sub
+    Private Sub subGetPassword()
+        Dim i As Long
+        Dim Ds As DataSet
+        Dim objSalesMan As New clsSalesMan
+        Try
+
+            Ds = objSalesMan.GetSalesManwithPassword(txtSalesManPWD.Text.Trim)
+            If Ds.Tables("Salesman").Rows.Count > 0 Then
+                msSalesManCode = Trim(Ds.Tables("Salesman").Rows(0)("SalesmanCode") & "")
+                'txtSalesMan.Text = Trim(Ds.Tables("Salesman").Rows(0)("SalesManName") & "")
+                If Trim(sCompanyShortCode) = "RJ" Then
+                    lblLastSalesMan.Text = Trim(Ds.Tables(0).Rows(0)("SalesManName") & "")
+                    lblLastBillNo.Text = Trim(Ds.Tables(0).Rows(0)("TradeInNo") & "")
+                    lblLastBillAmount.Text = Trim(Ds.Tables(0).Rows(0)("LastTradeInAmount") & "")
+                End If
+
+            Else
+                MsgBox("SalesMan Password is Incorrect!", MsgBoxStyle.Critical)
+                txtSalesManPWD.Text = ""
+                txtSalesManPWD.Focus()
+                Exit Sub
+            End If
+            PnlSalesManPwd.Visible = False
+        Catch ex As Exception
+            MessageBox.Show(ex.Message, "GoldPOS")
+        End Try
+    End Sub
+    Private Sub txtTotalCost_Leave(ByVal sender As Object, ByVal e As System.EventArgs) Handles txtTotalCost.Leave
+        Dim dCostPerGram As Double
+        If Val(txtTotalCost.Text) <> 0 Then
+            dCost = Val(txtTotalCost.Text)
+            dCostPerGram = dCost / (Val(txtWeight.Text) + Val(txtGoldLoss.Text))
+            txtCostPerGram1.Text = dCostPerGram
+            txtTotalCost.Text = Format(dCost, "0.00")
+        End If
+    End Sub
+
+    Private Sub Label34_Click(ByVal sender As System.Object, ByVal e As System.EventArgs) Handles lblLastBillNoCap.Click
+
+    End Sub
+
+    Private Sub lblNextInvoiceNoCap_Click(ByVal sender As System.Object, ByVal e As System.EventArgs)
+
+    End Sub
+
+    Private Sub lbllastSales_Click(ByVal sender As System.Object, ByVal e As System.EventArgs) Handles lbllastSalesManCap.Click
+
+    End Sub
+
+    Private Sub lblLastSalesMan_Click(ByVal sender As System.Object, ByVal e As System.EventArgs) Handles lblLastSalesMan.Click
+
+    End Sub
+
+    Private Sub grdTrade_CellClick(sender As Object, e As System.Windows.Forms.DataGridViewCellEventArgs) Handles grdTrade.CellClick
+        If Trim(fnGetdgvText(grdTrade, grdTrade.CurrentRow.Index, 1)) <> "TOTAL:" Then
+            bEdited = True
+            sItemNo = grdTrade.CurrentRow.Index
+            txtDescription.Text = fnGetdgvText(grdTrade, grdTrade.CurrentRow.Index, 1)
+            txtDiamondDescription.Text = fnGetdgvText(grdTrade, grdTrade.CurrentRow.Index, 8)
+            txtWeight.Text = fnGetdgvText(grdTrade, grdTrade.CurrentRow.Index, 2)
+            txtStoneWeight.Text = fnGetdgvText(grdTrade, grdTrade.CurrentRow.Index, 9)
+            txtGoldLoss.Text = fnGetdgvText(grdTrade, grdTrade.CurrentRow.Index, 3)
+            txtCostPerGram1.Text = fnGetdgvText(grdTrade, grdTrade.CurrentRow.Index, 4)
+            txtTotalCost.Text = fnGetdgvText(grdTrade, grdTrade.CurrentRow.Index, 7)
+            Exit Sub
+        End If
+    End Sub
+
+    Private Sub txtCustomerCode_TextChanged(ByVal sender As System.Object, ByVal e As System.EventArgs) Handles txtCustomerCode.TextChanged
+
+    End Sub
+
+    Private Sub txtInvoiceNo_TextChanged(ByVal sender As System.Object, ByVal e As System.EventArgs) Handles txtInvoiceNo.TextChanged
+
+    End Sub
+End Class

@@ -1,0 +1,74 @@
+[
+  {
+    "COLUMN_NAME": "LocationCode",
+    "DATA_TYPE": "char"
+  },
+  {
+    "COLUMN_NAME": "LocationName",
+    "DATA_TYPE": "varchar"
+  },
+  {
+    "COLUMN_NAME": "LocationType",
+    "DATA_TYPE": "char"
+  },
+  {
+    "COLUMN_NAME": "Address1",
+    "DATA_TYPE": "varchar"
+  },
+  {
+    "COLUMN_NAME": "Address2",
+    "DATA_TYPE": "varchar"
+  },
+  {
+    "COLUMN_NAME": "Address3",
+    "DATA_TYPE": "varchar"
+  },
+  {
+    "COLUMN_NAME": "Address4",
+    "DATA_TYPE": "varchar"
+  },
+  {
+    "COLUMN_NAME": "Phone",
+    "DATA_TYPE": "char"
+  },
+  {
+    "COLUMN_NAME": "Fax",
+    "DATA_TYPE": "char"
+  },
+  {
+    "COLUMN_NAME": "PersonIncharge",
+    "DATA_TYPE": "varchar"
+  },
+  {
+    "COLUMN_NAME": "SortCode",
+    "DATA_TYPE": "smallint"
+  },
+  {
+    "COLUMN_NAME": "EODDate",
+    "DATA_TYPE": "datetime"
+  },
+  {
+    "COLUMN_NAME": "EODUser",
+    "DATA_TYPE": "char"
+  },
+  {
+    "COLUMN_NAME": "CreateUser",
+    "DATA_TYPE": "char"
+  },
+  {
+    "COLUMN_NAME": "CreateDate",
+    "DATA_TYPE": "smalldatetime"
+  },
+  {
+    "COLUMN_NAME": "ModifyUser",
+    "DATA_TYPE": "char"
+  },
+  {
+    "COLUMN_NAME": "ModifyDate",
+    "DATA_TYPE": "smalldatetime"
+  },
+  {
+    "COLUMN_NAME": "LastEODDateToHQ",
+    "DATA_TYPE": "smalldatetime"
+  }
+]

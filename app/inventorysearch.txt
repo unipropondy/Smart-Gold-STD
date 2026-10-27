@@ -1,0 +1,537 @@
+<Global.Microsoft.VisualBasic.CompilerServices.DesignerGenerated()> _
+Partial Class frmInventorySearch
+    Inherits System.Windows.Forms.Form
+
+    'Form overrides dispose to clean up the component list.
+    <System.Diagnostics.DebuggerNonUserCode()> _
+    Protected Overrides Sub Dispose(ByVal disposing As Boolean)
+        Try
+            If disposing AndAlso components IsNot Nothing Then
+                components.Dispose()
+            End If
+        Finally
+            MyBase.Dispose(disposing)
+        End Try
+    End Sub
+
+    'Required by the Windows Form Designer
+    Private components As System.ComponentModel.IContainer
+
+    'NOTE: The following procedure is required by the Windows Form Designer
+    'It can be modified using the Windows Form Designer.  
+    'Do not modify it using the code editor.
+    <System.Diagnostics.DebuggerStepThrough()> _
+    Private Sub InitializeComponent()
+        Dim DataGridViewCellStyle1 As System.Windows.Forms.DataGridViewCellStyle = New System.Windows.Forms.DataGridViewCellStyle()
+        Dim resources As System.ComponentModel.ComponentResourceManager = New System.ComponentModel.ComponentResourceManager(GetType(frmInventorySearch))
+        Me.grpSearch = New System.Windows.Forms.GroupBox()
+        Me.txtInventoryCode = New System.Windows.Forms.TextBox()
+        Me.Label2 = New System.Windows.Forms.Label()
+        Me.txtToWeight = New System.Windows.Forms.TextBox()
+        Me.Label1 = New System.Windows.Forms.Label()
+        Me.txtFromWeight = New System.Windows.Forms.TextBox()
+        Me.Label4 = New System.Windows.Forms.Label()
+        Me.btnFetch = New System.Windows.Forms.Button()
+        Me.Label12 = New System.Windows.Forms.Label()
+        Me.txtCatalogue = New System.Windows.Forms.TextBox()
+        Me.Label11 = New System.Windows.Forms.Label()
+        Me.txtCategory = New System.Windows.Forms.TextBox()
+        Me.btnCatagorySearch = New System.Windows.Forms.Button()
+        Me.btnCatalogueSearch = New System.Windows.Forms.Button()
+        Me.grdCatalogue = New System.Windows.Forms.DataGridView()
+        Me.cLocationCode = New System.Windows.Forms.DataGridViewTextBoxColumn()
+        Me.cInventoryCode = New System.Windows.Forms.DataGridViewTextBoxColumn()
+        Me.cDescription = New System.Windows.Forms.DataGridViewTextBoxColumn()
+        Me.cWeight = New System.Windows.Forms.DataGridViewTextBoxColumn()
+        Me.cSizeCode = New System.Windows.Forms.DataGridViewTextBoxColumn()
+        Me.cSizeType = New System.Windows.Forms.DataGridViewTextBoxColumn()
+        Me.cStatus = New System.Windows.Forms.DataGridViewTextBoxColumn()
+        Me.btnClose = New System.Windows.Forms.Button()
+        Me.btnPrint = New System.Windows.Forms.Button()
+        Me.btnClear = New System.Windows.Forms.Button()
+        Me.grpSearch.SuspendLayout()
+        CType(Me.grdCatalogue, System.ComponentModel.ISupportInitialize).BeginInit()
+        Me.SuspendLayout()
+        '
+        'grpSearch
+        '
+        Me.grpSearch.Controls.Add(Me.txtInventoryCode)
+        Me.grpSearch.Controls.Add(Me.Label2)
+        Me.grpSearch.Controls.Add(Me.txtToWeight)
+        Me.grpSearch.Controls.Add(Me.Label1)
+        Me.grpSearch.Controls.Add(Me.txtFromWeight)
+        Me.grpSearch.Controls.Add(Me.Label4)
+        Me.grpSearch.Controls.Add(Me.btnFetch)
+        Me.grpSearch.Controls.Add(Me.Label12)
+        Me.grpSearch.Controls.Add(Me.txtCatalogue)
+        Me.grpSearch.Controls.Add(Me.Label11)
+        Me.grpSearch.Controls.Add(Me.txtCategory)
+        Me.grpSearch.Controls.Add(Me.btnCatagorySearch)
+        Me.grpSearch.Controls.Add(Me.btnCatalogueSearch)
+        Me.grpSearch.Location = New System.Drawing.Point(12, 12)
+        Me.grpSearch.Name = "grpSearch"
+        Me.grpSearch.Size = New System.Drawing.Size(773, 92)
+        Me.grpSearch.TabIndex = 494
+        Me.grpSearch.TabStop = False
+        '
+        'txtInventoryCode
+        '
+        Me.txtInventoryCode.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle
+        Me.txtInventoryCode.Font = New System.Drawing.Font("Arial", 8.25!, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, CType(0, Byte))
+        Me.txtInventoryCode.Location = New System.Drawing.Point(75, 53)
+        Me.txtInventoryCode.MaxLength = 50
+        Me.txtInventoryCode.Name = "txtInventoryCode"
+        Me.txtInventoryCode.Size = New System.Drawing.Size(121, 20)
+        Me.txtInventoryCode.TabIndex = 519
+        Me.txtInventoryCode.Tag = "NE;"
+        '
+        'Label2
+        '
+        Me.Label2.Font = New System.Drawing.Font("Arial", 8.25!, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, CType(0, Byte))
+        Me.Label2.Location = New System.Drawing.Point(9, 52)
+        Me.Label2.Name = "Label2"
+        Me.Label2.Size = New System.Drawing.Size(60, 34)
+        Me.Label2.TabIndex = 520
+        Me.Label2.Text = "Inventory Code"
+        '
+        'txtToWeight
+        '
+        Me.txtToWeight.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle
+        Me.txtToWeight.Font = New System.Drawing.Font("Arial", 8.25!, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, CType(0, Byte))
+        Me.txtToWeight.Location = New System.Drawing.Point(660, 23)
+        Me.txtToWeight.MaxLength = 50
+        Me.txtToWeight.Name = "txtToWeight"
+        Me.txtToWeight.Size = New System.Drawing.Size(57, 20)
+        Me.txtToWeight.TabIndex = 517
+        Me.txtToWeight.Tag = "NE;"
+        '
+        'Label1
+        '
+        Me.Label1.Font = New System.Drawing.Font("Arial", 8.25!, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, CType(0, Byte))
+        Me.Label1.Location = New System.Drawing.Point(598, 22)
+        Me.Label1.Name = "Label1"
+        Me.Label1.Size = New System.Drawing.Size(56, 34)
+        Me.Label1.TabIndex = 518
+        Me.Label1.Text = "To Weight"
+        '
+        'txtFromWeight
+        '
+        Me.txtFromWeight.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle
+        Me.txtFromWeight.Font = New System.Drawing.Font("Arial", 8.25!, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, CType(0, Byte))
+        Me.txtFromWeight.Location = New System.Drawing.Point(512, 23)
+        Me.txtFromWeight.MaxLength = 50
+        Me.txtFromWeight.Name = "txtFromWeight"
+        Me.txtFromWeight.Size = New System.Drawing.Size(57, 20)
+        Me.txtFromWeight.TabIndex = 515
+        Me.txtFromWeight.Tag = "NE;"
+        '
+        'Label4
+        '
+        Me.Label4.Font = New System.Drawing.Font("Arial", 8.25!, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, CType(0, Byte))
+        Me.Label4.Location = New System.Drawing.Point(453, 22)
+        Me.Label4.Name = "Label4"
+        Me.Label4.Size = New System.Drawing.Size(56, 34)
+        Me.Label4.TabIndex = 516
+        Me.Label4.Text = "From Weight"
+        '
+        'btnFetch
+        '
+        Me.btnFetch.BackColor = System.Drawing.Color.FromArgb(CType(CType(255, Byte), Integer), CType(CType(189, Byte), Integer), CType(CType(0, Byte), Integer))
+        Me.btnFetch.Font = New System.Drawing.Font("Arial", 9.0!, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, CType(0, Byte))
+        Me.btnFetch.Location = New System.Drawing.Point(660, 53)
+        Me.btnFetch.Name = "btnFetch"
+        Me.btnFetch.Size = New System.Drawing.Size(75, 33)
+        Me.btnFetch.TabIndex = 494
+        Me.btnFetch.Text = "Fetch"
+        Me.btnFetch.UseVisualStyleBackColor = False
+        '
+        'Label12
+        '
+        Me.Label12.AutoSize = True
+        Me.Label12.Font = New System.Drawing.Font("Tahoma", 8.25!, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, CType(0, Byte))
+        Me.Label12.ForeColor = System.Drawing.SystemColors.WindowText
+        Me.Label12.Location = New System.Drawing.Point(202, 23)
+        Me.Label12.Name = "Label12"
+        Me.Label12.Size = New System.Drawing.Size(64, 13)
+        Me.Label12.TabIndex = 509
+        Me.Label12.Text = "Catalogue"
+        Me.Label12.TextAlign = System.Drawing.ContentAlignment.MiddleLeft
+        '
+        'txtCatalogue
+        '
+        Me.txtCatalogue.BackColor = System.Drawing.SystemColors.Window
+        Me.txtCatalogue.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle
+        Me.txtCatalogue.CharacterCasing = System.Windows.Forms.CharacterCasing.Upper
+        Me.txtCatalogue.Font = New System.Drawing.Font("Tahoma", 8.25!, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, CType(0, Byte))
+        Me.txtCatalogue.ForeColor = System.Drawing.SystemColors.ControlText
+        Me.txtCatalogue.Location = New System.Drawing.Point(294, 20)
+        Me.txtCatalogue.MaxLength = 20
+        Me.txtCatalogue.Name = "txtCatalogue"
+        Me.txtCatalogue.Size = New System.Drawing.Size(130, 21)
+        Me.txtCatalogue.TabIndex = 510
+        '
+        'Label11
+        '
+        Me.Label11.AutoSize = True
+        Me.Label11.Font = New System.Drawing.Font("Tahoma", 8.25!, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, CType(0, Byte))
+        Me.Label11.ForeColor = System.Drawing.SystemColors.WindowText
+        Me.Label11.Location = New System.Drawing.Point(6, 21)
+        Me.Label11.Name = "Label11"
+        Me.Label11.Size = New System.Drawing.Size(59, 13)
+        Me.Label11.TabIndex = 511
+        Me.Label11.Text = "Catagory"
+        Me.Label11.TextAlign = System.Drawing.ContentAlignment.MiddleLeft
+        '
+        'txtCategory
+        '
+        Me.txtCategory.BackColor = System.Drawing.SystemColors.Window
+        Me.txtCategory.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle
+        Me.txtCategory.CharacterCasing = System.Windows.Forms.CharacterCasing.Upper
+        Me.txtCategory.Font = New System.Drawing.Font("Tahoma", 8.25!, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, CType(0, Byte))
+        Me.txtCategory.ForeColor = System.Drawing.SystemColors.ControlText
+        Me.txtCategory.Location = New System.Drawing.Point(75, 19)
+        Me.txtCategory.MaxLength = 20
+        Me.txtCategory.Name = "txtCategory"
+        Me.txtCategory.Size = New System.Drawing.Size(96, 21)
+        Me.txtCategory.TabIndex = 512
+        '
+        'btnCatagorySearch
+        '
+        Me.btnCatagorySearch.BackColor = System.Drawing.Color.FromArgb(CType(CType(255, Byte), Integer), CType(CType(189, Byte), Integer), CType(CType(0, Byte), Integer))
+        Me.btnCatagorySearch.FlatStyle = System.Windows.Forms.FlatStyle.Flat
+        Me.btnCatagorySearch.Font = New System.Drawing.Font("Arial", 8.25!, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, CType(0, Byte))
+        Me.btnCatagorySearch.ForeColor = System.Drawing.Color.Black
+        Me.btnCatagorySearch.Location = New System.Drawing.Point(170, 19)
+        Me.btnCatagorySearch.Name = "btnCatagorySearch"
+        Me.btnCatagorySearch.Size = New System.Drawing.Size(26, 21)
+        Me.btnCatagorySearch.TabIndex = 513
+        Me.btnCatagorySearch.Text = "..."
+        Me.btnCatagorySearch.UseVisualStyleBackColor = False
+        '
+        'btnCatalogueSearch
+        '
+        Me.btnCatalogueSearch.BackColor = System.Drawing.Color.FromArgb(CType(CType(255, Byte), Integer), CType(CType(189, Byte), Integer), CType(CType(0, Byte), Integer))
+        Me.btnCatalogueSearch.FlatStyle = System.Windows.Forms.FlatStyle.Flat
+        Me.btnCatalogueSearch.Font = New System.Drawing.Font("Arial", 8.25!, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, CType(0, Byte))
+        Me.btnCatalogueSearch.ForeColor = System.Drawing.Color.Black
+        Me.btnCatalogueSearch.Location = New System.Drawing.Point(423, 20)
+        Me.btnCatalogueSearch.Name = "btnCatalogueSearch"
+        Me.btnCatalogueSearch.Size = New System.Drawing.Size(24, 21)
+        Me.btnCatalogueSearch.TabIndex = 514
+        Me.btnCatalogueSearch.Text = "..."
+        Me.btnCatalogueSearch.UseVisualStyleBackColor = False
+        '
+        'grdCatalogue
+        '
+        Me.grdCatalogue.AllowUserToAddRows = False
+        Me.grdCatalogue.AllowUserToDeleteRows = False
+        Me.grdCatalogue.AllowUserToResizeColumns = False
+        Me.grdCatalogue.AllowUserToResizeRows = False
+        Me.grdCatalogue.BackgroundColor = System.Drawing.Color.White
+        DataGridViewCellStyle1.Alignment = System.Windows.Forms.DataGridViewContentAlignment.MiddleLeft
+        DataGridViewCellStyle1.BackColor = System.Drawing.Color.FromArgb(CType(CType(255, Byte), Integer), CType(CType(189, Byte), Integer), CType(CType(0, Byte), Integer))
+        DataGridViewCellStyle1.Font = New System.Drawing.Font("Verdana", 8.25!, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, CType(0, Byte))
+        DataGridViewCellStyle1.ForeColor = System.Drawing.SystemColors.WindowText
+        DataGridViewCellStyle1.SelectionBackColor = System.Drawing.SystemColors.Highlight
+        DataGridViewCellStyle1.SelectionForeColor = System.Drawing.SystemColors.HighlightText
+        DataGridViewCellStyle1.WrapMode = System.Windows.Forms.DataGridViewTriState.[True]
+        Me.grdCatalogue.ColumnHeadersDefaultCellStyle = DataGridViewCellStyle1
+        Me.grdCatalogue.ColumnHeadersHeightSizeMode = System.Windows.Forms.DataGridViewColumnHeadersHeightSizeMode.DisableResizing
+        Me.grdCatalogue.Columns.AddRange(New System.Windows.Forms.DataGridViewColumn() {Me.cLocationCode, Me.cInventoryCode, Me.cDescription, Me.cWeight, Me.cSizeCode, Me.cSizeType, Me.cStatus})
+        Me.grdCatalogue.EditMode = System.Windows.Forms.DataGridViewEditMode.EditOnEnter
+        Me.grdCatalogue.Location = New System.Drawing.Point(12, 110)
+        Me.grdCatalogue.Name = "grdCatalogue"
+        Me.grdCatalogue.RowHeadersVisible = False
+        Me.grdCatalogue.Size = New System.Drawing.Size(773, 451)
+        Me.grdCatalogue.TabIndex = 495
+        '
+        'cLocationCode
+        '
+        Me.cLocationCode.HeaderText = "LocationCode"
+        Me.cLocationCode.Name = "cLocationCode"
+        '
+        'cInventoryCode
+        '
+        Me.cInventoryCode.HeaderText = "InventoryCode"
+        Me.cInventoryCode.Name = "cInventoryCode"
+        Me.cInventoryCode.Width = 110
+        '
+        'cDescription
+        '
+        Me.cDescription.HeaderText = "Description"
+        Me.cDescription.Name = "cDescription"
+        Me.cDescription.Width = 220
+        '
+        'cWeight
+        '
+        Me.cWeight.HeaderText = "Weight"
+        Me.cWeight.Name = "cWeight"
+        Me.cWeight.Width = 80
+        '
+        'cSizeCode
+        '
+        Me.cSizeCode.HeaderText = "SizeCode"
+        Me.cSizeCode.Name = "cSizeCode"
+        Me.cSizeCode.Width = 80
+        '
+        'cSizeType
+        '
+        Me.cSizeType.HeaderText = "SizeType"
+        Me.cSizeType.Name = "cSizeType"
+        '
+        'cStatus
+        '
+        Me.cStatus.HeaderText = "Status"
+        Me.cStatus.Name = "cStatus"
+        '
+        'btnClose
+        '
+        Me.btnClose.BackColor = System.Drawing.Color.FromArgb(CType(CType(255, Byte), Integer), CType(CType(189, Byte), Integer), CType(CType(0, Byte), Integer))
+        Me.btnClose.DialogResult = System.Windows.Forms.DialogResult.Cancel
+        Me.btnClose.Font = New System.Drawing.Font("Verdana", 9.0!, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, CType(0, Byte))
+        Me.btnClose.Location = New System.Drawing.Point(685, 574)
+        Me.btnClose.Name = "btnClose"
+        Me.btnClose.Size = New System.Drawing.Size(100, 40)
+        Me.btnClose.TabIndex = 498
+        Me.btnClose.Text = "Close(Esc)"
+        Me.btnClose.UseVisualStyleBackColor = False
+        '
+        'btnPrint
+        '
+        Me.btnPrint.BackColor = System.Drawing.Color.FromArgb(CType(CType(255, Byte), Integer), CType(CType(189, Byte), Integer), CType(CType(0, Byte), Integer))
+        Me.btnPrint.Font = New System.Drawing.Font("Verdana", 9.0!, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, CType(0, Byte))
+        Me.btnPrint.Location = New System.Drawing.Point(468, 574)
+        Me.btnPrint.Name = "btnPrint"
+        Me.btnPrint.Size = New System.Drawing.Size(100, 40)
+        Me.btnPrint.TabIndex = 555
+        Me.btnPrint.Text = "Print (F8)"
+        Me.btnPrint.UseVisualStyleBackColor = False
+        '
+        'btnClear
+        '
+        Me.btnClear.BackColor = System.Drawing.Color.FromArgb(CType(CType(255, Byte), Integer), CType(CType(189, Byte), Integer), CType(CType(0, Byte), Integer))
+        Me.btnClear.Font = New System.Drawing.Font("Verdana", 9.0!, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, CType(0, Byte))
+        Me.btnClear.Location = New System.Drawing.Point(579, 574)
+        Me.btnClear.Name = "btnClear"
+        Me.btnClear.Size = New System.Drawing.Size(100, 40)
+        Me.btnClear.TabIndex = 556
+        Me.btnClear.Text = "Clear (F6)"
+        Me.btnClear.UseVisualStyleBackColor = False
+        '
+        'frmInventorySearch
+        '
+        Me.AutoScaleDimensions = New System.Drawing.SizeF(6.0!, 13.0!)
+        Me.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font
+        Me.BackColor = System.Drawing.SystemColors.Window
+        Me.ClientSize = New System.Drawing.Size(800, 626)
+        Me.Controls.Add(Me.btnClear)
+        Me.Controls.Add(Me.btnPrint)
+        Me.Controls.Add(Me.btnClose)
+        Me.Controls.Add(Me.grdCatalogue)
+        Me.Controls.Add(Me.grpSearch)
+        Me.Icon = CType(resources.GetObject("$this.Icon"), System.Drawing.Icon)
+        Me.Name = "frmInventorySearch"
+        Me.StartPosition = System.Windows.Forms.FormStartPosition.CenterScreen
+        Me.Text = "Inventory Search"
+        Me.grpSearch.ResumeLayout(False)
+        Me.grpSearch.PerformLayout()
+        CType(Me.grdCatalogue, System.ComponentModel.ISupportInitialize).EndInit()
+        Me.ResumeLayout(False)
+
+    End Sub
+    Friend WithEvents grpSearch As System.Windows.Forms.GroupBox
+    Friend WithEvents btnFetch As System.Windows.Forms.Button
+    Friend WithEvents Label12 As System.Windows.Forms.Label
+    Friend WithEvents txtCatalogue As System.Windows.Forms.TextBox
+    Friend WithEvents Label11 As System.Windows.Forms.Label
+    Friend WithEvents txtCategory As System.Windows.Forms.TextBox
+    Friend WithEvents btnCatagorySearch As System.Windows.Forms.Button
+    Friend WithEvents btnCatalogueSearch As System.Windows.Forms.Button
+    Friend WithEvents txtFromWeight As System.Windows.Forms.TextBox
+    Friend WithEvents Label4 As System.Windows.Forms.Label
+    Friend WithEvents grdCatalogue As System.Windows.Forms.DataGridView
+    Friend WithEvents btnClose As System.Windows.Forms.Button
+    Friend WithEvents txtToWeight As System.Windows.Forms.TextBox
+    Friend WithEvents Label1 As System.Windows.Forms.Label
+    Friend WithEvents btnPrint As System.Windows.Forms.Button
+    Friend WithEvents cLocationCode As System.Windows.Forms.DataGridViewTextBoxColumn
+    Friend WithEvents cInventoryCode As System.Windows.Forms.DataGridViewTextBoxColumn
+    Friend WithEvents cDescription As System.Windows.Forms.DataGridViewTextBoxColumn
+    Friend WithEvents cWeight As System.Windows.Forms.DataGridViewTextBoxColumn
+    Friend WithEvents cSizeCode As System.Windows.Forms.DataGridViewTextBoxColumn
+    Friend WithEvents cSizeType As System.Windows.Forms.DataGridViewTextBoxColumn
+    Friend WithEvents cStatus As System.Windows.Forms.DataGridViewTextBoxColumn
+    Friend WithEvents txtInventoryCode As System.Windows.Forms.TextBox
+    Friend WithEvents Label2 As System.Windows.Forms.Label
+    Friend WithEvents btnClear As System.Windows.Forms.Button
+End Class
+
+-------------------------------------------------------------------------------------------------
+
+Imports CrystalDecisions.CrystalReports.Engine
+Imports CrystalDecisions.Shared
+Public Class frmInventorySearch
+
+    Private Sub btnClose_Click(sender As System.Object, e As System.EventArgs) Handles btnClose.Click
+        Me.Dispose()
+    End Sub
+
+    Private Sub btnCatagorySearch_Click(sender As System.Object, e As System.EventArgs) Handles btnCatagorySearch.Click
+        Try
+            Dim frmHelpCategory As New frmHelpSearch(0, 0, "tblCategory", "L", 4, "CategoryCode", "", "CategoryCode", "CategoryCode", 80, "CategoryName", "CategoryName", 180, "ClassCode", "ClassCode", 60, "Remarks", "Remarks", 80)
+            frmHelpCategory.ShowDialog()
+            txtCategory.Text = frmHelpCategory.Var1.Trim
+        Catch ex As Exception
+            MessageBox.Show(Err.Description)
+        End Try
+    End Sub
+
+    Private Sub btnCatalogueSearch_Click(sender As System.Object, e As System.EventArgs) Handles btnCatalogueSearch.Click
+        Try
+            Dim frmHelpClass As New frmHelpSearch(0, 0, "tblCatalogue", "L", 4, "CatalogueName", "CategoryCode=" & fncFormatSQLText(txtCategory.Text), "CatalogueCode", "CatalogueCode", 80, "CatalogueName", "CatalogueName", 180, "CategoryCode", "CategoryCode", 60, "GoldLoss", "GoldLoss", 80)
+            frmHelpClass.ShowDialog()
+            txtCatalogue.Text = frmHelpClass.Var1.Trim
+        Catch ex As Exception
+            MessageBox.Show(Err.Description)
+        End Try
+    End Sub
+    Private Sub FetchInventoryDetails()
+        Dim sSql, sFromLocStatus As String
+        Dim iRows, iCount As Integer
+        Dim DM As New DataManager
+        Dim drH As DataRow()
+
+        sSql = "Select b.Locationcode, a.InventoryCode,a.Description,case a.Weight when 0 then a.StoneWeight else a.Weight End Weight,a.SizeCode,a.SizeType,Case Status when 'IN' then 'IN' else '' END [Status] from tblInventory a,"
+        sSql = sSql & " tblInventoryStock  b where a.InventoryCode=b.InventoryCode "
+        If Trim(txtCategory.Text) <> "" Then
+            sSql = sSql & " and a.CategoryCode=" & fncFormatSQLText(txtCategory.Text)
+        End If
+        If Trim(txtCatalogue.Text) <> "" Then
+            sSql = sSql & " and a.CatalogueCode=" & fncFormatSQLText(txtCatalogue.Text)
+        End If
+        If Val(txtFromWeight.Text) > 0 And Val(txtToWeight.Text) > 0 Then
+            sSql = sSql & " and a.Weight >= " & Val(txtFromWeight.Text)
+            sSql = sSql & " and a.Weight <= " & Val(txtToWeight.Text)
+        End If
+        If Trim(txtInventoryCode.Text) <> "" Then
+            sSql = sSql & " and a.InventoryCode=" & fncFormatSQLText(txtInventoryCode.Text)
+        End If
+        sSql = sSql & " and b.qtyonhand > 0 Order by b.Locationcode"
+
+
+
+        drH = DM.RowReturnProjExecNonQryWithDataRowAcc(sSql)
+        grdCatalogue.RowCount = 0
+        If drH.Length > 0 Then
+            '    grdCatalogue.Visible = True
+            For iRows = 0 To drH.Length - 1
+                grdCatalogue.Rows.Add()
+                fnSetdgvText(grdCatalogue, iRows, 0, Trim(drH(iRows)("Locationcode") & ""))
+                fnSetdgvText(grdCatalogue, iRows, 1, Trim(drH(iRows)("InventoryCode") & ""))
+                fnSetdgvText(grdCatalogue, iRows, 2, Trim(drH(iRows)("Description") & ""))
+                fnSetdgvText(grdCatalogue, iRows, 3, Trim(drH(iRows)("Weight") & ""))
+                fnSetdgvText(grdCatalogue, iRows, 4, Trim(drH(iRows)("SizeCode") & ""))
+                fnSetdgvText(grdCatalogue, iRows, 5, Trim(drH(iRows)("SizeType") & ""))
+                fnSetdgvText(grdCatalogue, iRows, 6, Trim(drH(iRows)("Status") & ""))
+
+                'Dim a As String
+                'a = Trim(drH(iRows)("Status") & "")
+                'If a = "IN" Then
+                '    'Call RowColor(grdTran, iRows, 0, grdTran.MaxRows, grdTran.MaxCols, Color.Red)
+                '    Call RowColor(grdCatalogue, iRows, 0, iRows, grdCatalogue.ColumnCount, Color.Red)
+
+                'End If
+            Next
+        Else
+            MsgBox("Stock Not Available", MsgBoxStyle.Critical)
+        End If
+        drH = Nothing
+        sSql = Nothing
+    End Sub
+    Sub RowColor(ByVal grd As Object, ByVal Row1 As Long, ByVal Col1 As Long, ByVal Row2 As Long, ByVal Col2 As Long, ByVal Color As System.Drawing.Color)
+        'set the row color in the grid
+        grd.Row = Row1
+        grd.Col = Col1
+        grd.Row2 = Row2
+        grd.Col2 = Col2
+        grd.BlockMode = True
+        grd.ForeColor = Color
+        'grd.Backcolor = Color
+        grd.BlockMode = False
+    End Sub
+    Private Sub btnFetch_Click(sender As System.Object, e As System.EventArgs) Handles btnFetch.Click
+        FetchInventoryDetails()
+    End Sub
+
+    Private Sub btnPrint_Click(sender As System.Object, e As System.EventArgs) Handles btnPrint.Click
+        subPrint()
+    End Sub
+    Private Sub subPrint()
+        Dim sSql As String
+        Dim sCompanyname, sAddress, sReportTitle, sPath, sPhone, sFax, sSelectFormula, sPrintFDate, sPrintTDate, sFromDate, sToDate As String
+        Dim CR As New ReportDocument
+        Dim frmRep As New frmReports
+        Dim sSelectFld As String
+        Dim dsCompany As DataSet
+        Dim objClsCompany As New clsCompany1
+        Try
+            ' If UCase(sCompanyShortCode) = "JH" Then
+            '    sPath = Application.StartupPath & "\Reports\rptTransferOutDetail_JH.rpt"
+            'Else
+            sPath = Application.StartupPath & "\Reports\rptCatalogueSearch.rpt"
+            'End If
+            sReportTitle = "Transfer Note"
+            sSql = " {tblInventory.CategoryCode} = " & fncFormatSQLText(txtCategory.Text)
+            sSql = sSql & " and {tblInventory.Cataloguecode} = " & fncFormatSQLText(txtCatalogue.Text)
+            If Val(txtFromWeight.Text) > 0 And Val(txtToWeight.Text) > 0 Then
+                sSql = sSql & " and {tblInventoryStock.weight} >= " & Val(txtFromWeight.Text)
+                sSql = sSql & " and {tblInventoryStock.weight} <= " & Val(txtToWeight.Text)
+            End If
+            sSql = sSql & " and {tblInventoryStock.Qtyonhand} > 0 "
+            dsCompany = objClsCompany.getCompanyName
+            If dsCompany.Tables("GetCompanyName").Rows.Count > 0 Then
+                sCompanyname = Trim(dsCompany.Tables("GetCompanyName").Rows(0)("Name") & "")
+                sAddress = Trim(dsCompany.Tables("GetCompanyName").Rows(0)("Address1") & "") & " " & _
+                             Trim(dsCompany.Tables("GetCompanyName").Rows(0)("Address2") & "") & " " & _
+                             Trim(dsCompany.Tables("GetCompanyName").Rows(0)("Country") & "")
+                sPhone = Trim(dsCompany.Tables("GetCompanyName").Rows(0)("Phone") & "")
+                sFax = Trim(dsCompany.Tables("GetCompanyName").Rows(0)("Fax") & "")
+            End If
+            CR.Load(sPath)
+            ReportLogOnToServer(CR)
+            CR.DataDefinition.FormulaFields("CompAddress1").Text = fncFormatSQLText(sCompanyname)
+            CR.DataDefinition.FormulaFields("CompAddress2").Text = fncFormatSQLText(sAddress)
+            CR.DataDefinition.FormulaFields("ReportTitle").Text = fncFormatSQLText(sReportTitle)
+            CR.DataDefinition.FormulaFields("RPTSELECTION").Text = fncFormatSQLText(sSelectFld)
+            CR.DataDefinition.FormulaFields("CompAddress3").Text = fncFormatSQLText(sPhone)
+            CR.DataDefinition.FormulaFields("CompAddress4").Text = fncFormatSQLText(sFax)
+            CR.DataDefinition.RecordSelectionFormula = sSql
+
+            CR.Refresh()
+            frmRep.ReportViewer.SelectionFormula = sSql
+            frmRep.ReportViewer.ReportSource = CR
+            frmRep.ShowDialog()
+        Catch ex As Exception
+            MessageBox.Show(ex.Message)
+        Finally
+            CR.Close()
+            CR = Nothing
+            frmRep = Nothing
+            objClsCompany = Nothing
+            dsCompany = Nothing
+        End Try
+    End Sub
+
+    Private Sub Label2_Click(sender As System.Object, e As System.EventArgs) Handles Label2.Click
+
+    End Sub
+
+    Private Sub btnClear_Click(sender As System.Object, e As System.EventArgs) Handles btnClear.Click
+        txtCategory.Text = ""
+        txtCatalogue.Text = ""
+        txtFromWeight.Text = ""
+        txtToWeight.Text = ""
+        txtInventoryCode.Text = ""
+        grdCatalogue.RowCount = 0
+    End Sub
+End Class

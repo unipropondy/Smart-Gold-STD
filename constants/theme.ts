@@ -1,53 +1,67 @@
-/**
- * Below are the colors that are used in the app. The colors are defined in the light and dark mode.
- * There are many other ways to style your app. For example, [Nativewind](https://www.nativewind.dev/), [Tamagui](https://tamagui.dev/), [unistyles](https://reactnativeunistyles.vercel.app), etc.
- */
-
 import { Platform } from 'react-native';
 
+// Base colors
 const tintColorLight = '#0a7ea4';
 const tintColorDark = '#fff';
 
-export const Colors = {
+export type ThemeType = 'light' | 'dark' | 'gold';
+
+export const Colors: Record<ThemeType, any> = {
   light: {
-    text: '#11181C',
-    background: '#fff',
+    text: '#1A1A1A',        
+    background: '#F9F9F9',  
+    card: '#FFFFFF',        
+    subtitle: '#8A817C',    
+    border: '#EAE6DF',      
+    primaryGold: '#D4AF37', 
     tint: tintColorLight,
     icon: '#687076',
     tabIconDefault: '#687076',
     tabIconSelected: tintColorLight,
   },
   dark: {
-    text: '#ECEDEE',
-    background: '#151718',
+    text: '#FFFFFF',        
+    background: '#0B0F19',  
+    card: '#151A28',        
+    subtitle: '#9CA3AF',    
+    border: '#232A3B',      
+    primaryGold: '#F2A900', 
     tint: tintColorDark,
     icon: '#9BA1A6',
     tabIconDefault: '#9BA1A6',
     tabIconSelected: tintColorDark,
   },
+  gold: {
+    text: '#382D16',
+    background: '#FAF2E6', // Very soft warm gold tint background
+    card: '#FFFFFF',
+    subtitle: '#A68A56',
+    border: '#EEDCBA',
+    primaryGold: '#D4AF37', // Pure gold
+    tint: '#D4AF37',
+    icon: '#A68A56',
+    tabIconDefault: '#A68A56',
+    tabIconSelected: '#D4AF37',
+  }
 };
 
 export const Fonts = Platform.select({
   ios: {
-    /** iOS `UIFontDescriptorSystemDesignDefault` */
-    sans: 'system-ui',
-    /** iOS `UIFontDescriptorSystemDesignSerif` */
-    serif: 'ui-serif',
-    /** iOS `UIFontDescriptorSystemDesignRounded` */
-    rounded: 'ui-rounded',
-    /** iOS `UIFontDescriptorSystemDesignMonospaced` */
-    mono: 'ui-monospace',
+    sans: 'Cambria',
+    serif: 'Cambria',
+    rounded: 'Cambria',
+    mono: 'Cambria',
   },
   default: {
-    sans: 'normal',
-    serif: 'serif',
-    rounded: 'normal',
-    mono: 'monospace',
+    sans: 'Cambria',
+    serif: 'Cambria',
+    rounded: 'Cambria',
+    mono: 'Cambria',
   },
   web: {
-    sans: "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif",
-    serif: "Georgia, 'Times New Roman', serif",
-    rounded: "'SF Pro Rounded', 'Hiragino Maru Gothic ProN', Meiryo, 'MS PGothic', sans-serif",
-    mono: "SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace",
+    sans: 'Cambria',
+    serif: 'Cambria',
+    rounded: 'Cambria',
+    mono: 'Cambria',
   },
 });
