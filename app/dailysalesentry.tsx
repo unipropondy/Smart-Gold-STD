@@ -68,10 +68,10 @@ export default function DailySalesEntryScreen() {
 
   const setTodayDate = () => {
     const d = new Date();
-    const year = d.getFullYear();
-    const month = String(d.getMonth() + 1).padStart(2, '0');
     const day = String(d.getDate()).padStart(2, '0');
-    setInvoiceDate(`${year}-${month}-${day}`);
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const year = d.getFullYear();
+    setInvoiceDate(`${day}/${month}/${year}`);
     setCalendarMonth(d.getMonth());
     setCalendarYear(d.getFullYear());
   };
@@ -284,7 +284,7 @@ export default function DailySalesEntryScreen() {
   const handleSelectDate = (day: number) => {
     const selectedMonth = String(calendarMonth + 1).padStart(2, '0');
     const selectedDay = String(day).padStart(2, '0');
-    const formatted = `${calendarYear}-${selectedMonth}-${selectedDay}`;
+    const formatted = `${selectedDay}/${selectedMonth}/${calendarYear}`;
     setInvoiceDate(formatted);
     setIsCalendarOpen(false);
   };
@@ -364,7 +364,7 @@ export default function DailySalesEntryScreen() {
                     style={[styles.formInput, styles.inputAttached, styles.codeCell, { maxWidth: 140 }]}
                     value={invoiceDate}
                     onChangeText={setInvoiceDate}
-                    placeholder="YYYY-MM-DD"
+                    placeholder="DD/MM/YYYY"
                     placeholderTextColor="#9E8D77"
                   />
                   <TouchableOpacity

@@ -374,25 +374,17 @@ export default function SalesOrderScreen() {
         printWindow.document.close();
       }
     } else {
-      Alert.alert('Print Sales Order', `Sales Order ${targetNo} sent to printer.`);
+      showToast(`Sales Order ${targetNo} sent to printer.`, 'success');
     }
   };
 
   const handleSave = async () => {
     if (!locationCode.trim()) {
-      if (Platform.OS === 'web') {
-        window.alert('LocationCode Should not be Empty');
-      } else {
-        Alert.alert('Information', 'LocationCode Should not be Empty');
-      }
+      showToast('LocationCode Should not be Empty', 'error');
       return;
     }
     if (!supplierCode.trim()) {
-      if (Platform.OS === 'web') {
-        window.alert('SupplierCode Should not be Empty');
-      } else {
-        Alert.alert('Information', 'SupplierCode Should not be Empty');
-      }
+      showToast('SupplierCode Should not be Empty', 'error');
       return;
     }
 
@@ -431,32 +423,11 @@ export default function SalesOrderScreen() {
         const json = await res.json();
         if (json.success) {
           const savedSoNo = json.salesOrderNo || soNo;
-          if (Platform.OS === 'web') {
-            window.alert('Please take note reference no. ' + savedSoNo);
-            if (window.confirm('Do you want to print ?')) {
-              handlePrint(savedSoNo);
-            }
-          } else {
-            Alert.alert('Sales Order', 'Please take note reference no. ' + savedSoNo, [
-              {
-                text: 'OK',
-                onPress: () => {
-                  Alert.alert('Print', 'Do you want to print ?', [
-                    { text: 'No', style: 'cancel' },
-                    { text: 'Yes', onPress: () => handlePrint(savedSoNo) }
-                  ]);
-                }
-              }
-            ]);
-          }
+          showToast(`Please take note reference no. ${savedSoNo}`, 'success');
           handleNew();
         } else {
-          const errDetail = json.error ? `\nDetails: ${json.error}` : '';
-          const errMsg = `${json.message || 'Failed to save Sales Order'}${errDetail}`;
-          if (Platform.OS === 'web') {
-            window.alert(errMsg);
-          }
-          showToast(json.message || 'Failed to save Sales Order', 'error');
+          const errDetail = json.error ? ` - ${json.error}` : '';
+          showToast(`${json.message || 'Failed to save Sales Order'}${errDetail}`, 'error');
         }
       } catch (e: any) {
         console.error(e);
@@ -466,29 +437,12 @@ export default function SalesOrderScreen() {
       }
     };
 
-    if (Platform.OS === 'web') {
-      if (window.confirm('Do want to Create SalesOrder for all  these items ?')) {
-        await performSave();
-      }
-    } else {
-      Alert.alert(
-        'Information',
-        'Do want to Create SalesOrder for all  these items ?',
-        [
-          { text: 'No', style: 'cancel' },
-          { text: 'Yes', onPress: performSave }
-        ]
-      );
-    }
+    await performSave();
   };
 
   const handleDelete = async () => {
     if (!soNo.trim()) {
-      if (Platform.OS === 'web') {
-        window.alert('SalesOrder Number Should not be Empty');
-      } else {
-        Alert.alert('Information', 'SalesOrder Number Should not be Empty');
-      }
+      showToast('SalesOrder Number Should not be Empty', 'error');
       return;
     }
 
@@ -498,18 +452,10 @@ export default function SalesOrderScreen() {
         const res = await fetch(`${API_URL}/${soNo}`, { method: 'DELETE' });
         const json = await res.json();
         if (json.success) {
-          if (Platform.OS === 'web') {
-            window.alert('Sales Order Deleted');
-          } else {
-            Alert.alert('GoldPOS', 'Sales Order Deleted');
-          }
+          showToast('Sales Order Deleted', 'success');
           handleNew();
         } else {
-          if (Platform.OS === 'web') {
-            window.alert(json.message || 'Could not delete Sales Order');
-          } else {
-            Alert.alert('Information', json.message || 'Could not delete Sales Order');
-          }
+          showToast(json.message || 'Could not delete Sales Order', 'error');
         }
       } catch (e) {
         console.error(e);
@@ -519,16 +465,7 @@ export default function SalesOrderScreen() {
       }
     };
 
-    if (Platform.OS === 'web') {
-      if (window.confirm(`Do you want to delete SalesOrder No ${soNo}`)) {
-        executeDelete();
-      }
-    } else {
-      Alert.alert('GoldPOS', `Do you want to delete SalesOrder No ${soNo}`, [
-        { text: 'No', style: 'cancel' },
-        { text: 'Yes', onPress: executeDelete }
-      ]);
-    }
+    await executeDelete();
   };
 
   const handleNew = () => {

@@ -32,6 +32,7 @@ export default function InstallmentPaymentScreen() {
   // Form State
   const [agreementNo, setAgreementNo] = useState('');
   const [customerCode, setCustomerCode] = useState('');
+  const [customerType, setCustomerType] = useState('');
   const [flexiId, setFlexiId] = useState('');
   const [customerName, setCustomerName] = useState('');
   const [address, setAddress] = useState('');
@@ -52,6 +53,12 @@ export default function InstallmentPaymentScreen() {
 
   // History
   const [historyList, setHistoryList] = useState<any[]>([]);
+
+  // Cancel & Reprint modal states
+  const [isCancelModalVisible, setIsCancelModalVisible] = useState(false);
+  const [cancelBillNo, setCancelBillNo] = useState('');
+  const [isReprintModalVisible, setIsReprintModalVisible] = useState(false);
+  const [reprintBillNo, setReprintBillNo] = useState('');
 
   // LOV State
   const [isAgreementModalVisible, setIsAgreementModalVisible] = useState(false);
@@ -92,18 +99,18 @@ export default function InstallmentPaymentScreen() {
 
         setCustomerCode(data.CustomerCode || '');
         setCustomerName(data.Name || '');
+        setCustomerType(data.CustomerType || data.MemberType || '');
         setAddress(`${data.Address1 || ''} ${data.Address2 || ''}`.trim());
 
         setSalesAmount(totalCost.toFixed(2));
         setDepositAmount(depAmt.toFixed(2));
-        setInstallmentAmount(insAmt.toFixed(2));
 
         // Fetch Balance
-        fetchBalance(agreementNo, totalCost, depAmt);
+        fetchBalance(agreementNo, totalCost, depAmt, insAmt, data.InsTotal, data.InsPaid);
         fetchHistory(agreementNo);
         showToast('Agreement details loaded', 'success');
       } else {
-        showToast('Agreement not found', 'error');
+        showToast(json.message || 'Agreement not found', 'error');
       }
     } catch (err) {
       showToast('Error fetching agreement', 'error');
@@ -112,14 +119,26 @@ export default function InstallmentPaymentScreen() {
     }
   };
 
-  const fetchBalance = async (agrNo: string, totalCost: number, depositAmt: number) => {
+  const fetchBalance = async (agrNo: string, totalCost: number, depositAmt: number, agreementInsAmt: number = 0, insTotal: number = 0, insPaid: number = 0) => {
     try {
       const res = await fetch(`${API_URL}/balance/${encodeURIComponent(agrNo)}`);
       const json = await res.json();
       if (json.success) {
         const amountPaid = json.data.AmountPaid || 0;
         const bal = totalCost - depositAmt - amountPaid;
-        setBalanceAmount(bal > 0 ? bal.toFixed(2) : '0.00');
+        const balFixed = bal > 0 ? bal.toFixed(2) : '0.00';
+        setBalanceAmount(balFixed);
+
+        // Adjust default installment amount based on remaining balance (matching frmInstallmentPayment.vb)
+        let computedInsAmt = agreementInsAmt > 0 ? agreementInsAmt : parseFloat(installmentAmount) || 0;
+        const pendingIns = (insTotal || 0) - (insPaid || 0);
+
+        if (bal > 0 && computedInsAmt > bal) {
+          computedInsAmt = bal;
+        } else if (bal > 0 && pendingIns === 1 && computedInsAmt < bal) {
+          computedInsAmt = bal;
+        }
+        setInstallmentAmount(computedInsAmt.toFixed(2));
       }
     } catch (err) {
       console.error(err);
@@ -226,6 +245,7 @@ export default function InstallmentPaymentScreen() {
   const handleClear = () => {
     setAgreementNo('');
     setCustomerCode('');
+    setCustomerType('');
     setFlexiId('');
     setCustomerName('');
     setAddress('');
@@ -237,6 +257,46 @@ export default function InstallmentPaymentScreen() {
     setDepositAmount('0.00');
     setBalanceAmount('0.00');
     setHistoryList([]);
+  };
+
+  const handleCancelBill = async () => {
+    if (!cancelBillNo || cancelBillNo.trim() === '') {
+      showToast('Please enter the Installment Bill No!', 'error');
+      return;
+    }
+    setLoading(true);
+    try {
+      const res = await fetch(`${API_URL}/cancel`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ installmentNo: cancelBillNo.trim() }),
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        showToast(data.message || 'Bill cancelled successfully', 'success');
+        setIsCancelModalVisible(false);
+        setCancelBillNo('');
+        if (agreementNo) {
+          fetchAgreement();
+        }
+      } else {
+        showToast(data.message || 'Failed to cancel bill', 'error');
+      }
+    } catch (e: any) {
+      showToast(e.message || 'Error communicating with server', 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleReprintBill = () => {
+    if (!reprintBillNo || reprintBillNo.trim() === '') {
+      showToast('Please enter the Installment Bill No to RePrint!', 'error');
+      return;
+    }
+    showToast(`RePrinting Installment Bill: ${reprintBillNo}`, 'success');
+    setIsReprintModalVisible(false);
+    setReprintBillNo('');
   };
 
   const latestState = useRef({ agreementNo, totalAmount, noOfInstallment, installmentAmount, customerCode });
@@ -292,6 +352,7 @@ export default function InstallmentPaymentScreen() {
         params: {
           totalNet: currentState.totalAmount,
           customerCode: currentState.customerCode,
+          customerType,
           apiEndpoint: `${API_URL}/pay`,
           payload: JSON.stringify(payload),
           returnPath: '/installmentpayment',
@@ -336,7 +397,17 @@ export default function InstallmentPaymentScreen() {
 
           <TouchableOpacity
             style={[styles.actionBtn, styles.reprintBtn]}
-            onPress={() => showToast('RePrinting receipt...', 'success')}
+            onPress={() => setIsCancelModalVisible(true)}
+            activeOpacity={0.8}
+            disabled={loading}
+          >
+            <Ionicons name="close-circle-outline" size={14} color="#B71C1C" />
+            <ThemedText style={[styles.clearBtnText, { color: '#B71C1C' }]}>Cancel Bill</ThemedText>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.actionBtn, styles.reprintBtn]}
+            onPress={() => setIsReprintModalVisible(true)}
             activeOpacity={0.8}
           >
             <Ionicons name="print-outline" size={14} color="#5C4A28" />
@@ -602,25 +673,44 @@ export default function InstallmentPaymentScreen() {
                 </ThemedText>
               </View>
             ) : (
-              historyList.map((item, index) => (
-                <View key={index} style={styles.tableRow}>
-                  <ThemedText style={[styles.tableCell, styles.codeCell, { flex: 1.8 }]}>
-                    {item.InstallmentNo}
+              <>
+                {historyList.map((item, index) => (
+                  <View key={index} style={styles.tableRow}>
+                    <ThemedText style={[styles.tableCell, styles.codeCell, { flex: 1.8 }]}>
+                      {item.InstallmentNo}
+                    </ThemedText>
+                    <ThemedText style={[styles.tableCell, { flex: 1.4 }]}>
+                      {item.CreateDate ? new Date(item.CreateDate).toLocaleDateString() : ''}
+                    </ThemedText>
+                    <ThemedText style={[styles.tableCell, { flex: 1.2, textAlign: 'right' }]}>
+                      {item.InsPaid}
+                    </ThemedText>
+                    <ThemedText style={[styles.tableCell, { flex: 1.3, textAlign: 'right' }]}>
+                      {typeof item.InstallmentAmt === 'number' ? item.InstallmentAmt.toFixed(2) : item.InstallmentAmt}
+                    </ThemedText>
+                    <ThemedText style={[styles.tableCell, styles.amountCell, { flex: 1.3, textAlign: 'right' }]}>
+                      {typeof item.AmtPaid === 'number' ? item.AmtPaid.toFixed(2) : item.AmtPaid}
+                    </ThemedText>
+                  </View>
+                ))}
+
+                {/* Grid Total Row matching subTotal in VB.NET */}
+                <View style={[styles.tableRow, { backgroundColor: '#FFF5F5', borderTopWidth: 2, borderTopColor: '#FFCDD2' }]}>
+                  <ThemedText style={[styles.tableCell, { flex: 1.8, fontWeight: 'bold', color: '#D32F2F' }]}>
+                    TOTAL:
                   </ThemedText>
-                  <ThemedText style={[styles.tableCell, { flex: 1.4 }]}>
-                    {item.CreateDate ? new Date(item.CreateDate).toLocaleDateString() : ''}
+                  <ThemedText style={[styles.tableCell, { flex: 1.4 }]} />
+                  <ThemedText style={[styles.tableCell, { flex: 1.2, textAlign: 'right', fontWeight: 'bold', color: '#D32F2F' }]}>
+                    {historyList.reduce((acc, curr) => acc + (parseFloat(curr.InsPaid) || 0), 0)}
                   </ThemedText>
-                  <ThemedText style={[styles.tableCell, { flex: 1.2, textAlign: 'right' }]}>
-                    {item.InsPaid}
+                  <ThemedText style={[styles.tableCell, { flex: 1.3, textAlign: 'right', fontWeight: 'bold', color: '#D32F2F' }]}>
+                    {historyList.reduce((acc, curr) => acc + (parseFloat(curr.InstallmentAmt) || 0), 0).toFixed(2)}
                   </ThemedText>
-                  <ThemedText style={[styles.tableCell, { flex: 1.3, textAlign: 'right' }]}>
-                    {item.InstallmentAmt}
-                  </ThemedText>
-                  <ThemedText style={[styles.tableCell, styles.amountCell, { flex: 1.3, textAlign: 'right' }]}>
-                    {item.AmtPaid}
+                  <ThemedText style={[styles.tableCell, { flex: 1.3, textAlign: 'right', fontWeight: 'bold', color: '#D32F2F' }]}>
+                    {historyList.reduce((acc, curr) => acc + (parseFloat(curr.AmtPaid) || 0), 0).toFixed(2)}
                   </ThemedText>
                 </View>
-              ))
+              </>
             )}
           </View>
 
@@ -907,6 +997,105 @@ export default function InstallmentPaymentScreen() {
                 </TouchableOpacity>
               )}
             />
+          </View>
+        </View>
+      </Modal>
+
+      {/* CANCEL BILL MODAL */}
+      <Modal visible={isCancelModalVisible} transparent animationType="fade">
+        <View style={styles.modalOverlay}>
+          <View style={[styles.lovModalCard, { maxWidth: 400 }]}>
+            <View style={[styles.modalHeaderBanner, { backgroundColor: '#FFEBEE' }]}>
+              <View style={styles.headerTitleContainer}>
+                <Ionicons name="alert-circle-outline" size={16} color="#B71C1C" style={{ marginRight: 6 }} />
+                <ThemedText style={[styles.modalHeaderTitle, { color: '#B71C1C' }]}>Cancel Installment Bill</ThemedText>
+              </View>
+              <TouchableOpacity
+                onPress={() => setIsCancelModalVisible(false)}
+                activeOpacity={0.7}
+                style={styles.closeModalBtn}
+              >
+                <Ionicons name="close" size={18} color="#3B2D17" />
+              </TouchableOpacity>
+            </View>
+
+            <View style={{ padding: 14 }}>
+              <ThemedText style={{ fontSize: 12, color: '#5C4A28', marginBottom: 8 }}>
+                Enter the Installment Bill No to cancel (only today's bills can be cancelled):
+              </ThemedText>
+              <TextInput
+                style={[styles.formInput, { height: 32, fontSize: 13, marginBottom: 14 }]}
+                value={cancelBillNo}
+                onChangeText={setCancelBillNo}
+                placeholder="e.g. IN-101"
+                placeholderTextColor="#9E8D77"
+                autoFocus
+              />
+              <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 8 }}>
+                <TouchableOpacity
+                  style={[styles.actionBtn, styles.clearBtn]}
+                  onPress={() => setIsCancelModalVisible(false)}
+                >
+                  <ThemedText style={styles.clearBtnText}>Close</ThemedText>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.actionBtn, { backgroundColor: '#FFCDD2', borderColor: '#E57373' }]}
+                  onPress={handleCancelBill}
+                  disabled={loading}
+                >
+                  <ThemedText style={[styles.saveBtnText, { color: '#B71C1C' }]}>Confirm Cancel</ThemedText>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* REPRINT MODAL */}
+      <Modal visible={isReprintModalVisible} transparent animationType="fade">
+        <View style={styles.modalOverlay}>
+          <View style={[styles.lovModalCard, { maxWidth: 400 }]}>
+            <View style={styles.modalHeaderBanner}>
+              <View style={styles.headerTitleContainer}>
+                <Ionicons name="print-outline" size={16} color="#8D6409" style={{ marginRight: 6 }} />
+                <ThemedText style={styles.modalHeaderTitle}>RePrint Installment Bill</ThemedText>
+              </View>
+              <TouchableOpacity
+                onPress={() => setIsReprintModalVisible(false)}
+                activeOpacity={0.7}
+                style={styles.closeModalBtn}
+              >
+                <Ionicons name="close" size={18} color="#3B2D17" />
+              </TouchableOpacity>
+            </View>
+
+            <View style={{ padding: 14 }}>
+              <ThemedText style={{ fontSize: 12, color: '#5C4A28', marginBottom: 8 }}>
+                Enter the Installment Bill No to RePrint:
+              </ThemedText>
+              <TextInput
+                style={[styles.formInput, { height: 32, fontSize: 13, marginBottom: 14 }]}
+                value={reprintBillNo}
+                onChangeText={setReprintBillNo}
+                placeholder="e.g. IN-101"
+                placeholderTextColor="#9E8D77"
+                autoFocus
+              />
+              <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 8 }}>
+                <TouchableOpacity
+                  style={[styles.actionBtn, styles.clearBtn]}
+                  onPress={() => setIsReprintModalVisible(false)}
+                >
+                  <ThemedText style={styles.clearBtnText}>Close</ThemedText>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.actionBtn, styles.saveBtn]}
+                  onPress={handleReprintBill}
+                >
+                  <ThemedText style={styles.saveBtnText}>Print</ThemedText>
+                </TouchableOpacity>
+              </View>
+            </View>
           </View>
         </View>
       </Modal>

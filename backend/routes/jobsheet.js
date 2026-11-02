@@ -22,7 +22,7 @@ router.get("/lov/taelpercent", async (req, res) => {
 });
 
 // ================= GET NEXT JOBSHEET NO =================
-router.get("/nextNo", async (req, res) => {
+router.get(["/nextNo", "/next-number"], async (req, res) => {
   try {
     const pool = req.pool;
 
@@ -342,12 +342,46 @@ router.delete("/:jobSheetNo", async (req, res) => {
 
   try {
     const { jobSheetNo } = req.params;
+    const pool = req.pool;
+
+    // 1. Check if jobsheet exists and if items exist in tblPurchase or tblInventory
+    const chk = await pool.request()
+      .input("JobSheetNo", sql.VarChar, jobSheetNo.trim())
+      .query(`
+        SELECT 
+          jh.JobSheetNo,
+          jh.BillClose,
+          jh.TranType,
+          (SELECT COUNT(1) FROM tblPurchase WHERE JobSheetNo = @JobSheetNo) as PurchaseItemCount,
+          (SELECT COUNT(1) FROM tblInventory WHERE JobSheetNo = @JobSheetNo) as InventoryItemCount
+        FROM tblJobSheetHeader jh
+        WHERE jh.JobSheetNo = @JobSheetNo
+      `);
+
+    if (chk.recordset.length === 0) {
+      return res.status(404).json({ success: false, message: "JobSheet not found" });
+    }
+
+    const jsInfo = chk.recordset[0];
+    if (jsInfo.BillClose === 'Y') {
+      return res.status(400).json({ success: false, message: "This bill is closed. Cannot delete!" });
+    }
+    if (jsInfo.TranType === 'DP') {
+      return res.status(400).json({ success: false, message: "This is a direct purchase bill. Cannot delete from JobSheet!" });
+    }
+    if ((parseInt(jsInfo.PurchaseItemCount, 10) || 0) > 0 || (parseInt(jsInfo.InventoryItemCount, 10) || 0) > 0) {
+      return res.status(400).json({ success: false, message: "This job sheet has items. Cannot delete!" });
+    }
+
     await transaction.begin();
 
     const request = new sql.Request(transaction)
-      .input("JobSheetNo", sql.VarChar, jobSheetNo);
+      .input("JobSheetNo", sql.VarChar, jobSheetNo.trim());
 
     await request.query(`DELETE FROM tblJobSheetDetail WHERE JobSheetNo = @JobSheetNo`);
+    if (jsInfo.Accessories === 'Y') {
+      await request.query(`DELETE FROM tblAccessoriesDetail WHERE JobSheetNo = @JobSheetNo`);
+    }
     const headerRes = await request.query(`DELETE FROM tblJobSheetHeader WHERE JobSheetNo = @JobSheetNo`);
 
     if (headerRes.rowsAffected[0] === 0) {
@@ -356,13 +390,236 @@ router.delete("/:jobSheetNo", async (req, res) => {
     }
 
     await transaction.commit();
-    return res.status(200).json({ success: true, message: "JobSheet deleted successfully" });
+    return res.status(200).json({ success: true, message: "Jobsheet deleted successfully!" });
   } catch (err) {
     console.error("🔥 DELETE JOBSHEET ERROR:", err);
     try {
       await transaction.rollback();
     } catch (rbErr) { }
     return res.status(500).json({ success: false, message: "Database delete failed", error: err.message });
+  }
+});
+
+// ================= DELETE SINGLE CATALOGUE FROM JOBSHEET =================
+// VB Reference: btnCatDelete_Click -> objCatalogue.fncCheckCatalogueDelete1
+router.delete("/:jobSheetNo/catalogue/:catalogueCode", async (req, res) => {
+  const pool = req.pool;
+  const transaction = new sql.Transaction(pool);
+
+  try {
+    const { jobSheetNo, catalogueCode } = req.params;
+    const jsNo = jobSheetNo.trim();
+    const catCode = catalogueCode.trim();
+
+    // Check if items exist for this catalogue in this jobsheet
+    const chk = await pool.request()
+      .input("JobSheetNo", sql.VarChar, jsNo)
+      .input("CatalogueCode", sql.VarChar, catCode)
+      .query(`
+        SELECT 
+          (SELECT COUNT(1) FROM tblPurchase WHERE JobSheetNo = @JobSheetNo AND CatalogueCode = @CatalogueCode) as PurCount,
+          (SELECT COUNT(1) FROM tblInventory WHERE JobSheetNo = @JobSheetNo AND CatalogueCode = @CatalogueCode) as InvCount
+      `);
+
+    const purCount = parseInt(chk.recordset[0]?.PurCount, 10) || 0;
+    const invCount = parseInt(chk.recordset[0]?.InvCount, 10) || 0;
+
+    if (purCount > 0 || invCount > 0) {
+      return res.status(400).json({ success: false, message: "This catalogue has items. Cannot delete!" });
+    }
+
+    await transaction.begin();
+
+    // Delete catalogue from tblJobSheetDetail
+    const delReq = new sql.Request(transaction);
+    delReq.input("JobSheetNo", sql.VarChar, jsNo);
+    delReq.input("CatalogueCode", sql.VarChar, catCode);
+
+    await delReq.query(`
+      DELETE FROM tblJobSheetDetail 
+      WHERE JobSheetNo = @JobSheetNo AND CatalogueCode = @CatalogueCode;
+      DELETE FROM tblAccessoriesDetail 
+      WHERE JobSheetNo = @JobSheetNo AND CatalogueCode = @CatalogueCode;
+    `);
+
+    // Recalculate remaining header totals
+    const sumReq = new sql.Request(transaction);
+    sumReq.input("JobSheetNo", sql.VarChar, jsNo);
+    const sumRes = await sumReq.query(`
+      SELECT 
+        ISNULL(SUM(Weight), 0) as TotalWeight,
+        ISNULL(SUM(MC), 0) as TotalMC,
+        ISNULL(SUM(PCS), 0) as TotalPCS,
+        ISNULL(SUM(GoldLoss), 0) as TotalGoldLoss,
+        ISNULL(SUM(TotalCost), 0) as TotalCost
+      FROM tblJobSheetDetail
+      WHERE JobSheetNo = @JobSheetNo
+    `);
+
+    const tot = sumRes.recordset[0];
+    const updReq = new sql.Request(transaction);
+    updReq
+      .input("JobSheetNo", sql.VarChar, jsNo)
+      .input("TotalWeight24K", sql.Numeric(18, 3), tot.TotalWeight)
+      .input("TotalMC", sql.Numeric(18, 2), tot.TotalMC)
+      .input("TotalPCS", sql.Numeric(18, 0), tot.TotalPCS)
+      .input("TotalGoldLoss", sql.Numeric(18, 3), tot.TotalGoldLoss)
+      .input("TotalLocalCost", sql.Numeric(18, 2), tot.TotalCost)
+      .input("TotalForeignCost", sql.Numeric(18, 2), tot.TotalCost)
+      .input("TotalCost", sql.Numeric(18, 2), tot.TotalCost)
+      .input("ManualWeight", sql.Numeric(18, 3), tot.TotalWeight)
+      .input("ManualMC", sql.Numeric(18, 2), tot.TotalMC)
+      .input("ManualGoldLoss", sql.Numeric(18, 3), tot.TotalGoldLoss)
+      .input("ManualLocalCost", sql.Numeric(18, 2), tot.TotalCost);
+
+    await updReq.query(`
+      UPDATE tblJobSheetHeader SET
+        TotalWeight24K = @TotalWeight24K,
+        TotalMC = @TotalMC,
+        TotalPCS = @TotalPCS,
+        TotalGoldLoss = @TotalGoldLoss,
+        TotalLocalCost = @TotalLocalCost,
+        TotalForeignCost = @TotalForeignCost,
+        TotalCost = @TotalCost,
+        ManualWeight = @ManualWeight,
+        ManualMC = @ManualMC,
+        ManualGoldLoss = @ManualGoldLoss,
+        ManualLocalCost = @ManualLocalCost,
+        ModifyDate = GETDATE()
+      WHERE JobSheetNo = @JobSheetNo
+    `);
+
+    await transaction.commit();
+    return res.status(200).json({ success: true, message: "Catalogue deleted successfully!" });
+  } catch (err) {
+    if (transaction) {
+      try { await transaction.rollback(); } catch (_) {}
+    }
+    console.error("🔥 DELETE CATALOGUE ERROR:", err);
+    return res.status(500).json({ success: false, message: "Server error", error: err.message });
+  }
+});
+
+// ================= CHECK DUPLICATE INVOICE NO =================
+// VB Reference: subCheckDuplicateBill
+router.get("/check/duplicate", async (req, res) => {
+  try {
+    const { supplierCode, invoiceNo, jobSheetNo } = req.query;
+    if (!supplierCode || !invoiceNo) {
+      return res.status(400).json({ success: false, message: "supplierCode and invoiceNo are required" });
+    }
+
+    const pool = req.pool;
+    const result = await pool.request()
+      .input("SupplierCode", sql.VarChar, supplierCode.trim())
+      .input("PurchaseBillNo", sql.VarChar, invoiceNo.trim())
+      .query(`
+        SELECT JobSheetNo 
+        FROM tblJobSheetHeader 
+        WHERE SupplierCode = @SupplierCode AND PurchaseBillNo = @PurchaseBillNo
+      `);
+
+    if (result.recordset.length > 0) {
+      const existingNo = result.recordset[0].JobSheetNo;
+      if (!jobSheetNo || existingNo.trim() !== jobSheetNo.trim()) {
+        return res.json({
+          success: true,
+          isDuplicate: true,
+          existingJobSheetNo: existingNo,
+          message: `Duplicate Invoice No. This invoice is already entered in JobsheetNo ${existingNo}.`
+        });
+      }
+    }
+
+    return res.json({ success: true, isDuplicate: false });
+  } catch (err) {
+    console.error("🔥 CHECK DUPLICATE INVOICE ERROR:", err);
+    return res.status(500).json({ success: false, message: "Server Error", error: err.message });
+  }
+});
+
+// ================= GET JOBSHEET BY SUPPLIER & INVOICE =================
+// VB Reference: fncGetJobSheet(sSupplier, sInvoiceNo)
+router.get("/by-invoice/:supplierCode/:invoiceNo", async (req, res) => {
+  try {
+    const { supplierCode, invoiceNo } = req.params;
+    const pool = req.pool;
+    const result = await pool.request()
+      .input("SupplierCode", sql.VarChar, supplierCode.trim())
+      .input("PurchaseBillNo", sql.VarChar, invoiceNo.trim())
+      .query(`
+        SELECT JobSheetNo 
+        FROM tblJobSheetHeader 
+        WHERE SupplierCode = @SupplierCode AND PurchaseBillNo = @PurchaseBillNo
+      `);
+
+    if (result.recordset.length > 0) {
+      return res.json({ success: true, jobSheetNo: result.recordset[0].JobSheetNo });
+    }
+    return res.json({ success: false, message: "No jobsheet found for invoice" });
+  } catch (err) {
+    console.error("🔥 GET BY INVOICE ERROR:", err);
+    return res.status(500).json({ success: false, message: "Server Error", error: err.message });
+  }
+});
+
+// ================= GET CATALOGUE INFO (WITH PURCHASE TYPE) =================
+// VB Reference: subGetCatalogue & subSetPurchaseType
+router.get("/lookup/catalogue/:code", async (req, res) => {
+  try {
+    const { code } = req.params;
+    const pool = req.pool;
+    const result = await pool.request()
+      .input("CatalogueCode", sql.VarChar, code.trim())
+      .query(`
+        SELECT 
+          a.CatalogueCode,
+          a.CatalogueName,
+          a.CategoryCode,
+          b.ClassCode,
+          c.PurchaseType
+        FROM tblCatalogue a
+        INNER JOIN tblCategory b ON a.CategoryCode = b.CategoryCode
+        LEFT JOIN tblClass c ON b.ClassCode = c.ClassCode
+        WHERE a.CatalogueCode = @CatalogueCode
+      `);
+
+    if (result.recordset.length > 0) {
+      return res.json({ success: true, data: result.recordset[0] });
+    }
+    return res.status(404).json({ success: false, message: "Invalid CatalogueCode" });
+  } catch (err) {
+    console.error("🔥 GET CATALOGUE LOOKUP ERROR:", err);
+    return res.status(500).json({ success: false, message: "Server Error", error: err.message });
+  }
+});
+
+// ================= GET CATEGORY INFO (WITH PURCHASE TYPE) =================
+// VB Reference: subGetCategory & subSetPurchaseType
+router.get("/lookup/category/:code", async (req, res) => {
+  try {
+    const { code } = req.params;
+    const pool = req.pool;
+    const result = await pool.request()
+      .input("CategoryCode", sql.VarChar, code.trim())
+      .query(`
+        SELECT 
+          b.CategoryCode,
+          b.CategoryName,
+          b.ClassCode,
+          c.PurchaseType
+        FROM tblCategory b
+        LEFT JOIN tblClass c ON b.ClassCode = c.ClassCode
+        WHERE b.CategoryCode = @CategoryCode
+      `);
+
+    if (result.recordset.length > 0) {
+      return res.json({ success: true, data: result.recordset[0] });
+    }
+    return res.status(404).json({ success: false, message: "Invalid CategoryCode" });
+  } catch (err) {
+    console.error("🔥 GET CATEGORY LOOKUP ERROR:", err);
+    return res.status(500).json({ success: false, message: "Server Error", error: err.message });
   }
 });
 

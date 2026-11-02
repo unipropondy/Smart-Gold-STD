@@ -20,7 +20,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-const API_SEARCH_URL = `${API_BASE_URL}/catalogue/search`;
+const API_SEARCH_URL = `${API_BASE_URL}/inventorysearch`;
 const API_DETAIL_URL = `${API_BASE_URL}/inventorysearch`;
 
 export default function InventorySearchScreen() {
@@ -172,7 +172,7 @@ export default function InventorySearchScreen() {
     setIsLOVVisible(true);
     setLovData([]);
     try {
-      let url = `${API_BASE_URL}/catalogue/lov/${type}`;
+      let url = `${API_BASE_URL}/inventorysearch/lov/${type}`;
       if (type === 'catalogue' && category.trim()) {
         url += `?category=${encodeURIComponent(category.trim())}`;
       }
@@ -318,10 +318,7 @@ export default function InventorySearchScreen() {
           <ThemedText style={styles.title}>Inventory Search</ThemedText>
         </View>
         <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
-          <TouchableOpacity style={styles.printBtn} onPress={handlePrint}>
-            <Ionicons name="print-outline" size={14} color="#5C4A28" style={{ marginRight: 4 }} />
-            <ThemedText style={styles.clearBtnText}>Print</ThemedText>
-          </TouchableOpacity>
+
           <TouchableOpacity style={styles.clearBtn} onPress={handleClear}>
             <Ionicons name="refresh-outline" size={14} color="#5C4A28" style={{ marginRight: 4 }} />
             <ThemedText style={styles.clearBtnText}>Clear</ThemedText>

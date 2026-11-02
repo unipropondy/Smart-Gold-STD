@@ -1,6 +1,23 @@
 const express = require("express");
-const { sql } = require("../db");
+const { sql, getPool } = require("../db");
 const router = express.Router();
+
+// Helper to inspect tblInventory columns
+router.get("/debug-inventory-cols", async (req, res) => {
+  try {
+    const pool = await getPool(process.env.DB_NAME || 'smartgold');
+    const colsRes = await pool.request().query(`
+      SELECT COLUMN_NAME, DATA_TYPE 
+      FROM INFORMATION_SCHEMA.COLUMNS 
+      WHERE TABLE_NAME = 'tblInventory'
+      ORDER BY ORDINAL_POSITION
+    `);
+    res.json({ success: true, columns: colsRes.recordset });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 
 // ================= KDS TODAY =================
 router.get("/kds-today", async (req, res) => {

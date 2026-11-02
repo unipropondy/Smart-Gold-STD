@@ -1,3 +1,7 @@
+/**
+ * Developer: durairaj
+ */
+
 import { ThemedText } from '@/components/themed-text';
 import { API_BASE_URL } from '@/constants/api';
 import { Ionicons } from '@expo/vector-icons';
@@ -7,12 +11,13 @@ import {
   ActivityIndicator,
   FlatList,
   Modal,
+  Platform,
   ScrollView,
   StyleSheet,
   TextInput,
   TouchableOpacity,
   TouchableWithoutFeedback,
-  View
+  View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -24,13 +29,12 @@ export default function PurchaseEntryScreen() {
   const [saving, setSaving] = useState(false);
   const [loadingDetails, setLoadingDetails] = useState(false);
   const [loadingLookup, setLoadingLookup] = useState(false);
-  const [isEditing, setIsEditing] = useState(false);
 
-  // Form State
+  // Form State matching frmPurchaseEntry.vb
   const [jobSheetNo, setJobSheetNo] = useState('');
   const [invoiceNo, setInvoiceNo] = useState('');
 
-  // Date Fields
+  // Date Fields (txtIDD, txtIMM, txtIYYYY)
   const [invoiceDateDD, setInvoiceDateDD] = useState('');
   const [invoiceDateMM, setInvoiceDateMM] = useState('');
   const [invoiceDateYYYY, setInvoiceDateYYYY] = useState('');
@@ -47,15 +51,16 @@ export default function PurchaseEntryScreen() {
   const [searchQuery, setSearchQuery] = useState('');
 
   // Toast Notification State
-  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
 
-  const showToast = (message: string, type: 'success' | 'error' = 'success') => {
+  const showToast = (message: string, type: 'success' | 'error' | 'info' = 'success') => {
     setToast({ message, type });
     setTimeout(() => {
       setToast(null);
-    }, 3000);
+    }, 3200);
   };
 
+  // Fetch LOV JobSheets matching btnJobSheetNoSearch_Click
   const fetchJobSheets = async () => {
     setLoadingLookup(true);
     try {
@@ -98,46 +103,62 @@ export default function PurchaseEntryScreen() {
 
   const selectJobSheet = async (item: any) => {
     setIsModalVisible(false);
-    setJobSheetNo(item.JobSheetNo);
-    loadJobSheetDetails(item.JobSheetNo);
+    const selectedNo = (item.JobSheetNo || '').trim();
+    setJobSheetNo(selectedNo);
+    if (item.PurchaseBillNo) setInvoiceNo(item.PurchaseBillNo.trim());
+    if (item.SupplierCode) setSupplier(item.SupplierCode.trim());
+    loadJobSheetDetails(selectedNo);
   };
 
+  // Load JobSheet details matching subGetJobSheetDetail in frmPurchaseEntry.vb
   const loadJobSheetDetails = async (id: string) => {
-    if (!id.trim()) return;
+    const trimmedId = id.trim();
+    if (!trimmedId) return;
     setLoadingDetails(true);
     try {
-      const response = await fetch(`${API_URL}/jobsheet/${encodeURIComponent(id)}?t=${Date.now()}`);
+      const response = await fetch(`${API_URL}/jobsheet/${encodeURIComponent(trimmedId)}?t=${Date.now()}`);
       const json = await response.json();
       if (json.success && json.data) {
         const data = json.data;
-        setInvoiceNo(data.PurchaseBillNo || '');
-        setSupplier(data.SupplierCode || '');
-        setTotalGSTSales(data.TotalBeforeGST ? Number(data.TotalBeforeGST).toFixed(2) : '');
-        setGst(data.GST ? Number(data.GST).toFixed(2) : '');
-        setTotalSales(data.TotalSales ? Number(data.TotalSales).toFixed(2) : '');
-        setIsEditing(true);
+        if (data.PurchaseBillNo !== undefined) setInvoiceNo(data.PurchaseBillNo || '');
+        if (data.SupplierCode !== undefined) setSupplier(data.SupplierCode || '');
+        setTotalGSTSales(data.TotalBeforeGST !== undefined && data.TotalBeforeGST !== null ? Number(data.TotalBeforeGST).toFixed(2) : '');
+        setGst(data.GST !== undefined && data.GST !== null ? Number(data.GST).toFixed(2) : '');
+        setTotalSales(data.TotalSales !== undefined && data.TotalSales !== null ? Number(data.TotalSales).toFixed(2) : '');
 
         if (data.PurchaseBillDate) {
           const dateObj = new Date(data.PurchaseBillDate);
-          setInvoiceDateDD(String(dateObj.getDate()).padStart(2, '0'));
-          setInvoiceDateMM(String(dateObj.getMonth() + 1).padStart(2, '0'));
-          setInvoiceDateYYYY(String(dateObj.getFullYear()));
+          if (!isNaN(dateObj.getTime())) {
+            setInvoiceDateDD(String(dateObj.getDate()).padStart(2, '0'));
+            setInvoiceDateMM(String(dateObj.getMonth() + 1).padStart(2, '0'));
+            setInvoiceDateYYYY(String(dateObj.getFullYear()));
+          } else {
+            setInvoiceDateDD('');
+            setInvoiceDateMM('');
+            setInvoiceDateYYYY('');
+          }
         } else {
           setInvoiceDateDD('');
           setInvoiceDateMM('');
           setInvoiceDateYYYY('');
         }
       } else {
-        setIsEditing(false);
+        const msg = json.error ? `${json.message || 'Error'}: ${json.error}` : (json.message || 'Jobsheet No not found.');
+        showToast(msg, 'error');
       }
-    } catch (e) {
+    } catch (e: any) {
       console.error(e);
-      showToast('Failed to fetch job sheet details', 'error');
+      showToast(e?.message || 'Jobsheet No not found.', 'error');
     } finally {
       setLoadingDetails(false);
     }
   };
 
+  // Calculation matching txtTotalGSTSales_Leave in frmPurchaseEntry.vb:
+  // If Val(txtTotalGSTSales.Text) <> 0 Then
+  //   txtGST.Text = Format(Val(txtTotalGSTSales.Text) * 0.09, "0.00")
+  //   txtTotalSales.Text = Format(Val(txtTotalGSTSales.Text) + Val(txtGST.Text), "0.00")
+  // End If
   const handleTotalGSTSalesChange = (val: string) => {
     setTotalGSTSales(val);
   };
@@ -145,30 +166,31 @@ export default function PurchaseEntryScreen() {
   const handleTotalGSTSalesBlur = () => {
     const valNum = parseFloat(totalGSTSales);
     if (!isNaN(valNum) && valNum !== 0) {
-      const calculatedGst = valNum * 0.09;
+      const calculatedGst = Number((valNum * 0.09).toFixed(2));
+      const calculatedTotal = Number((valNum + calculatedGst).toFixed(2));
       setGst(calculatedGst.toFixed(2));
-      setTotalSales((valNum + calculatedGst).toFixed(2));
-    } else {
-      setGst('');
-      setTotalSales('');
+      setTotalSales(calculatedTotal.toFixed(2));
+    } else if (valNum === 0) {
+      setGst('0.00');
+      setTotalSales('0.00');
     }
   };
 
+  // Validations matching fncValidateMe() in frmPurchaseEntry.vb:
+  // If txtJobSheetNo.Text.Trim = "" Then MsgBox "JobsheeNo should not be blank."
+  // If txtInvoiceNo.Text.Trim = "" Then MsgBox "Invoice No should not be blank."
+  // ElseIf txtSupplier.Text.Trim = "" Then MsgBox "Supplier Code should not be blank."
   const handleSave = async () => {
     if (!jobSheetNo.trim()) {
-      showToast('JobSheet No is required', 'error');
+      showToast('JobsheeNo should not be blank.', 'error');
       return;
     }
     if (!invoiceNo.trim()) {
-      showToast('Invoice No is required', 'error');
+      showToast('Invoice No should not be blank.', 'error');
       return;
     }
     if (!supplier.trim()) {
-      showToast('Supplier Code is required', 'error');
-      return;
-    }
-    if (!totalGSTSales.trim() || isNaN(parseFloat(totalGSTSales)) || parseFloat(totalGSTSales) <= 0) {
-      showToast('Total GST Sales is required and must be greater than 0', 'error');
+      showToast('Supplier Code should not be blank.', 'error');
       return;
     }
 
@@ -183,36 +205,28 @@ export default function PurchaseEntryScreen() {
 
     setSaving(true);
     try {
-      let response;
-      if (isEditing) {
-        response = await fetch(`${API_URL}/jobsheet/${encodeURIComponent(jobSheetNo.trim())}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
-        });
-      } else {
-        response = await fetch(`${API_URL}/jobsheet`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
-        });
-      }
+      const response = await fetch(`${API_URL}/jobsheet/${encodeURIComponent(jobSheetNo.trim())}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
 
       const json = await response.json();
       if (json.success) {
-        showToast(isEditing ? 'Purchase details updated successfully!' : 'Purchase entry inserted successfully!');
+        showToast('Purchase Details updated successfully!', 'success');
         handleClear();
       } else {
-        showToast(json.message || 'Error saving purchase entry.', 'error');
+        showToast(json.message || 'Error in Save.', 'error');
       }
     } catch (error) {
       console.error('Save error:', error);
-      showToast('Failed to save purchase entry', 'error');
+      showToast('Error in Save.', 'error');
     } finally {
       setSaving(false);
     }
   };
 
+  // Clear matching subClearMe() in frmPurchaseEntry.vb
   const handleClear = () => {
     setJobSheetNo('');
     setInvoiceNo('');
@@ -223,7 +237,6 @@ export default function PurchaseEntryScreen() {
     setTotalGSTSales('');
     setGst('');
     setTotalSales('');
-    setIsEditing(false);
   };
 
   return (
@@ -264,8 +277,8 @@ export default function PurchaseEntryScreen() {
               <ActivityIndicator size="small" color="#9E6D08" />
             ) : (
               <>
-                <Ionicons name="checkmark-done-outline" size={14} color="#9E6D08" />
-                <ThemedText style={styles.saveBtnText}>{isEditing ? 'Update' : 'Save'}</ThemedText>
+                <Ionicons name="save-outline" size={14} color="#7D5800" />
+                <ThemedText style={styles.saveBtnText}>Save</ThemedText>
               </>
             )}
           </TouchableOpacity>
@@ -277,11 +290,24 @@ export default function PurchaseEntryScreen() {
         <View
           style={[
             styles.toast,
-            { backgroundColor: toast.type === 'success' ? '#2E7D32' : '#D32F2F' },
+            {
+              backgroundColor:
+                toast.type === 'success'
+                  ? '#2E7D32'
+                  : toast.type === 'info'
+                    ? '#0288D1'
+                    : '#C62828',
+            },
           ]}
         >
           <Ionicons
-            name={toast.type === 'success' ? 'checkmark-circle' : 'alert-circle'}
+            name={
+              toast.type === 'success'
+                ? 'checkmark-circle'
+                : toast.type === 'info'
+                  ? 'information-circle'
+                  : 'alert-circle'
+            }
             size={16}
             color="#FFFFFF"
             style={{ marginRight: 6 }}
@@ -301,28 +327,30 @@ export default function PurchaseEntryScreen() {
             <View style={styles.cardHeaderBanner}>
               <View style={styles.headerTitleContainer}>
                 <View style={styles.headerIconBadge}>
-                  <Ionicons name="receipt-outline" size={16} color="#B48218" />
+                  <Ionicons name="receipt-outline" size={15} color="#B48218" />
                 </View>
                 <ThemedText style={styles.cardHeaderTitle}>Purchase Invoice Details</ThemedText>
               </View>
-              {isEditing && (
-                <View style={styles.badgeEditing}>
-                  <ThemedText style={styles.badgeEditingText}>EDIT MODE</ThemedText>
-                </View>
-              )}
             </View>
 
             <View style={styles.cardBody}>
               {/* JobSheet No with Lookup */}
               <View style={styles.formRow}>
-                <ThemedText style={styles.fieldLabel}>
-                  JobSheet No <ThemedText style={styles.reqStar}>*</ThemedText>
-                </ThemedText>
+                <ThemedText style={styles.fieldLabel}>JobSheet No</ThemedText>
                 <View style={styles.fieldValueContainer}>
-                  <View style={styles.lookupInputWrapper}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                     <TextInput
-                      style={[styles.input, { flex: 1 }]}
-                      placeholder="Enter or select JobSheet..."
+                      style={[
+                        styles.input,
+                        {
+                          width: 140,
+                          minWidth: 0,
+                          borderTopRightRadius: 0,
+                          borderBottomRightRadius: 0,
+                          borderRightWidth: 0,
+                        },
+                      ]}
+                      placeholder="JobSheet No"
                       placeholderTextColor="#9E8D77"
                       value={jobSheetNo}
                       onChangeText={setJobSheetNo}
@@ -334,7 +362,7 @@ export default function PurchaseEntryScreen() {
                       onPress={handleOpenLookup}
                       activeOpacity={0.7}
                     >
-                      <Ionicons name="search" size={14} color="#6E5528" />
+                      <ThemedText style={styles.lookupBtnText}>...</ThemedText>
                     </TouchableOpacity>
                   </View>
                 </View>
@@ -349,13 +377,11 @@ export default function PurchaseEntryScreen() {
 
               {/* Invoice No */}
               <View style={styles.formRow}>
-                <ThemedText style={styles.fieldLabel}>
-                  Invoice No <ThemedText style={styles.reqStar}>*</ThemedText>
-                </ThemedText>
+                <ThemedText style={styles.fieldLabel}>Invoice No</ThemedText>
                 <View style={styles.fieldValueContainer}>
                   <TextInput
-                    style={styles.input}
-                    placeholder="Enter Invoice / Bill No"
+                    style={[styles.input, { width: 172, minWidth: 0 }]}
+                    placeholder="Invoice / Bill No"
                     placeholderTextColor="#9E8D77"
                     value={invoiceNo}
                     onChangeText={setInvoiceNo}
@@ -369,7 +395,7 @@ export default function PurchaseEntryScreen() {
                 <View style={styles.fieldValueContainer}>
                   <View style={styles.dateRow}>
                     <TextInput
-                      style={[styles.input, styles.datePartInput, { width: 44 }]}
+                      style={[styles.input, styles.datePartInput, { width: 44, minWidth: 0 }]}
                       placeholder="DD"
                       placeholderTextColor="#9E8D77"
                       value={invoiceDateDD}
@@ -379,7 +405,7 @@ export default function PurchaseEntryScreen() {
                     />
                     <ThemedText style={styles.dateSeparator}>/</ThemedText>
                     <TextInput
-                      style={[styles.input, styles.datePartInput, { width: 44 }]}
+                      style={[styles.input, styles.datePartInput, { width: 44, minWidth: 0 }]}
                       placeholder="MM"
                       placeholderTextColor="#9E8D77"
                       value={invoiceDateMM}
@@ -389,7 +415,7 @@ export default function PurchaseEntryScreen() {
                     />
                     <ThemedText style={styles.dateSeparator}>/</ThemedText>
                     <TextInput
-                      style={[styles.input, styles.datePartInput, { width: 68 }]}
+                      style={[styles.input, styles.datePartInput, { width: 68, minWidth: 0 }]}
                       placeholder="YYYY"
                       placeholderTextColor="#9E8D77"
                       value={invoiceDateYYYY}
@@ -403,13 +429,11 @@ export default function PurchaseEntryScreen() {
 
               {/* Supplier Code */}
               <View style={styles.formRow}>
-                <ThemedText style={styles.fieldLabel}>
-                  Supplier <ThemedText style={styles.reqStar}>*</ThemedText>
-                </ThemedText>
+                <ThemedText style={styles.fieldLabel}>Supplier</ThemedText>
                 <View style={styles.fieldValueContainer}>
                   <TextInput
-                    style={styles.input}
-                    placeholder="Enter Supplier Code"
+                    style={[styles.input, { width: 172, minWidth: 0 }]}
+                    placeholder="Supplier Code"
                     placeholderTextColor="#9E8D77"
                     value={supplier}
                     onChangeText={setSupplier}
@@ -425,21 +449,19 @@ export default function PurchaseEntryScreen() {
             <View style={styles.cardHeaderBanner}>
               <View style={styles.headerTitleContainer}>
                 <View style={styles.headerIconBadge}>
-                  <Ionicons name="calculator-outline" size={16} color="#B48218" />
+                  <Ionicons name="calculator-outline" size={15} color="#B48218" />
                 </View>
                 <ThemedText style={styles.cardHeaderTitle}>Sales & Tax Calculation</ThemedText>
               </View>
             </View>
 
             <View style={styles.cardBody}>
-              {/* Total GST Sales */}
+              {/* Total GST Sales (Subtotal before GST) */}
               <View style={styles.formRow}>
-                <ThemedText style={styles.fieldLabel}>
-                  Total GST Sales <ThemedText style={styles.reqStar}>*</ThemedText>
-                </ThemedText>
+                <ThemedText style={styles.fieldLabel}>Total GST Sales</ThemedText>
                 <View style={styles.fieldValueContainer}>
                   <TextInput
-                    style={[styles.input, { textAlign: 'right', fontWeight: '600' }]}
+                    style={[styles.input, { width: 172, minWidth: 0, textAlign: 'right', fontWeight: '600' }]}
                     placeholder="0.00"
                     placeholderTextColor="#9E8D77"
                     value={totalGSTSales}
@@ -454,31 +476,30 @@ export default function PurchaseEntryScreen() {
               <View style={styles.formRow}>
                 <View style={styles.labelWithSubContainer}>
                   <ThemedText style={styles.fieldLabel}>GST (9%)</ThemedText>
-                  <ThemedText style={styles.fieldSubLabel}>Auto Calculated</ThemedText>
                 </View>
                 <View style={styles.fieldValueContainer}>
                   <TextInput
-                    style={[styles.input, styles.readOnlyInput, { textAlign: 'right', fontWeight: 'bold', color: '#9E6D08' }]}
-                    value={gst ? `$ ${gst}` : '$ 0.00'}
+                    style={[styles.input, styles.readOnlyInput, { width: 172, minWidth: 0, textAlign: 'right', fontWeight: 'bold', color: '#9E6D08' }]}
+                    value={gst || '0.00'}
                     editable={false}
                   />
                 </View>
               </View>
 
-              {/* Total Sales */}
+              {/* Total Sales (Total + GST) */}
               <View style={[styles.formRow, { borderBottomWidth: 0, paddingBottom: 0 }]}>
                 <View style={styles.labelWithSubContainer}>
-                  <ThemedText style={[styles.fieldLabel, { fontSize: 13, color: '#3B2D17' }]}>Total Sales</ThemedText>
-                  <ThemedText style={styles.fieldSubLabel}>Inclusive of GST</ThemedText>
+                  <ThemedText style={[styles.fieldLabel, { fontSize: 12, color: '#3B2D17' }]}>Total Sales</ThemedText>
                 </View>
                 <View style={styles.fieldValueContainer}>
                   <TextInput
                     style={[
                       styles.input,
                       styles.readOnlyInput,
-                      styles.totalHighlightInput
+                      styles.totalHighlightInput,
+                      { width: 172, minWidth: 0 }
                     ]}
-                    value={totalSales ? `$ ${totalSales}` : '$ 0.00'}
+                    value={totalSales || '0.00'}
                     editable={false}
                   />
                 </View>
@@ -503,7 +524,7 @@ export default function PurchaseEntryScreen() {
                 <View style={styles.modalHeader}>
                   <View style={styles.modalTitleContainer}>
                     <View style={styles.modalIconBadge}>
-                      <Ionicons name="search" size={16} color="#B48218" />
+                      <Ionicons name="search" size={15} color="#B48218" />
                     </View>
                     <ThemedText style={styles.modalTitle}>Select JobSheet</ThemedText>
                   </View>
@@ -511,14 +532,14 @@ export default function PurchaseEntryScreen() {
                     onPress={() => setIsModalVisible(false)}
                     style={styles.modalCloseBtn}
                   >
-                    <Ionicons name="close" size={20} color="#5C4A28" />
+                    <Ionicons name="close" size={18} color="#5C4A28" />
                   </TouchableOpacity>
                 </View>
 
                 {/* Modal Search Input */}
                 <View style={styles.modalSearchSection}>
                   <View style={styles.modalSearchBox}>
-                    <Ionicons name="search-outline" size={16} color="#7D6F5B" style={{ marginRight: 8 }} />
+                    <Ionicons name="search-outline" size={15} color="#7D6F5B" style={{ marginRight: 8 }} />
                     <TextInput
                       style={styles.modalSearchInput}
                       placeholder="Search JobSheet No, Bill No, or Supplier..."
@@ -537,7 +558,7 @@ export default function PurchaseEntryScreen() {
 
                 {/* Table Header */}
                 <View style={styles.tableHeaderRow}>
-                  <ThemedText style={[styles.tableHeaderCell, { flex: 1.2 }]}>JobSheet No</ThemedText>
+                  <ThemedText style={[styles.tableHeaderCell, { flex: 1.3 }]}>JobSheet No</ThemedText>
                   <ThemedText style={[styles.tableHeaderCell, { flex: 1.2 }]}>Purchase Bill No</ThemedText>
                   <ThemedText style={[styles.tableHeaderCell, { flex: 1 }]}>Supplier Code</ThemedText>
                 </View>
@@ -550,14 +571,14 @@ export default function PurchaseEntryScreen() {
                   </View>
                 ) : filteredLookupData.length === 0 ? (
                   <View style={styles.modalEmpty}>
-                    <Ionicons name="document-text-outline" size={36} color="#C4B69C" />
+                    <Ionicons name="document-text-outline" size={32} color="#C4B69C" />
                     <ThemedText style={styles.modalEmptyText}>No job sheets found</ThemedText>
                   </View>
                 ) : (
                   <FlatList
                     data={filteredLookupData}
                     keyExtractor={(item, index) => item.JobSheetNo || index.toString()}
-                    style={{ maxHeight: 380 }}
+                    style={{ maxHeight: 360 }}
                     renderItem={({ item, index }) => (
                       <TouchableOpacity
                         style={[
@@ -567,7 +588,7 @@ export default function PurchaseEntryScreen() {
                         activeOpacity={0.7}
                         onPress={() => selectJobSheet(item)}
                       >
-                        <ThemedText style={[styles.tableRowCell, styles.boldCell, { flex: 1.2 }]}>
+                        <ThemedText style={[styles.tableRowCell, styles.boldCell, { flex: 1.3 }]}>
                           {item.JobSheetNo}
                         </ThemedText>
                         <ThemedText style={[styles.tableRowCell, { flex: 1.2 }]}>
@@ -624,9 +645,9 @@ const styles = StyleSheet.create({
     borderColor: '#E8DCB8',
   },
   headerTitle: {
-    fontSize: 20,
-    fontWeight: '400',
-    letterSpacing: 1,
+    fontSize: 18,
+    fontWeight: 'bold',
+    letterSpacing: 0.5,
     color: '#3B2D17',
   },
   headerRight: {
@@ -639,18 +660,18 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 12,
-    paddingVertical: 6,
+    paddingVertical: 5,
     borderRadius: 6,
     borderWidth: 1,
     gap: 5,
-    minHeight: 30,
+    minHeight: 28,
   },
   saveBtn: {
-    backgroundColor: '#F9F2E2',
-    borderColor: '#B8903B',
+    backgroundColor: '#FAF0D7',
+    borderColor: '#D8B257',
   },
   saveBtnText: {
-    color: '#9E6D08',
+    color: '#7D5800',
     fontSize: 12,
     fontWeight: 'bold',
   },
@@ -674,7 +695,7 @@ const styles = StyleSheet.create({
   },
   mainWrapper: {
     width: '100%',
-    maxWidth: 720,
+    maxWidth: 700,
     gap: 12,
   },
 
@@ -707,9 +728,9 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   headerIconBadge: {
-    width: 26,
-    height: 26,
-    borderRadius: 6,
+    width: 24,
+    height: 24,
+    borderRadius: 5,
     backgroundColor: '#FFF8EA',
     borderWidth: 1,
     borderColor: '#E2D2AF',
@@ -721,20 +742,6 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: '#3B2D17',
     letterSpacing: 0.3,
-  },
-  badgeEditing: {
-    backgroundColor: '#FAF1D8',
-    borderWidth: 1,
-    borderColor: '#C29837',
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 4,
-  },
-  badgeEditingText: {
-    color: '#8D6409',
-    fontSize: 10,
-    fontWeight: 'bold',
-    letterSpacing: 0.5,
   },
   cardBody: {
     padding: 12,
@@ -749,23 +756,14 @@ const styles = StyleSheet.create({
     borderBottomColor: '#F5EFE4',
   },
   fieldLabel: {
-    width: 140,
+    width: 130,
     fontSize: 12,
     fontWeight: '600',
     color: '#4A3B2C',
   },
   labelWithSubContainer: {
-    width: 140,
+    width: 130,
     justifyContent: 'center',
-  },
-  fieldSubLabel: {
-    fontSize: 10,
-    color: '#9E8D77',
-    marginTop: 1,
-  },
-  reqStar: {
-    color: '#D32F2F',
-    fontWeight: 'bold',
   },
   fieldValueContainer: {
     flex: 1,
@@ -780,7 +778,9 @@ const styles = StyleSheet.create({
     paddingVertical: 0,
     fontSize: 12,
     color: '#2B2118',
-  },
+    minWidth: 0,
+    ...(Platform.OS === 'web' ? { outlineStyle: 'none', boxSizing: 'border-box' } : {}),
+  } as any,
   readOnlyInput: {
     backgroundColor: '#F8F5EE',
     borderColor: '#EADBCA',
@@ -790,7 +790,7 @@ const styles = StyleSheet.create({
     textAlign: 'right',
     fontWeight: 'bold',
     color: '#9E6D08',
-    fontSize: 13,
+    fontSize: 12,
     backgroundColor: '#FFF9ED',
     borderColor: '#C29837',
   },
@@ -810,28 +810,31 @@ const styles = StyleSheet.create({
     fontSize: 13,
   },
 
-  // Lookup Input
-  lookupInputWrapper: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
+  // Lookup Button
   lookupBtn: {
     width: 32,
     height: 28,
     backgroundColor: '#FAF5EA',
     borderWidth: 1,
-    borderColor: '#E2D7C5',
-    borderRadius: 6,
-    alignItems: 'center',
+    borderColor: '#DFD5C3',
+    borderTopRightRadius: 6,
+    borderBottomRightRadius: 6,
     justifyContent: 'center',
+    alignItems: 'center',
+    flexShrink: 0,
+    ...(Platform.OS === 'web' ? { boxSizing: 'border-box' } : {}),
+  } as any,
+  lookupBtnText: {
+    fontSize: 13,
+    fontWeight: 'bold',
+    color: '#6E5528',
   },
 
   inlineLoading: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    paddingVertical: 8,
+    paddingVertical: 6,
     paddingHorizontal: 4,
   },
   inlineLoadingText: {
@@ -873,7 +876,7 @@ const styles = StyleSheet.create({
   },
   modalContainer: {
     width: '100%',
-    maxWidth: 620,
+    maxWidth: 600,
     backgroundColor: '#FFFFFF',
     borderRadius: 10,
     borderWidth: 1,
@@ -888,7 +891,7 @@ const styles = StyleSheet.create({
   modalHeader: {
     backgroundColor: '#F5E7CA',
     paddingHorizontal: 14,
-    paddingVertical: 10,
+    paddingVertical: 9,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
@@ -901,9 +904,9 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   modalIconBadge: {
-    width: 26,
-    height: 26,
-    borderRadius: 6,
+    width: 24,
+    height: 24,
+    borderRadius: 5,
     backgroundColor: '#FFF8EA',
     borderWidth: 1,
     borderColor: '#E2D2AF',
@@ -911,7 +914,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   modalTitle: {
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: 'bold',
     color: '#3B2D17',
   },
@@ -933,18 +936,20 @@ const styles = StyleSheet.create({
     borderColor: '#E2D7C5',
     borderRadius: 6,
     paddingHorizontal: 10,
-    height: 32,
+    height: 30,
   },
   modalSearchInput: {
     flex: 1,
     fontSize: 12,
     color: '#2B2118',
     paddingVertical: 0,
-  },
+    minWidth: 0,
+    ...(Platform.OS === 'web' ? { outlineStyle: 'none' } : {}),
+  } as any,
   tableHeaderRow: {
     flexDirection: 'row',
     backgroundColor: '#F5E7CA',
-    paddingVertical: 8,
+    paddingVertical: 7,
     paddingHorizontal: 12,
     borderBottomWidth: 1,
     borderBottomColor: '#E2D3B3',
@@ -958,7 +963,7 @@ const styles = StyleSheet.create({
   tableRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 9,
+    paddingVertical: 8,
     paddingHorizontal: 12,
     borderBottomWidth: 1,
     borderBottomColor: '#F3EBDD',

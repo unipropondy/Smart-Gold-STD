@@ -1,3 +1,7 @@
+/**
+ * Developer: durairaj
+ */
+
 import { ThemedText } from '@/components/themed-text';
 import { API_BASE_URL } from '@/constants/api';
 import { Ionicons } from '@expo/vector-icons';
@@ -7,6 +11,7 @@ import {
   ActivityIndicator,
   FlatList,
   Modal,
+  Platform,
   ScrollView,
   StyleSheet,
   TextInput,
@@ -21,25 +26,27 @@ const API_URL = `${API_BASE_URL}`;
 export default function SupplierPaymentAmendmentScreen() {
   const router = useRouter();
 
-  // ===== STATE =====
+  // ===== SEARCH CRITERIA STATE =====
   const [supplierCode, setSupplierCode] = useState('');
   const [supplierName, setSupplierName] = useState('');
   const [invoiceNo, setInvoiceNo] = useState('');
   const [customerCopy, setCustomerCopy] = useState(false);
 
+  // ===== GRID STATE =====
   const [payments, setPayments] = useState<any[]>([]);
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
 
-  // Selected Detail State
+  // ===== SELECTED PAYMENT AMENDMENT ENTRY STATE =====
   const [detailPaymentNo, setDetailPaymentNo] = useState('');
   const [detailPaymentDate, setDetailPaymentDate] = useState('');
   const [detailPaymode, setDetailPaymode] = useState('');
   const [detailAmount, setDetailAmount] = useState('');
   const [detailRemarks, setDetailRemarks] = useState('');
 
+  // Loading & Action States
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
 
   // LOV State
   const [lovVisible, setLovVisible] = useState(false);
@@ -47,17 +54,27 @@ export default function SupplierPaymentAmendmentScreen() {
   const [lovData, setLovData] = useState<any[]>([]);
   const [filteredLovData, setFilteredLovData] = useState<any[]>([]);
   const [lovSearch, setLovSearch] = useState('');
-  const [lovColumns, setLovColumns] = useState<string[]>([]);
+  const [lovColumns, setLovColumns] = useState<{ key: string; label: string; flex?: number }[]>([]);
   const [onLovSelect, setOnLovSelect] = useState<((item: any) => void) | null>(null);
 
-  const showToast = (message: string, type: 'success' | 'error' = 'success') => {
+  // Voucher / RePrint Modal State
+  const [voucherModalVisible, setVoucherModalVisible] = useState(false);
+  const [voucherData, setVoucherData] = useState<any[]>([]);
+  const [voucherLoading, setVoucherLoading] = useState(false);
+
+  const showToast = (message: string, type: 'success' | 'error' | 'info' = 'success') => {
     setToast({ message, type });
     setTimeout(() => {
       setToast(null);
-    }, 3000);
+    }, 3200);
   };
 
-  const openLov = (title: string, data: any[], columns: string[], onSelect: (item: any) => void) => {
+  const openLov = (
+    title: string,
+    data: any[],
+    columns: { key: string; label: string; flex?: number }[],
+    onSelect: (item: any) => void
+  ) => {
     setLovTitle(title);
     setLovData(data);
     setFilteredLovData(data);
@@ -69,7 +86,7 @@ export default function SupplierPaymentAmendmentScreen() {
 
   const handleLovSearch = (text: string) => {
     setLovSearch(text);
-    if (!text) {
+    if (!text.trim()) {
       setFilteredLovData(lovData);
       return;
     }
@@ -85,18 +102,28 @@ export default function SupplierPaymentAmendmentScreen() {
     setLovVisible(false);
   };
 
+  // Supplier Search LOV matching btnSupplierCodeSearch_Click in frmSupplierPaymentAmendment.vb
   const fetchSuppliers = async () => {
     setLoading(true);
     try {
-      const res = await fetch(`${API_URL}/supplier`);
+      const res = await fetch(`${API_URL}/supplierpaymentamendment/lov/supplier`);
       const json = await res.json();
-      if (json.success) {
-        openLov('Select Supplier', json.data, ['SupplierCode', 'SupplierName'], item => {
-          setSupplierCode(item.SupplierCode);
-          setSupplierName(item.SupplierName);
-        });
+      if (json.success && json.data) {
+        openLov(
+          'Select Supplier',
+          json.data,
+          [
+            { key: 'SupplierCode', label: 'Supplier Code', flex: 1.5 },
+            { key: 'SupplierName', label: 'Supplier Name', flex: 2.5 },
+            { key: 'Address1', label: 'Address', flex: 2 }
+          ],
+          item => {
+            setSupplierCode(item.SupplierCode);
+            setSupplierName(item.SupplierName);
+          }
+        );
       } else {
-        showToast('Failed to fetch suppliers', 'error');
+        showToast(json.message || 'Failed to fetch suppliers', 'error');
       }
     } catch (e) {
       showToast('Error connecting to server', 'error');
@@ -105,6 +132,63 @@ export default function SupplierPaymentAmendmentScreen() {
     }
   };
 
+  // Supplier Blur Validation
+  const handleSupplierBlur = async () => {
+    if (!supplierCode.trim()) {
+      setSupplierName('');
+      return;
+    }
+    try {
+      const res = await fetch(`${API_URL}/supplierpaymentamendment/supplier/${encodeURIComponent(supplierCode.trim())}`);
+      const json = await res.json();
+      if (json.success && json.data) {
+        setSupplierCode(json.data.SupplierCode);
+        setSupplierName(json.data.SupplierName);
+      } else {
+        showToast('Invalid supplier code!', 'error');
+        setSupplierCode('');
+        setSupplierName('');
+      }
+    } catch (e) {
+      console.warn('Supplier check error:', e);
+    }
+  };
+
+  // Invoice Lookup LOV
+  const fetchInvoices = async () => {
+    setLoading(true);
+    try {
+      const queryParam = supplierCode.trim() ? `?SupplierCode=${encodeURIComponent(supplierCode.trim())}` : '';
+      const res = await fetch(`${API_URL}/supplierpaymentamendment/lov/invoices${queryParam}`);
+      const json = await res.json();
+      if (json.success && json.data) {
+        if (json.data.length === 0) {
+          showToast('No invoices found for this supplier', 'info');
+          return;
+        }
+        openLov(
+          'Select Invoice',
+          json.data,
+          [
+            { key: 'InvoiceNo', label: 'Invoice No', flex: 1.5 },
+            { key: 'InvoiceDate', label: 'Date', flex: 1.2 },
+            { key: 'JobSheetNo', label: 'Job Sheet', flex: 1.5 }
+          ],
+          item => {
+            setInvoiceNo(item.InvoiceNo);
+          }
+        );
+      } else {
+        showToast(json.message || 'Failed to fetch invoices', 'error');
+      }
+    } catch (e) {
+      showToast('Error connecting to server', 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Fetch Payments matching cmdFetch_Click in frmSupplierPaymentAmendment.vb
   const handleFetch = async () => {
     if (!supplierCode.trim()) {
       showToast('Supplier Code is required', 'error');
@@ -118,15 +202,15 @@ export default function SupplierPaymentAmendmentScreen() {
     setLoading(true);
     try {
       const res = await fetch(
-        `${API_URL}/supplierpaymentamendment/fetch?SupplierCode=${supplierCode}&InvoiceNo=${invoiceNo}`
+        `${API_URL}/supplierpaymentamendment/fetch?SupplierCode=${encodeURIComponent(supplierCode.trim())}&InvoiceNo=${encodeURIComponent(invoiceNo.trim())}`
       );
       const json = await res.json();
       if (json.success) {
-        setPayments(json.data);
-        if (json.data.length === 0) {
-          showToast('No payments found for this criteria.', 'error');
+        setPayments(json.data || []);
+        if (!json.data || json.data.length === 0) {
+          showToast('No payment records found', 'info');
         } else {
-          showToast(`Loaded ${json.data.length} records.`, 'success');
+          showToast(`Loaded ${json.data.length} payment records`, 'success');
         }
       } else {
         showToast(json.message || 'Failed to fetch details', 'error');
@@ -138,15 +222,17 @@ export default function SupplierPaymentAmendmentScreen() {
     }
   };
 
+  // Select Payment Row matching dgvSupplier_Click in frmSupplierPaymentAmendment.vb
   const handleSelectPayment = (item: any, idx: number) => {
     setSelectedIndex(idx);
     setDetailPaymentNo(item.PaymentNo || '');
-    setDetailPaymentDate(item.PaymentDate ? item.PaymentDate.split('T')[0] : '');
+    setDetailPaymentDate(item.PaymentDate || '');
     setDetailPaymode(item.Paymode || '');
-    setDetailAmount(item.PaymentAmount ? item.PaymentAmount.toString() : '');
+    setDetailAmount(item.PaymentAmount ? Number(item.PaymentAmount).toFixed(2) : '0.00');
     setDetailRemarks(item.Remarks || '');
   };
 
+  // Clear Form matching SubClearall() in frmSupplierPaymentAmendment.vb
   const handleClearAll = () => {
     setSupplierCode('');
     setSupplierName('');
@@ -159,16 +245,18 @@ export default function SupplierPaymentAmendmentScreen() {
     setDetailPaymode('');
     setDetailAmount('');
     setDetailRemarks('');
-    showToast('Form Cleared', 'success');
+    showToast('Cleared All', 'info');
   };
 
+  // Update Payment Details matching cmdUpdate_Click in frmSupplierPaymentAmendment.vb
   const handleUpdate = async () => {
     if (!detailPaymentNo.trim()) {
       showToast('Please select a payment record to update', 'error');
       return;
     }
+    // Validation matching VB: If Trim(txtRemarks.Text) = "" Then MsgBox("Please Enter the Details", MsgBoxStyle.Information)
     if (!detailRemarks.trim()) {
-      showToast('Please Enter the Details (Remarks)', 'error');
+      showToast('Please Enter the Details', 'error');
       return;
     }
 
@@ -178,16 +266,24 @@ export default function SupplierPaymentAmendmentScreen() {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          PaymentNo: detailPaymentNo,
-          Remarks: detailRemarks
+          PaymentNo: detailPaymentNo.trim(),
+          Remarks: detailRemarks.trim()
         })
       });
+
       const json = await res.json();
       if (json.success) {
-        showToast('Payment Details Updated', 'success');
-        handleFetch();
+        // Matches MsgBox("Payment Details Update", MsgBoxStyle.Information) in VB
+        showToast('Payment Details Update', 'success');
+
+        // Reload payments matching cmdFetch_Click in VB
+        await handleFetch();
+
+        // Clear all fields matching SubClearall() in VB
+        handleClearAll();
       } else {
-        showToast(json.message || 'Failed to update record', 'error');
+        const errDetail = json.error ? `${json.message || 'Error'}: ${json.error}` : (json.message || 'Update failed');
+        showToast(errDetail, 'error');
       }
     } catch (e) {
       showToast('Server connection failed', 'error');
@@ -196,10 +292,38 @@ export default function SupplierPaymentAmendmentScreen() {
     }
   };
 
+  // RePrint matching subPrint(txtHeadInvoiceNo.Text.Trim) in frmSupplierPaymentAmendment.vb
+  const handleReprint = async () => {
+    if (!invoiceNo.trim()) {
+      showToast('Please enter an Invoice No to reprint', 'error');
+      return;
+    }
+
+    setVoucherLoading(true);
+    setVoucherModalVisible(true);
+    try {
+      const supplierParam = supplierCode.trim() ? `?SupplierCode=${encodeURIComponent(supplierCode.trim())}` : '';
+      const res = await fetch(
+        `${API_URL}/supplierpaymentamendment/voucher/${encodeURIComponent(invoiceNo.trim())}${supplierParam}`
+      );
+      const json = await res.json();
+      if (json.success && json.data) {
+        setVoucherData(json.data);
+      } else {
+        setVoucherData([]);
+        showToast('No voucher history found for this invoice', 'info');
+      }
+    } catch (e) {
+      showToast('Error loading voucher data', 'error');
+    } finally {
+      setVoucherLoading(false);
+    }
+  };
+
   const Checkbox = ({ label, selected, onPress }: { label: string; selected: boolean; onPress: () => void }) => (
-    <TouchableOpacity style={styles.radioContainer} onPress={onPress}>
+    <TouchableOpacity style={styles.checkboxContainer} onPress={onPress} activeOpacity={0.7}>
       <View style={[styles.checkboxSquare, selected && styles.checkboxSquareActive]}>
-        {selected && <Ionicons name="checkmark" size={10} color="#FFFFFF" />}
+        {selected && <Ionicons name="checkmark" size={11} color="#FFFFFF" />}
       </View>
       {label ? <ThemedText style={styles.radioLabel}>{label}</ThemedText> : null}
     </TouchableOpacity>
@@ -209,7 +333,7 @@ export default function SupplierPaymentAmendmentScreen() {
     <SafeAreaView edges={['top']} style={styles.safeArea}>
       <Stack.Screen options={{ headerShown: false }} />
 
-      {/* Top Header Bar matching jobsheet.tsx */}
+      {/* Top Header Bar */}
       <View style={styles.header}>
         <View style={styles.headerLeft}>
           <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
@@ -219,7 +343,13 @@ export default function SupplierPaymentAmendmentScreen() {
         </View>
 
         <View style={styles.headerActions}>
+          <TouchableOpacity style={styles.headerBtnSecondary} onPress={handleReprint}>
+            <Ionicons name="print-outline" size={14} color="#7D6F5B" style={{ marginRight: 4 }} />
+            <ThemedText style={styles.headerBtnSecondaryText}>RePrint</ThemedText>
+          </TouchableOpacity>
+
           <TouchableOpacity style={styles.headerBtnSecondary} onPress={handleClearAll}>
+            <Ionicons name="refresh-outline" size={14} color="#7D6F5B" style={{ marginRight: 4 }} />
             <ThemedText style={styles.headerBtnSecondaryText}>Clear</ThemedText>
           </TouchableOpacity>
 
@@ -231,69 +361,114 @@ export default function SupplierPaymentAmendmentScreen() {
             {saving ? (
               <ActivityIndicator size="small" color="#9E6D08" />
             ) : (
-              <ThemedText style={styles.headerBtnPrimaryText}>Update</ThemedText>
+              <>
+                <Ionicons name="checkmark-circle-outline" size={14} color="#7D5800" style={{ marginRight: 4 }} />
+                <ThemedText style={styles.headerBtnPrimaryText}>Update</ThemedText>
+              </>
             )}
           </TouchableOpacity>
+
+
         </View>
       </View>
 
       <ScrollView style={styles.container} contentContainerStyle={styles.contentContainer}>
-        {/* TOP SECTION: Amendment Search Filter Card */}
+        {/* TOP SECTION: Amendment Search Filter Card (GroupBox1) */}
         <View style={styles.goldCard}>
           <View style={styles.cardHeaderBanner}>
             <View style={{ flexDirection: 'row', alignItems: 'center' }}>
               <View style={styles.headerIconBadge}>
-                <Ionicons name="create-outline" size={15} color="#B48218" />
+                <Ionicons name="search" size={14} color="#B48218" />
               </View>
               <ThemedText style={styles.cardHeaderTitle}>Search Criteria</ThemedText>
             </View>
 
             <TouchableOpacity style={styles.fetchBtn} onPress={handleFetch} disabled={loading}>
               <Ionicons name="search" size={13} color="#9E6D08" style={{ marginRight: 4 }} />
-              <ThemedText style={styles.fetchBtnText}>{loading ? 'Fetching...' : 'Fetch Payments'}</ThemedText>
+              <ThemedText style={styles.fetchBtnText}>{loading ? 'Fetching...' : 'Fetch'}</ThemedText>
             </TouchableOpacity>
           </View>
 
           <View style={styles.cardBody}>
-            {/* Single Row: Supplier Code, Supplier Name, Invoice No, Customer Copy */}
-            <View style={styles.row}>
-              <ThemedText style={styles.label}>Supplier Code</ThemedText>
-              <View style={{ width: 140, flexDirection: 'row' }}>
+            {/* Single Row: Supplier Code, Search, Supplier Name, Invoice No, Search, Customer Copy */}
+            <View style={[styles.row, { flexWrap: 'nowrap', alignItems: 'center' }]}>
+              {/* Supplier Code */}
+              <ThemedText style={[styles.label, { width: 'auto', marginRight: 8 }]}>Supplier Code</ThemedText>
+              <View style={{ flexDirection: 'row', alignItems: 'center', marginRight: 8 }}>
                 <TextInput
-                  style={[styles.input, { width: 108, borderTopRightRadius: 0, borderBottomRightRadius: 0, borderRightWidth: 0 }]}
+                  style={[
+                    styles.input,
+                    {
+                      width: 80,
+                      minWidth: 0,
+                      borderTopRightRadius: 0,
+                      borderBottomRightRadius: 0,
+                      borderRightWidth: 0,
+                    },
+                  ]}
                   value={supplierCode}
                   onChangeText={setSupplierCode}
+                  onBlur={handleSupplierBlur}
                   placeholder="Code"
+                  autoCapitalize="characters"
                 />
                 <TouchableOpacity style={styles.lookupBtn} onPress={fetchSuppliers}>
                   <ThemedText style={styles.lookupBtnText}>...</ThemedText>
                 </TouchableOpacity>
               </View>
 
+              {/* Supplier Name */}
               <TextInput
-                style={[styles.input, styles.readonlyInput, { flex: 1, minWidth: 160, marginLeft: 8 }]}
+                style={[styles.input, styles.readonlyInput, { flex: 1.2, minWidth: 140, marginRight: 16 }]}
                 value={supplierName}
                 editable={false}
                 placeholder="Supplier Name"
               />
 
-              <ThemedText style={[styles.label, { width: 'auto', marginLeft: 16, marginRight: 6 }]}>Invoice No</ThemedText>
-              <TextInput
-                style={[styles.input, { width: 140 }]}
-                value={invoiceNo}
-                onChangeText={setInvoiceNo}
-                placeholder="Invoice No"
-              />
+              {/* Invoice No */}
+              <ThemedText style={[styles.label, { width: 'auto', marginRight: 8 }]}>Invoice No</ThemedText>
+              <View style={{ flexDirection: 'row', alignItems: 'center', marginRight: 16 }}>
+                <TextInput
+                  style={[
+                    styles.input,
+                    {
+                      width: 110,
+                      minWidth: 0,
+                      borderTopRightRadius: 0,
+                      borderBottomRightRadius: 0,
+                      borderRightWidth: 0,
+                    },
+                  ]}
+                  value={invoiceNo}
+                  onChangeText={setInvoiceNo}
+                  placeholder="Invoice No"
+                />
+                <TouchableOpacity style={styles.lookupBtn} onPress={fetchInvoices}>
+                  <ThemedText style={styles.lookupBtnText}>...</ThemedText>
+                </TouchableOpacity>
+              </View>
 
-              <View style={{ marginLeft: 16 }}>
+              {/* Customer Copy Checkbox */}
+              <View style={{ justifyContent: 'center', marginLeft: 8 }}>
                 <Checkbox label="Customer Copy" selected={customerCopy} onPress={() => setCustomerCopy(!customerCopy)} />
               </View>
             </View>
           </View>
         </View>
 
-        {/* MIDDLE SECTION: Payments List Grid (Full Width Table) */}
+        {/* MIDDLE SECTION: Payments List Grid (dgvSupplier matching frmSupplierPaymentAmendment.vb) */}
         <View style={styles.goldCard}>
+          <View style={styles.cardHeaderBanner}>
+            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+              <View style={styles.headerIconBadge}>
+                <Ionicons name="list" size={14} color="#B48218" />
+              </View>
+              <ThemedText style={styles.cardHeaderTitle}>Payment Records</ThemedText>
+              <View style={styles.counterBadge}>
+                <ThemedText style={styles.counterBadgeText}>{payments.length} Records</ThemedText>
+              </View>
+            </View>
+          </View>
 
           <View style={{ width: '100%' }}>
             {/* Table Header with proportional flex widths */}
@@ -301,12 +476,12 @@ export default function SupplierPaymentAmendmentScreen() {
               <ThemedText style={[styles.tableHeaderText, { flex: 1.3 }]}>Payment No</ThemedText>
               <ThemedText style={[styles.tableHeaderText, { flex: 1.2, textAlign: 'center' }]}>Payment Date</ThemedText>
               <ThemedText style={[styles.tableHeaderText, { flex: 1.1 }]}>Paymode</ThemedText>
-              <ThemedText style={[styles.tableHeaderText, { flex: 1.3, textAlign: 'right' }]}>Amount</ThemedText>
+              <ThemedText style={[styles.tableHeaderText, { flex: 1.3, textAlign: 'right' }]}>Payment Amount</ThemedText>
               <ThemedText style={[styles.tableHeaderText, { flex: 2.5 }]}>Remarks</ThemedText>
             </View>
 
             {/* Table Body */}
-            <ScrollView nestedScrollEnabled={true} style={{ maxHeight: 250, minHeight: payments.length === 0 ? 100 : 0 }}>
+            <ScrollView nestedScrollEnabled={true} style={{ maxHeight: 250, minHeight: payments.length === 0 ? 110 : 0 }}>
               {loading ? (
                 <View style={styles.emptyTableState}>
                   <ActivityIndicator size="large" color="#B48218" />
@@ -319,7 +494,7 @@ export default function SupplierPaymentAmendmentScreen() {
                     No payment records found
                   </ThemedText>
                   <ThemedText style={{ color: '#7D6F5B', fontSize: 11, marginTop: 2 }}>
-                    Enter Supplier Code and Invoice No, then click 'Fetch Payments'
+                    Enter Supplier Code and Invoice No, then click 'Fetch'
                   </ThemedText>
                 </View>
               ) : (
@@ -340,7 +515,7 @@ export default function SupplierPaymentAmendmentScreen() {
                         {item.PaymentNo}
                       </ThemedText>
                       <ThemedText style={[styles.tableCellText, { flex: 1.2, textAlign: 'center' }]}>
-                        {item.PaymentDate ? item.PaymentDate.split('T')[0] : ''}
+                        {item.PaymentDate || ''}
                       </ThemedText>
                       <ThemedText style={[styles.tableCellText, { flex: 1.1 }]}>
                         {item.Paymode}
@@ -359,19 +534,19 @@ export default function SupplierPaymentAmendmentScreen() {
           </View>
         </View>
 
-        {/* BOTTOM SECTION: Selected Payment Amendment Entry Card */}
+        {/* BOTTOM SECTION: Selected Payment Amendment Entry Card (GroupBox4) */}
         <View style={styles.goldCard}>
           <View style={styles.cardHeaderBanner}>
             <View style={{ flexDirection: 'row', alignItems: 'center' }}>
               <View style={styles.headerIconBadge}>
-                <Ionicons name="clipboard-outline" size={15} color="#B48218" />
+                <Ionicons name="create-outline" size={14} color="#B48218" />
               </View>
               <ThemedText style={styles.cardHeaderTitle}>Amend Payment Details</ThemedText>
             </View>
           </View>
 
           <View style={styles.cardBody}>
-            {/* Read-only reference fields of selected payment */}
+            {/* Read-only reference fields: Payment No, Payment Date, Paymode, Amount */}
             <View style={styles.row}>
               <View style={{ flex: 1.2, minWidth: 110, marginRight: 8 }}>
                 <ThemedText style={styles.inputSubLabel}>Payment No</ThemedText>
@@ -394,16 +569,17 @@ export default function SupplierPaymentAmendmentScreen() {
               </View>
             </View>
 
-            {/* Editable Remarks input on single row */}
-            <View style={{ marginTop: 10, paddingTop: 8, borderTopWidth: 1, borderTopColor: '#F2ECE0', flexDirection: 'row', alignItems: 'center' }}>
-              <ThemedText style={[styles.label, { width: 'auto', marginRight: 10, marginBottom: 0, color: '#9E6D08' }]}>
-                Amendment Remarks
+            {/* Editable Remarks input matching txtRemarks in frmSupplierPaymentAmendment.vb */}
+            <View style={{ marginTop: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: '#F2ECE0' }}>
+              <ThemedText style={[styles.inputSubLabel, { color: '#9E6D08' }]}>
+                Remarks (Max 50 Characters)
               </ThemedText>
               <TextInput
-                style={[styles.input, { flex: 1, height: 32, borderColor: '#B8903B' }]}
+                style={[styles.input, { borderColor: '#B8903B', height: 32 }]}
                 value={detailRemarks}
                 onChangeText={setDetailRemarks}
-                placeholder="Enter new payment remarks..."
+                maxLength={50}
+                placeholder="Enter remarks..."
               />
             </View>
           </View>
@@ -416,76 +592,138 @@ export default function SupplierPaymentAmendmentScreen() {
           <View style={styles.modalOverlay}>
             <TouchableWithoutFeedback>
               <View style={styles.modalContainer}>
+                {/* Header */}
                 <View style={styles.modalHeader}>
                   <ThemedText style={styles.modalTitle}>{lovTitle}</ThemedText>
                   <TouchableOpacity onPress={() => setLovVisible(false)} style={styles.modalCloseIconBtn}>
-                    <Ionicons name="close" size={20} color="#3B2D17" />
+                    <Ionicons name="close" size={18} color="#3B2D17" />
                   </TouchableOpacity>
                 </View>
 
-                <View style={{ padding: 12 }}>
+                {/* Search */}
+                <View style={{ padding: 10 }}>
                   <TextInput
                     style={styles.modalSearchInput}
-                    placeholder="Search options..."
-                    placeholderTextColor="#7D6F5B"
+                    placeholder="Search..."
                     value={lovSearch}
                     onChangeText={handleLovSearch}
-                    autoFocus
+                    autoFocus={true}
                   />
 
-                  {lovColumns.length > 0 && (
-                    <View style={styles.lovHeaderRow}>
-                      {lovColumns.map((col, idx) => (
-                        <ThemedText key={idx} style={[styles.lovHeaderText, { flex: 1 }]}>
-                          {col}
-                        </ThemedText>
-                      ))}
-                    </View>
-                  )}
+                  {/* Header Row */}
+                  <View style={styles.lovHeaderRow}>
+                    {lovColumns.map((col, idx) => (
+                      <ThemedText key={idx} style={[styles.lovHeaderText, { flex: col.flex || 1 }]}>
+                        {col.label}
+                      </ThemedText>
+                    ))}
+                  </View>
 
+                  {/* List */}
                   <FlatList
                     data={filteredLovData}
-                    keyExtractor={(item, index) => index.toString()}
-                    style={{ maxHeight: 320 }}
+                    keyExtractor={(_, index) => index.toString()}
+                    style={{ maxHeight: 300 }}
                     renderItem={({ item, index }) => (
                       <TouchableOpacity
-                        activeOpacity={0.7}
-                        style={[
-                          styles.lovItem,
-                          index % 2 === 1 && { backgroundColor: '#FCFAF6' },
-                        ]}
+                        style={[styles.lovItem, index % 2 === 1 && { backgroundColor: '#FCFAF6' }]}
                         onPress={() => handleLovSelect(item)}
                       >
-                        {lovColumns.length > 0 ? (
-                          lovColumns.map((col, idx) => (
-                            <ThemedText
-                              key={idx}
-                              style={[
-                                styles.lovItemText,
-                                { flex: 1 },
-                                idx === 0 && { fontWeight: 'bold' },
-                              ]}
-                            >
-                              {String(item[col] ?? '')}
-                            </ThemedText>
-                          ))
-                        ) : (
-                          <ThemedText style={styles.lovItemText}>{Object.values(item).join(' - ')}</ThemedText>
-                        )}
+                        {lovColumns.map((col, cIdx) => (
+                          <ThemedText key={cIdx} style={[styles.lovItemText, { flex: col.flex || 1 }]}>
+                            {item[col.key] !== undefined ? String(item[col.key]) : ''}
+                          </ThemedText>
+                        ))}
                       </TouchableOpacity>
                     )}
                     ListEmptyComponent={
-                      <View style={{ padding: 24, alignItems: 'center' }}>
-                        <ThemedText style={{ color: '#7D6F5B', fontSize: 13, fontStyle: 'italic' }}>
-                          No records found
-                        </ThemedText>
+                      <View style={{ padding: 20, alignItems: 'center' }}>
+                        <ThemedText style={{ color: '#7D6F5B', fontSize: 12 }}>No matching records</ThemedText>
                       </View>
                     }
                   />
                 </View>
 
+                {/* Footer */}
                 <View style={styles.modalFooter}>
                   <TouchableOpacity style={styles.modalCloseBtn} onPress={() => setLovVisible(false)}>
+                    <ThemedText style={styles.modalCloseBtnText}>Cancel</ThemedText>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </TouchableWithoutFeedback>
+          </View>
+        </TouchableWithoutFeedback>
+      </Modal>
+
+      {/* Voucher RePrint Modal */}
+      <Modal visible={voucherModalVisible} transparent={true} animationType="fade">
+        <TouchableWithoutFeedback onPress={() => setVoucherModalVisible(false)}>
+          <View style={styles.modalOverlay}>
+            <TouchableWithoutFeedback>
+              <View style={[styles.modalContainer, { maxWidth: 640 }]}>
+                {/* Header */}
+                <View style={styles.modalHeader}>
+                  <ThemedText style={styles.modalTitle}>Supplier Payment Voucher</ThemedText>
+                  <TouchableOpacity onPress={() => setVoucherModalVisible(false)} style={styles.modalCloseIconBtn}>
+                    <Ionicons name="close" size={18} color="#3B2D17" />
+                  </TouchableOpacity>
+                </View>
+
+                <View style={{ padding: 14 }}>
+                  {voucherLoading ? (
+                    <View style={{ padding: 30, alignItems: 'center' }}>
+                      <ActivityIndicator size="large" color="#B48218" />
+                      <ThemedText style={{ marginTop: 10, color: '#7D6F5B' }}>Loading vouchers...</ThemedText>
+                    </View>
+                  ) : voucherData.length === 0 ? (
+                    <View style={{ padding: 30, alignItems: 'center' }}>
+                      <Ionicons name="document-text-outline" size={32} color="#D0C2A8" />
+                      <ThemedText style={{ color: '#3B2D17', fontSize: 13, fontWeight: 'bold', marginTop: 6 }}>
+                        No Payment Voucher History
+                      </ThemedText>
+                      <ThemedText style={{ color: '#7D6F5B', fontSize: 11, marginTop: 2 }}>
+                        No records found for Invoice {invoiceNo}
+                      </ThemedText>
+                    </View>
+                  ) : (
+                    <ScrollView style={{ maxHeight: 320 }}>
+                      <View style={styles.tableHeader}>
+                        <ThemedText style={[styles.tableHeaderText, { flex: 1.3 }]}>Payment No</ThemedText>
+                        <ThemedText style={[styles.tableHeaderText, { flex: 1.1 }]}>Date</ThemedText>
+                        <ThemedText style={[styles.tableHeaderText, { flex: 1 }]}>Paymode</ThemedText>
+                        <ThemedText style={[styles.tableHeaderText, { flex: 1.2, textAlign: 'right' }]}>Amount</ThemedText>
+                        <ThemedText style={[styles.tableHeaderText, { flex: 2 }]}>Remarks</ThemedText>
+                      </View>
+                      {voucherData.map((v, i) => (
+                        <View key={i} style={[styles.tableRow, i % 2 === 1 && { backgroundColor: '#FCFAF6' }]}>
+                          <ThemedText style={[styles.tableCellText, { flex: 1.3, fontWeight: 'bold' }]}>{v.PaymentNo}</ThemedText>
+                          <ThemedText style={[styles.tableCellText, { flex: 1.1 }]}>{v.PaymentDate}</ThemedText>
+                          <ThemedText style={[styles.tableCellText, { flex: 1 }]}>{v.Paymode}</ThemedText>
+                          <ThemedText style={[styles.tableCellText, { flex: 1.2, textAlign: 'right', fontWeight: 'bold', color: '#9E6D08' }]}>
+                            {Number(v.PaymentAmount).toFixed(2)}
+                          </ThemedText>
+                          <ThemedText style={[styles.tableCellText, { flex: 2 }]}>{v.Remarks}</ThemedText>
+                        </View>
+                      ))}
+                    </ScrollView>
+                  )}
+                </View>
+
+                <View style={styles.modalFooter}>
+                  {Platform.OS === 'web' && (
+                    <TouchableOpacity
+                      style={[styles.modalCloseBtn, { backgroundColor: '#FDF6E2', borderColor: '#C8A24A', marginRight: 8 }]}
+                      onPress={() => {
+                        if (typeof window !== 'undefined') {
+                          window.print();
+                        }
+                      }}
+                    >
+                      <ThemedText style={[styles.modalCloseBtnText, { color: '#9E6D08' }]}>Print Voucher</ThemedText>
+                    </TouchableOpacity>
+                  )}
+                  <TouchableOpacity style={styles.modalCloseBtn} onPress={() => setVoucherModalVisible(false)}>
                     <ThemedText style={styles.modalCloseBtnText}>Close</ThemedText>
                   </TouchableOpacity>
                 </View>
@@ -495,24 +733,34 @@ export default function SupplierPaymentAmendmentScreen() {
         </TouchableWithoutFeedback>
       </Modal>
 
-      {/* Floating Toast Notification */}
+      {/* Non-blocking Toast Banner */}
       {toast && (
-        <View style={[styles.toast, { backgroundColor: toast.type === 'success' ? '#2E7D32' : '#C62828' }]}>
+        <View
+          style={[
+            styles.toast,
+            {
+              backgroundColor:
+                toast.type === 'error'
+                  ? '#D32F2F'
+                  : toast.type === 'info'
+                    ? '#0288D1'
+                    : '#2E7D32',
+            },
+          ]}
+        >
           <Ionicons
-            name={toast.type === 'success' ? 'checkmark-circle' : 'alert-circle'}
-            size={16}
+            name={
+              toast.type === 'error'
+                ? 'alert-circle'
+                : toast.type === 'info'
+                  ? 'information-circle'
+                  : 'checkmark-circle'
+            }
+            size={18}
             color="#FFFFFF"
-            style={{ marginRight: 6 }}
+            style={{ marginRight: 8 }}
           />
           <ThemedText style={styles.toastText}>{toast.message}</ThemedText>
-        </View>
-      )}
-
-      {/* Loading Overlay */}
-      {saving && (
-        <View style={styles.loadingOverlay}>
-          <ActivityIndicator size="large" color="#B48218" />
-          <ThemedText style={{ color: '#FFFFFF', fontWeight: 'bold', marginTop: 10 }}>Updating Payment...</ThemedText>
         </View>
       )}
     </SafeAreaView>
@@ -522,32 +770,31 @@ export default function SupplierPaymentAmendmentScreen() {
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: '#FBF9F5',
+    backgroundColor: '#FAF7EE',
   },
-  // Top Header Bar
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 16,
     paddingVertical: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: '#EBE2D2',
     backgroundColor: '#FFFFFF',
+    borderBottomWidth: 1,
+    borderBottomColor: '#E8DCB8',
   },
   headerLeft: {
     flexDirection: 'row',
     alignItems: 'center',
   },
   backButton: {
-    padding: 4,
     marginRight: 10,
+    padding: 4,
   },
   headerTitle: {
-    fontSize: 20,
-    fontWeight: '400',
-    letterSpacing: 1,
+    fontSize: 16,
+    fontWeight: 'bold',
     color: '#3B2D17',
+    letterSpacing: 0.3,
   },
   headerActions: {
     flexDirection: 'row',
@@ -555,70 +802,75 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   headerBtnSecondary: {
-    backgroundColor: '#FFFFFF',
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 6,
     borderWidth: 1,
     borderColor: '#DFD5C3',
-    paddingVertical: 6,
-    paddingHorizontal: 14,
-    borderRadius: 5,
+    backgroundColor: '#FFFFFF',
   },
   headerBtnSecondaryText: {
-    color: '#5C4A28',
-    fontWeight: 'bold',
     fontSize: 12,
+    fontWeight: '600',
+    color: '#5C4A28',
   },
   headerBtnPrimary: {
-    backgroundColor: '#F9F2E2',
-    borderWidth: 1,
-    borderColor: '#B8903B',
+    flexDirection: 'row',
+    alignItems: 'center',
     paddingVertical: 6,
-    paddingHorizontal: 16,
-    borderRadius: 5,
+    paddingHorizontal: 14,
+    borderRadius: 6,
+    backgroundColor: '#F5C842',
+    borderWidth: 1,
+    borderColor: '#D4A41B',
   },
   headerBtnPrimaryText: {
-    color: '#9E6D08',
-    fontWeight: 'bold',
     fontSize: 12,
+    fontWeight: 'bold',
+    color: '#3D2C04',
+  },
+  headerBtnClose: {
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderRadius: 6,
+    backgroundColor: '#EAE3D2',
+  },
+  headerBtnCloseText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#4A3B22',
   },
   container: {
     flex: 1,
-    backgroundColor: '#FBF9F5',
   },
   contentContainer: {
     padding: 12,
-    paddingBottom: 28,
+    gap: 10,
   },
-  // Gold Cards
   goldCard: {
     backgroundColor: '#FFFFFF',
+    borderRadius: 8,
     borderWidth: 1,
     borderColor: '#E8DCB8',
-    borderRadius: 8,
-    marginBottom: 12,
     overflow: 'hidden',
-    shadowColor: '#A38035',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.08,
-    shadowRadius: 3,
-    elevation: 2,
   },
   cardHeaderBanner: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: '#F5E7CA',
+    backgroundColor: '#FDF6E2',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
     borderBottomWidth: 1,
-    borderBottomColor: '#E2D3B3',
-    paddingVertical: 7,
-    paddingHorizontal: 10,
+    borderBottomColor: '#F0E6D2',
   },
   headerIconBadge: {
     width: 22,
     height: 22,
     borderRadius: 11,
-    backgroundColor: '#FFF8EA',
-    borderWidth: 1,
-    borderColor: '#E2D2AF',
+    backgroundColor: '#FFF1C2',
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 8,
@@ -627,116 +879,113 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: 'bold',
     color: '#3B2D17',
-    letterSpacing: 0.3,
   },
   counterBadge: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: '#F3E8C4',
     paddingHorizontal: 8,
     paddingVertical: 2,
     borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#E2D3B3',
     marginLeft: 8,
   },
   counterBadgeText: {
     fontSize: 11,
     fontWeight: 'bold',
-    color: '#9E6D08',
+    color: '#7D5800',
   },
   fetchBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#F9F2E2',
+    backgroundColor: '#FFF6D6',
     borderWidth: 1,
-    borderColor: '#B8903B',
+    borderColor: '#C8A24A',
     paddingVertical: 4,
-    paddingHorizontal: 10,
+    paddingHorizontal: 12,
     borderRadius: 5,
   },
   fetchBtnText: {
-    fontSize: 11,
+    fontSize: 12,
     fontWeight: 'bold',
     color: '#9E6D08',
   },
   cardBody: {
-    padding: 10,
+    padding: 12,
   },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 7,
     flexWrap: 'wrap',
   },
   label: {
-    fontSize: 11,
-    fontWeight: 'bold',
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#4A3B22',
+    marginRight: 10,
     width: 95,
-    marginRight: 6,
-    color: '#3A2E19',
   },
   inputSubLabel: {
     fontSize: 11,
     fontWeight: 'bold',
-    color: '#3A2E19',
-    marginBottom: 3,
+    color: '#6E5C3D',
+    marginBottom: 4,
   },
   input: {
     borderWidth: 1,
     borderColor: '#E2D7C5',
     borderRadius: 6,
     paddingHorizontal: 8,
-    paddingVertical: 3,
+    paddingVertical: 4,
     fontSize: 12,
     height: 28,
     backgroundColor: '#FFFFFF',
     color: '#2C2519',
-  },
+    minWidth: 0,
+    ...(Platform.OS === 'web' ? { outlineStyle: 'none', boxSizing: 'border-box' } : {}),
+  } as any,
   readonlyInput: {
-    backgroundColor: '#F8F5EE',
-    borderColor: '#EADBCA',
-    color: '#554736',
+    backgroundColor: '#F7F4EC',
+    color: '#554734',
   },
   lookupBtn: {
     width: 32,
     height: 28,
+    backgroundColor: '#FAF5EA',
     borderWidth: 1,
-    borderColor: '#E2D7C5',
-    borderLeftWidth: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
+    borderColor: '#DFD5C3',
     borderTopRightRadius: 6,
     borderBottomRightRadius: 6,
-    backgroundColor: '#FAF5EA',
-  },
+    justifyContent: 'center',
+    alignItems: 'center',
+    flexShrink: 0,
+    ...(Platform.OS === 'web' ? { boxSizing: 'border-box' } : {}),
+  } as any,
   lookupBtnText: {
-    color: '#6E5528',
+    fontSize: 13,
     fontWeight: 'bold',
-    fontSize: 12,
+    color: '#6E5528',
   },
-  radioContainer: {
+  checkboxContainer: {
     flexDirection: 'row',
     alignItems: 'center',
   },
   checkboxSquare: {
-    width: 16,
-    height: 16,
+    width: 15,
+    height: 15,
+    borderRadius: 3,
     borderWidth: 1.5,
     borderColor: '#B8903B',
     justifyContent: 'center',
     alignItems: 'center',
-    borderRadius: 3,
+    marginRight: 6,
     backgroundColor: '#FFFFFF',
-    marginRight: 4,
   },
   checkboxSquareActive: {
     backgroundColor: '#B8903B',
   },
   radioLabel: {
     fontSize: 11,
-    color: '#362B1A',
-    fontWeight: 'bold',
+    color: '#3B2D17',
+    fontWeight: '600',
   },
-  // Table
   tableHeader: {
     flexDirection: 'row',
     backgroundColor: '#F5E7CA',
@@ -748,35 +997,28 @@ const styles = StyleSheet.create({
   tableHeaderText: {
     fontSize: 11,
     fontWeight: 'bold',
-    color: '#3B2D17',
-    paddingHorizontal: 4,
+    color: '#4A3B22',
   },
   tableRow: {
     flexDirection: 'row',
-    paddingVertical: 6,
-    paddingHorizontal: 8,
+    alignItems: 'center',
     borderBottomWidth: 1,
     borderBottomColor: '#F0E6D2',
-    alignItems: 'center',
-    backgroundColor: '#FFFFFF',
+    paddingVertical: 7,
+    paddingHorizontal: 8,
   },
   tableRowSelected: {
-    backgroundColor: '#FFF6DF',
-    borderLeftWidth: 3,
-    borderLeftColor: '#B8903B',
+    backgroundColor: '#FFF2C6',
   },
   tableCellText: {
     fontSize: 11,
-    color: '#332717',
-    paddingHorizontal: 4,
+    color: '#2C2519',
   },
   emptyTableState: {
-    paddingVertical: 32,
-    justifyContent: 'center',
+    padding: 30,
     alignItems: 'center',
-    backgroundColor: '#FFFFFF',
+    justifyContent: 'center',
   },
-  // Modal
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.5)',
@@ -798,10 +1040,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: '#F5E7CA',
+    backgroundColor: '#FDF6E2',
     borderBottomWidth: 1,
-    borderBottomColor: '#E2D3B3',
-    paddingHorizontal: 12,
+    borderBottomColor: '#E8DCB8',
+    paddingHorizontal: 14,
     paddingVertical: 10,
   },
   modalTitle: {
@@ -822,7 +1064,7 @@ const styles = StyleSheet.create({
     height: 32,
     backgroundColor: '#FFFFFF',
     color: '#2C2519',
-    marginBottom: 10,
+    marginBottom: 8,
   },
   lovHeaderRow: {
     flexDirection: 'row',
@@ -841,7 +1083,7 @@ const styles = StyleSheet.create({
   },
   lovItem: {
     flexDirection: 'row',
-    paddingVertical: 9,
+    paddingVertical: 8,
     paddingHorizontal: 8,
     borderBottomWidth: 1,
     borderBottomColor: '#F0E6D2',
@@ -855,8 +1097,8 @@ const styles = StyleSheet.create({
   modalFooter: {
     flexDirection: 'row',
     justifyContent: 'flex-end',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 9,
     borderTopWidth: 1,
     borderTopColor: '#F0E6D2',
     backgroundColor: '#FCFAF6',
@@ -880,7 +1122,7 @@ const styles = StyleSheet.create({
     alignSelf: 'center',
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 18,
+    paddingHorizontal: 16,
     paddingVertical: 9,
     borderRadius: 20,
     elevation: 6,
@@ -893,12 +1135,5 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: 'bold',
     color: '#FFFFFF',
-  },
-  loadingOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0,0,0,0.45)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    zIndex: 10000,
   },
 });

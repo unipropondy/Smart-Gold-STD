@@ -1,11 +1,18 @@
 const express = require("express");
 const router = express.Router();
-const { sql } = require("../db");
+const { sql, poolPromise } = require("../db");
 
-// 1. GET all orders for lookup (Order No search)
+// Helper to acquire database connection pool reliably
+const getPool = async (req) => {
+  if (req && req.pool) return req.pool;
+  if (poolPromise) return await poolPromise;
+  throw new Error("Database pool is not available.");
+};
+
+// 1. GET all orders for lookup (Order No search matching frmOrderInventory btnOrderPaymentNoSearch_Click)
 router.get("/orders", async (req, res) => {
   try {
-    const pool = req.pool;
+    const pool = await getPool(req);
     const result = await pool.request().query(`
       SELECT DISTINCT 
         OrderNo, 
@@ -28,11 +35,11 @@ router.get("/orders", async (req, res) => {
   }
 });
 
-// 2. GET unassigned order details (Description search)
+// 2. GET unassigned order details (Description search matching btnDescription_Click)
 router.get("/order-details/:orderNo", async (req, res) => {
   try {
     const { orderNo } = req.params;
-    const pool = req.pool;
+    const pool = await getPool(req);
     const result = await pool.request()
       .input("OrderNo", sql.VarChar, orderNo)
       .query(`
@@ -43,6 +50,7 @@ router.get("/order-details/:orderNo", async (req, res) => {
           WeightEstimated 
         FROM tblInventoryOrderDetail 
         WHERE OrderNo = @OrderNo AND (InventoryCode = '' OR InventoryCode IS NULL)
+        ORDER BY OrderInventoryCode
       `);
     res.json({ success: true, data: result.recordset });
   } catch (err) {
@@ -51,10 +59,10 @@ router.get("/order-details/:orderNo", async (req, res) => {
   }
 });
 
-// 3. GET active inventory stock (Inventory Code search)
+// 3. GET active inventory stock (Inventory Code search matching btnInventoryCodeSearch_Click)
 router.get("/inventory-stock", async (req, res) => {
   try {
-    const pool = req.pool;
+    const pool = await getPool(req);
     const locationCode = req.query.locationCode || "HQ";
     const result = await pool.request()
       .input("LocationCode", sql.VarChar, locationCode)
@@ -79,7 +87,7 @@ router.get("/inventory-stock", async (req, res) => {
 router.get("/customer/:customerCode", async (req, res) => {
   try {
     const { customerCode } = req.params;
-    const pool = req.pool;
+    const pool = await getPool(req);
     const result = await pool.request()
       .input("CustomerCode", sql.VarChar, customerCode)
       .query(`
@@ -103,12 +111,11 @@ router.get("/customer/:customerCode", async (req, res) => {
   }
 });
 
-// 5. GET inventory details by inventory code
+// 5. GET inventory details by inventory code (matching subGetInventory)
 router.get("/inventory/:inventoryCode", async (req, res) => {
   try {
     const { inventoryCode } = req.params;
-    console.log("[DEBUG] Fetch inventoryCode:", JSON.stringify(inventoryCode));
-    const pool = req.pool;
+    const pool = await getPool(req);
     const result = await pool.request()
       .input("InventoryCode", sql.VarChar, inventoryCode)
       .query(`
@@ -116,11 +123,11 @@ router.get("/inventory/:inventoryCode", async (req, res) => {
           InventoryCode, 
           Description, 
           Weight, 
-          StoneWeight 
+          StoneWeight,
+          QtyOnHand
         FROM tblInventory 
         WHERE InventoryCode = @InventoryCode
       `);
-    console.log("[DEBUG] Result rows count:", result.recordset.length);
     if (result.recordset.length === 0) {
       return res.status(404).json({ success: false, message: "InventoryCode Not Found" });
     }
@@ -131,17 +138,18 @@ router.get("/inventory/:inventoryCode", async (req, res) => {
   }
 });
 
-// 6. GET order header and its customer details
+// 6. GET order header and its customer details (matching subGetOrderDetails)
 router.get("/order-header/:orderNo", async (req, res) => {
   try {
     const { orderNo } = req.params;
-    const pool = req.pool;
+    const pool = await getPool(req);
     const result = await pool.request()
       .input("OrderNo", sql.VarChar, orderNo)
       .query(`
         SELECT 
           h.OrderNo, 
           h.CustomerCode, 
+          h.Remarks,
           c.CustomerName, 
           c.Address1, 
           c.Address2, 
@@ -161,11 +169,11 @@ router.get("/order-header/:orderNo", async (req, res) => {
   }
 });
 
-// 7. GET mapped items for an order
+// 7. GET mapped items for an order (matching SubGetInventoryDetails)
 router.get("/order-details-mapped/:orderNo", async (req, res) => {
   try {
     const { orderNo } = req.params;
-    const pool = req.pool;
+    const pool = await getPool(req);
     const result = await pool.request()
       .input("OrderNo", sql.VarChar, orderNo)
       .query(`
@@ -187,9 +195,9 @@ router.get("/order-details-mapped/:orderNo", async (req, res) => {
   }
 });
 
-// 8. POST save (transaction block to map items)
+// 8. POST save (transaction block to map items matching btnSave_Click)
 router.post("/save", async (req, res) => {
-  const pool = req.pool;
+  const pool = await getPool(req);
   const transaction = new sql.Transaction(pool);
   
   try {
@@ -202,20 +210,28 @@ router.post("/save", async (req, res) => {
     const sysUser = userId || "sys";
     await transaction.begin();
 
-    // 1. First, clear old mappings if any, but wait, VB code doesn't do a full delete/reinsert,
-    // it simply loops through grdOrder and updates tblInventoryOrderDetail and tblInventory.
-    // However, if we removed some mappings, how do we clear them?
-    // In VB: when we load, the grid is populated with existing mappings. If we delete a row in the grid and then hit save,
-    // we would want to unmap it. But VB6 doesn't seem to track deleted items, or does it?
-    // Actually, in the VB6 code:
-    // It loops through grdOrder rows and calls fncUpdateOrderInventory for each.
-    // Let's implement this:
-    // First, let's find all currently mapped InventoryCodes for this OrderNo in tblInventoryOrderDetail,
-    // and clear their OrderNo in tblInventory, and clear their InventoryCode in tblInventoryOrderDetail.
-    // That way, we do a clean "sync" to match the frontend grid state! This is much more reliable and prevents orphaned mappings.
-    
-    // Clear existing mapped inventory items for this order:
-    // a. Get existing mapped inventory codes
+    // Dynamically check columns in tblInventoryOrderDetail, tblInventory, tblInventoryOrderHeader
+    let detailCols = [];
+    let invCols = [];
+    let headerCols = [];
+    try {
+      const cRes = await new sql.Request(transaction).query(`
+        SELECT TABLE_NAME, COLUMN_NAME 
+        FROM INFORMATION_SCHEMA.COLUMNS 
+        WHERE TABLE_NAME IN ('tblInventoryOrderDetail', 'tblInventory', 'tblInventoryOrderHeader')
+      `);
+      for (const row of cRes.recordset) {
+        const t = row.TABLE_NAME.toLowerCase();
+        const c = row.COLUMN_NAME.toLowerCase();
+        if (t === 'tblinventoryorderdetail') detailCols.push(c);
+        else if (t === 'tblinventory') invCols.push(c);
+        else if (t === 'tblinventoryorderheader') headerCols.push(c);
+      }
+    } catch (e) {}
+
+    const hasCol = (list, col) => list.length === 0 || list.includes(col.toLowerCase());
+
+    // 1. Clear unmapped items that were previously linked to this order
     const existingMappedRequest = new sql.Request(transaction);
     const existingMappedRes = await existingMappedRequest
       .input("OrderNo", sql.VarChar, orderNo)
@@ -225,73 +241,80 @@ router.post("/save", async (req, res) => {
         WHERE OrderNo = @OrderNo AND InventoryCode <> '' AND InventoryCode IS NOT NULL
       `);
     
-    const existingCodes = existingMappedRes.recordset.map(r => r.InventoryCode.trim());
-    if (existingCodes.length > 0) {
-      // Unlink them in tblInventory
-      const unlinkRequest = new sql.Request(transaction);
-      unlinkRequest.input("OrderNo", sql.VarChar, orderNo);
-      await unlinkRequest.query(`
-        UPDATE tblInventory 
-        SET OrderNo = NULL, 
-            ModifyUser = @UserId, 
-            ModifyDate = GETDATE() 
-        WHERE OrderNo = @OrderNo
-      `);
-      
-      // Clear them in tblInventoryOrderDetail
-      const clearRequest = new sql.Request(transaction);
-      clearRequest.input("OrderNo", sql.VarChar, orderNo);
-      await clearRequest.query(`
-        UPDATE tblInventoryOrderDetail 
-        SET InventoryCode = '', 
-            Status = ' ', 
-            ModifiedUser = @UserId, 
-            ModifiedDate = GETDATE() 
-        WHERE OrderNo = @OrderNo
-      `);
+    const existingCodes = existingMappedRes.recordset.map(r => (r.InventoryCode || '').trim());
+    const incomingCodes = (items || []).map(i => (i.InventoryCode || '').trim());
+
+    // Unlink only the ones removed from the grid
+    const toUnlink = existingCodes.filter(c => c && !incomingCodes.includes(c));
+    for (const code of toUnlink) {
+      if (hasCol(invCols, "orderno")) {
+        const unlinkInv = new sql.Request(transaction);
+        unlinkInv.input("InventoryCode", sql.VarChar, code);
+        let setClauses = ["OrderNo = NULL"];
+        if (hasCol(invCols, "modifyuser")) setClauses.push("ModifyUser = @UserId");
+        if (hasCol(invCols, "modifydate")) setClauses.push("ModifyDate = GETDATE()");
+        unlinkInv.input("UserId", sql.VarChar, sysUser);
+        await unlinkInv.query(`UPDATE tblInventory SET ${setClauses.join(", ")} WHERE InventoryCode = @InventoryCode`);
+      }
+
+      const clearDetail = new sql.Request(transaction);
+      clearDetail.input("OrderNo", sql.VarChar, orderNo);
+      clearDetail.input("InventoryCode", sql.VarChar, code);
+      clearDetail.input("UserId", sql.VarChar, sysUser);
+      let setD = ["InventoryCode = ''", "Status = ' '"];
+      if (hasCol(detailCols, "modifieduser")) setD.push("ModifiedUser = @UserId");
+      if (hasCol(detailCols, "modifieddate")) setD.push("ModifiedDate = GETDATE()");
+      await clearDetail.query(`UPDATE tblInventoryOrderDetail SET ${setD.join(", ")} WHERE OrderNo = @OrderNo AND InventoryCode = @InventoryCode`);
     }
 
-    // 2. Insert/Update new mappings from req.body.items
+    // 2. Insert/Update new mappings from req.body.items (fncUpdateOrderInventory)
     if (items && items.length > 0) {
       for (const item of items) {
-        const { OrderInventoryCode, InventoryCode } = item;
-        
+        const { OrderInventoryCode, InventoryCode, InvWeight } = item;
         if (!OrderInventoryCode || !InventoryCode) continue;
 
         // Update tblInventoryOrderDetail
         const updateDetailReq = new sql.Request(transaction);
-        await updateDetailReq
+        updateDetailReq
           .input("OrderNo", sql.VarChar, orderNo)
           .input("OrderInventoryCode", sql.VarChar, OrderInventoryCode)
           .input("InventoryCode", sql.VarChar, InventoryCode)
-          .input("UserId", sql.VarChar, sysUser)
-          .query(`
-            UPDATE tblInventoryOrderDetail 
-            SET InventoryCode = @InventoryCode, 
-                Status = 'S', 
-                ModifiedUser = @UserId, 
-                ModifiedDate = GETDATE() 
-            WHERE OrderNo = @OrderNo AND OrderInventoryCode = @OrderInventoryCode
-          `);
+          .input("Weight", sql.Decimal(18, 3), parseFloat(InvWeight) || 0)
+          .input("UserId", sql.VarChar, sysUser);
+
+        let dSets = ["InventoryCode = @InventoryCode", "Status = 'S'"];
+        if (hasCol(detailCols, "weight")) dSets.push("Weight = @Weight");
+        if (hasCol(detailCols, "modifieduser")) dSets.push("ModifiedUser = @UserId");
+        if (hasCol(detailCols, "modifieddate")) dSets.push("ModifiedDate = GETDATE()");
+
+        await updateDetailReq.query(`
+          UPDATE tblInventoryOrderDetail 
+          SET ${dSets.join(", ")} 
+          WHERE OrderNo = @OrderNo AND OrderInventoryCode = @OrderInventoryCode
+        `);
 
         // Update tblInventory
-        const updateInvReq = new sql.Request(transaction);
-        await updateInvReq
-          .input("OrderNo", sql.VarChar, orderNo)
-          .input("InventoryCode", sql.VarChar, InventoryCode)
-          .input("UserId", sql.VarChar, sysUser)
-          .query(`
+        if (hasCol(invCols, "orderno")) {
+          const updateInvReq = new sql.Request(transaction);
+          updateInvReq
+            .input("OrderNo", sql.VarChar, orderNo)
+            .input("InventoryCode", sql.VarChar, InventoryCode)
+            .input("UserId", sql.VarChar, sysUser);
+
+          let iSets = ["OrderNo = @OrderNo"];
+          if (hasCol(invCols, "modifyuser")) iSets.push("ModifyUser = @UserId");
+          if (hasCol(invCols, "modifydate")) iSets.push("ModifyDate = GETDATE()");
+
+          await updateInvReq.query(`
             UPDATE tblInventory 
-            SET OrderNo = @OrderNo, 
-                ModifyUser = @UserId, 
-                ModifyDate = GETDATE() 
+            SET ${iSets.join(", ")} 
             WHERE InventoryCode = @InventoryCode
           `);
+        }
       }
     }
 
     // 3. Update Order Header (fncUpdateOrderInventoryHeader)
-    // Check if there are any unassigned details remaining
     const checkRemainingReq = new sql.Request(transaction);
     const checkRemainingRes = await checkRemainingReq
       .input("OrderNo", sql.VarChar, orderNo)
@@ -302,21 +325,24 @@ router.post("/save", async (req, res) => {
       `);
     
     const remainingCount = checkRemainingRes.recordset[0].remainingCount;
-    // Set Status: if 0 remaining, Status = 'R' (Ready/Fully Processed), else 'P' (Processing/Partially Processed)
+    // Status: if 0 unassigned, Status = 'R' (Ready), else 'P' (Processing)
     const newStatus = remainingCount === 0 ? "R" : "P";
 
     const updateHeaderReq = new sql.Request(transaction);
-    await updateHeaderReq
+    updateHeaderReq
       .input("OrderNo", sql.VarChar, orderNo)
       .input("Status", sql.VarChar, newStatus)
-      .input("UserId", sql.VarChar, sysUser)
-      .query(`
-        UPDATE tblInventoryOrderHeader 
-        SET Status = @Status, 
-            ModifiedUser = @UserId, 
-            ModifiedDate = CONVERT(varchar(10), GETDATE(), 120) 
-        WHERE OrderNo = @OrderNo
-      `);
+      .input("UserId", sql.VarChar, sysUser);
+
+    let hSets = ["Status = @Status"];
+    if (hasCol(headerCols, "modifieduser")) hSets.push("ModifiedUser = @UserId");
+    if (hasCol(headerCols, "modifieddate")) hSets.push("ModifiedDate = GETDATE()");
+
+    await updateHeaderReq.query(`
+      UPDATE tblInventoryOrderHeader 
+      SET ${hSets.join(", ")} 
+      WHERE OrderNo = @OrderNo
+    `);
 
     await transaction.commit();
     res.json({ success: true, message: "Order inventory mapping saved successfully" });
@@ -325,11 +351,11 @@ router.post("/save", async (req, res) => {
     console.error("Save Order Inventory Error:", err);
     try {
       await transaction.rollback();
-    } catch (rollbackErr) {
-      console.error("Rollback failed:", rollbackErr);
-    }
+    } catch (rollbackErr) {}
     res.status(500).json({ success: false, message: "Database Save Error", error: err.message });
   }
 });
+
+module.exports = router;
 
 module.exports = router;

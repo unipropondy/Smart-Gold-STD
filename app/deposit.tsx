@@ -235,42 +235,23 @@ export default function DepositScreen() {
   // Form Validation
   const validateForm = () => {
     if (!customerCode.trim()) {
-      showAlert('Information', 'Please enter or select the Customer Code');
+      showAlert('Information', 'Please enter the customer Code');
       return false;
     }
-    if (!customerName.trim()) {
-      showAlert('Information', 'Please enter the Customer Name');
+    const dep = parseFloat(depositAmount) || 0;
+    if (isNaN(dep)) {
+      showAlert('Information', 'Deposit Amount should be numeric!');
       return false;
     }
-    if (!depositDate.trim()) {
-      showAlert('Information', 'Please select the Deposit Date');
-      return false;
-    }
-    const tot = parseFloat(totalAmount) || 0;
-    if (tot <= 0) {
-      showAlert('Information', 'Please enter a valid Total Amount greater than zero');
-      return false;
-    }
-
     if (mode === 'I') {
-      const dep = parseFloat(depositAmount) || 0;
       if (dep <= 0) {
-        showAlert('Information', 'Please enter the initial Deposit Amount');
-        return false;
-      }
-      if (dep > tot) {
-        showAlert('Information', 'Deposit Amount cannot exceed Total Amount');
+        showAlert('Information', 'Deposit Amount should be greater than zero!');
         return false;
       }
     } else {
       const paid = parseFloat(amountPaid) || 0;
-      const dep = parseFloat(depositAmount) || 0;
       if (paid <= 0) {
         showAlert('Information', 'Please enter the Amount Paid');
-        return false;
-      }
-      if (dep + paid > tot) {
-        showAlert('Information', 'Total payments exceed total agreement value');
         return false;
       }
     }

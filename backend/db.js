@@ -1,46 +1,80 @@
 const sql = require("mssql");
-
 require("dotenv").config();
-
 
 // ✅ POOL CACHE
 const pools = new Map();
 
-// ✅ DYNAMIC CONNECTION FUNCTION
+// Helper to configure connection
+const createPoolConfig = (dbname) => ({
+  user: process.env.DB_USER,
+  password: process.env.DB_PASS,
+  server: process.env.DB_SERVER,
+  port: Number(process.env.DB_PORT),
+  database: dbname,
+  connectionTimeout: 60000,
+  requestTimeout: 120000,
+  pool: {
+    max: 10,
+    min: 0,
+    idleTimeoutMillis: 30000
+  },
+  options: {
+    encrypt: false,
+    trustServerCertificate: true
+  }
+});
+
+// ✅ DYNAMIC CONNECTION FUNCTION WITH AUTO-RECONNECT
 const getPool = async (dbname) => {
-  if (!dbname) throw new Error("Database name is required");
-  if (pools.has(dbname)) return pools.get(dbname);
+  const targetDb = dbname || process.env.DB_NAME || 'smartgold';
+  let pool = pools.get(targetDb);
+
+  if (pool && pool.connected && !pool.closed) {
+    return pool;
+  }
+
+  // If pool exists but closed/connecting/erroring, close and remove from cache
+  if (pool) {
+    try {
+      await pool.close();
+    } catch (_) {}
+    pools.delete(targetDb);
+  }
 
   try {
-    const pool = await new sql.ConnectionPool({
-      user: process.env.DB_USER,
-      password: process.env.DB_PASS,
-      server: process.env.DB_SERVER,
-      port: Number(process.env.DB_PORT),
-      database: dbname,
-      requestTimeout: 120000,
-      options: {
-        encrypt: false,
-        trustServerCertificate: true
-      }
-    }).connect();
+    const config = createPoolConfig(targetDb);
+    pool = await new sql.ConnectionPool(config).connect();
 
-    console.log(`✅ SQL Connected : ${dbname}`);
-    pools.set(dbname, pool);
+    // Attach error handler to prevent crashing process and handle disconnects
+    pool.on('error', (err) => {
+      console.error(`⚠️ SQL Pool Error on [${targetDb}]:`, err.message);
+      try {
+        pool.close();
+      } catch (_) {}
+      pools.delete(targetDb);
+    });
+
+    console.log(`✅ SQL Connected : ${targetDb}`);
+    pools.set(targetDb, pool);
     return pool;
 
   } catch (err) {
-    console.error(`❌ DB Connection Failed [${dbname}]:`, err);
+    console.error(`❌ DB Connection Failed [${targetDb}]:`, err.message);
+    pools.delete(targetDb);
     throw err;
   }
 };
 
+// Default pool accessor getter
+const getValidPool = async () => {
+  return await getPool(process.env.DB_NAME || 'smartgold');
+};
 
-// ✅ DEFAULT POOL PROMISE
-const poolPromise = getPool(process.env.DB_NAME || 'UNIPRO');
+const poolPromise = getValidPool();
 
 module.exports = {
   sql,
   getPool,
+  getValidPool,
   poolPromise
 };

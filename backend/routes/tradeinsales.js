@@ -1,15 +1,23 @@
+/** Developer: durairaj */
 const express = require("express");
 const router = express.Router();
-const { sql } = require("../db");
+const { sql, poolPromise } = require("../db");
+
+// Helper to acquire database connection pool reliably
+const getPool = async (req) => {
+  if (req && req.pool) return req.pool;
+  if (poolPromise) return await poolPromise;
+  throw new Error("Database pool is not available.");
+};
 
 // 1. GET Next Reference Number and Company info
 router.get("/next-ref", async (req, res) => {
   try {
-    const pool = req.pool;
+    const pool = await getPool(req);
     const result = await pool.request().query(
       "SELECT TOP 1 LocationCode, CompanyShortCode, NextTradeInSalesNo, NextPVNo, TradeInLimit FROM tblCompany"
     );
-    if (result.recordset.length === 0) {
+    if (!result.recordset || result.recordset.length === 0) {
       return res.json({ 
         success: true, 
         refNo: "00000001", 
@@ -42,7 +50,7 @@ router.get("/next-ref", async (req, res) => {
 // 2. GET all trade-ins for LOV lookup
 router.get("/list", async (req, res) => {
   try {
-    const pool = req.pool;
+    const pool = await getPool(req);
     const result = await pool.request().query(`
       SELECT 
         ReferenceNo, 
@@ -55,7 +63,7 @@ router.get("/list", async (req, res) => {
       FROM tblTradeInSalesHeader 
       ORDER BY ReferenceNo DESC
     `);
-    res.json({ success: true, data: result.recordset });
+    res.json({ success: true, data: result.recordset || [] });
   } catch (err) {
     console.error("Fetch Trade-In List Error:", err);
     res.status(500).json({ success: false, message: "Server error", error: err.message });
@@ -65,18 +73,18 @@ router.get("/list", async (req, res) => {
 // 2b. GET all members for lookup
 router.get("/members", async (req, res) => {
   try {
-    const pool = req.pool;
+    const pool = await getPool(req);
     const result = await pool.request().query(
       "SELECT MemberCode, MemberName, Address1, Address2, Address3, MemberType FROM tblMember ORDER BY MemberCode ASC"
     );
-    res.json({ success: true, data: result.recordset });
+    res.json({ success: true, data: result.recordset || [] });
   } catch (err) {
     try {
-      const pool = req.pool;
+      const pool = await getPool(req);
       const result = await pool.request().query(
         "SELECT CustomerCode AS MemberCode, CustomerName AS MemberName, Address1, Address2, Address3, CustomerType AS MemberType FROM tblCustomer ORDER BY CustomerCode ASC"
       );
-      res.json({ success: true, data: result.recordset });
+      res.json({ success: true, data: result.recordset || [] });
     } catch (innerErr) {
       res.status(500).json({ success: false, message: "Server error", error: err.message });
     }
@@ -87,7 +95,7 @@ router.get("/members", async (req, res) => {
 router.get("/customer/:code", async (req, res) => {
   try {
     const { code } = req.params;
-    const pool = req.pool;
+    const pool = await getPool(req);
     const result = await pool.request()
       .input("CustomerCode", sql.VarChar, (code || "").trim())
       .query(`
@@ -95,7 +103,7 @@ router.get("/customer/:code", async (req, res) => {
         FROM tblCustomer 
         WHERE CustomerCode = @CustomerCode
       `);
-    if (result.recordset.length > 0) {
+    if (result.recordset && result.recordset.length > 0) {
       res.json({ success: true, data: result.recordset[0] });
     } else {
       res.json({ success: false, message: "Customer not found" });
@@ -110,7 +118,7 @@ router.get("/customer/:code", async (req, res) => {
 router.get("/member/:code", async (req, res) => {
   try {
     const { code } = req.params;
-    const pool = req.pool;
+    const pool = await getPool(req);
     let result = await pool.request()
       .input("MemberCode", sql.VarChar, (code || "").trim())
       .query(`
@@ -118,7 +126,7 @@ router.get("/member/:code", async (req, res) => {
         FROM tblMember 
         WHERE MemberCode = @MemberCode
       `);
-    if (result.recordset.length === 0) {
+    if (!result.recordset || result.recordset.length === 0) {
       result = await pool.request()
         .input("CustomerCode", sql.VarChar, (code || "").trim())
         .query(`
@@ -127,7 +135,7 @@ router.get("/member/:code", async (req, res) => {
           WHERE CustomerCode = @CustomerCode
         `);
     }
-    if (result.recordset.length > 0) {
+    if (result.recordset && result.recordset.length > 0) {
       res.json({ success: true, data: result.recordset[0] });
     } else {
       res.json({ success: false, message: "Member not found" });
@@ -142,26 +150,26 @@ router.get("/member/:code", async (req, res) => {
 router.get("/transaction/:refNo", async (req, res) => {
   try {
     const { refNo } = req.params;
-    const pool = req.pool;
+    const pool = await getPool(req);
     
     // Fetch header
     const headerResult = await pool.request()
-      .input("ReferenceNo", sql.VarChar, refNo.trim())
+      .input("ReferenceNo", sql.VarChar, (refNo || "").trim())
       .query("SELECT * FROM tblTradeInSalesHeader WHERE ReferenceNo = @ReferenceNo");
       
-    if (headerResult.recordset.length === 0) {
+    if (!headerResult.recordset || headerResult.recordset.length === 0) {
       return res.status(404).json({ success: false, message: "Transaction not found." });
     }
     
     // Fetch details
     const detailsResult = await pool.request()
-      .input("ReferenceNo", sql.VarChar, refNo.trim())
+      .input("ReferenceNo", sql.VarChar, (refNo || "").trim())
       .query("SELECT * FROM tblTradeinSalesDetail WHERE ReferenceNo = @ReferenceNo ORDER BY InventoryCode ASC");
       
     res.json({
       success: true,
       header: headerResult.recordset[0],
-      details: detailsResult.recordset
+      details: detailsResult.recordset || []
     });
   } catch (err) {
     console.error("Fetch Transaction Details Error:", err);
@@ -172,9 +180,9 @@ router.get("/transaction/:refNo", async (req, res) => {
 // 4. GET gold rates from tblClass
 router.get("/class-rates", async (req, res) => {
   try {
-    const pool = req.pool;
+    const pool = await getPool(req);
     const result = await pool.request().query("SELECT ClassCode, Rate FROM tblClass");
-    res.json({ success: true, data: result.recordset });
+    res.json({ success: true, data: result.recordset || [] });
   } catch (err) {
     console.error("Fetch Class Rates Error:", err);
     res.status(500).json({ success: false, message: "Server error", error: err.message });
@@ -183,8 +191,8 @@ router.get("/class-rates", async (req, res) => {
 
 // 5. POST Save (Insert / Update) Trade-In Sales Transaction
 router.post("/save", async (req, res) => {
-  const pool = req.pool;
-  const transaction = new sql.Transaction(pool);
+  let pool;
+  let transaction;
   
   try {
     const {
@@ -209,6 +217,9 @@ router.post("/save", async (req, res) => {
     if (!inventoryCode || !customerCode || !items || items.length === 0) {
       return res.status(400).json({ success: false, message: "Required parameters missing." });
     }
+
+    pool = await getPool(req);
+    transaction = new sql.Transaction(pool);
 
     await transaction.begin();
     const reqDeleteHeader = new sql.Request(transaction);
@@ -357,10 +368,12 @@ router.post("/save", async (req, res) => {
     res.json({ success: true, message: "Trade In Sales transaction saved successfully.", invoiceNo: inventoryCode });
   } catch (err) {
     console.error("Save Trade-In Sales Error:", err);
-    try {
-      await transaction.rollback();
-    } catch (rerr) {
-      console.error("Rollback failed:", rerr);
+    if (transaction) {
+      try {
+        await transaction.rollback();
+      } catch (rerr) {
+        console.error("Rollback failed:", rerr);
+      }
     }
     res.status(500).json({ success: false, message: "Database Save Error", error: err.message });
   }
@@ -369,47 +382,50 @@ router.post("/save", async (req, res) => {
 // 6. DELETE Trade-In Sales Transaction
 router.delete("/delete/:refNo", async (req, res) => {
   const { refNo } = req.params;
-  const pool = req.pool;
-  const transaction = new sql.Transaction(pool);
+  let pool;
+  let transaction;
 
   try {
+    pool = await getPool(req);
+    transaction = new sql.Transaction(pool);
     await transaction.begin();
     
     const reqDetail = new sql.Request(transaction);
     await reqDetail
-      .input("ReferenceNo", sql.VarChar, refNo.trim())
+      .input("ReferenceNo", sql.VarChar, (refNo || "").trim())
       .query("DELETE FROM tblTradeinSalesDetail WHERE ReferenceNo = @ReferenceNo");
 
     const reqPayMode = new sql.Request(transaction);
     await reqPayMode
-      .input("InvoiceNo", sql.VarChar, refNo.trim())
+      .input("InvoiceNo", sql.VarChar, (refNo || "").trim())
       .query("DELETE FROM tblPayModeDetail WHERE InvoiceNo = @InvoiceNo");
 
     const reqHeader = new sql.Request(transaction);
     await reqHeader
-      .input("ReferenceNo", sql.VarChar, refNo.trim())
+      .input("ReferenceNo", sql.VarChar, (refNo || "").trim())
       .query("DELETE FROM tblTradeInSalesHeader WHERE ReferenceNo = @ReferenceNo");
 
     await transaction.commit();
     res.json({ success: true, message: "Trade In Sales transaction deleted successfully." });
   } catch (err) {
     console.error("Delete Transaction Error:", err);
-    try {
-      await transaction.rollback();
-    } catch (rerr) {
-      console.error("Rollback error:", rerr);
+    if (transaction) {
+      try {
+        await transaction.rollback();
+      } catch (rerr) {
+        console.error("Rollback error:", rerr);
+      }
     }
     res.status(500).json({ success: false, message: "Database Delete Error", error: err.message });
   }
 });
 
 // 7. POST Verify SalesMan Password
-// Checks tblSalesMan for Password and returns Salesman details (SalesManCode, SalesManName, TradeInNo, LastTradeInAmount)
 router.post("/verifypassword", async (req, res) => {
   try {
     const { password } = req.body;
     if (!password) return res.status(400).json({ success: false, message: "Password required" });
-    const pool = req.pool;
+    const pool = await getPool(req);
 
     let result;
     try {
@@ -426,7 +442,6 @@ router.post("/verifypassword", async (req, res) => {
           WHERE Password = @Password
         `);
     } catch (colErr) {
-      // Fallback if TradeInNo columns do not exist on tblSalesman
       result = await pool.request()
         .input("Password", sql.VarChar, password.trim())
         .query(`
@@ -441,7 +456,7 @@ router.post("/verifypassword", async (req, res) => {
         `);
     }
 
-    if (result.recordset.length > 0) {
+    if (result.recordset && result.recordset.length > 0) {
       res.json({ success: true, salesman: result.recordset[0] });
     } else {
       res.json({ success: false, message: "SalesMan Password is Incorrect!" });
@@ -456,7 +471,7 @@ router.post("/verifypassword", async (req, res) => {
 router.post("/check-admin", async (req, res) => {
   try {
     const { password } = req.body;
-    const pool = req.pool;
+    const pool = await getPool(req);
     
     const result = await pool.request()
       .input("Password", sql.VarChar, (password || "").trim())
@@ -466,7 +481,7 @@ router.post("/check-admin", async (req, res) => {
         WHERE Password = @Password AND UPPER(LTRIM(RTRIM(SalesManGroup))) = 'SUPER ADMIN'
       `);
       
-    if (result.recordset.length > 0) {
+    if (result.recordset && result.recordset.length > 0) {
       res.json({ success: true, message: "Authorized" });
     } else {
       res.json({ success: false, message: "SalesMan Has No Rights to change Cost!" });

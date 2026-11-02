@@ -1,12 +1,13 @@
+/** Developer: durairaj */
 import { ThemedText } from '@/components/themed-text';
 import { API_BASE_URL } from '@/constants/api';
 import { Ionicons } from '@expo/vector-icons';
-import { Stack, useRouter } from 'expo-router';
-import React, { useEffect, useState } from 'react';
+import { Stack, useFocusEffect, useRouter } from 'expo-router';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   KeyboardAvoidingView,
+  Modal,
   Platform,
   ScrollView,
   StyleSheet,
@@ -14,7 +15,6 @@ import {
   TouchableOpacity,
   TouchableWithoutFeedback,
   View,
-  Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -70,13 +70,49 @@ export default function MiscScreen() {
     }, 3000);
   };
 
-  const showAlert = (title: string, message: string) => {
-    if (Platform.OS === 'web') {
-      window.alert(`${title}: ${message}`);
-    } else {
-      Alert.alert(title, message);
-    }
-  };
+  // Keyboard Shortcuts matching VB frmMisc_KeyDown:
+  // Enter/Tab, F7 (Save/Add), F6 (Cancel/Clear), Escape (Back)
+  useFocusEffect(
+    useCallback(() => {
+      if (Platform.OS === 'web') {
+        const handleKeyDown = (e: KeyboardEvent) => {
+          if (e.key === 'F7') {
+            e.preventDefault();
+            handleSave();
+          } else if (e.key === 'F6') {
+            e.preventDefault();
+            handleCancel();
+          } else if (e.key === 'Escape') {
+            e.preventDefault();
+            if (isCalendarOpen) {
+              setIsCalendarOpen(false);
+            } else if (isTypeDropdownOpen) {
+              setIsTypeDropdownOpen(false);
+            } else {
+              router.back();
+            }
+          }
+        };
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+      }
+    }, [
+      selectedType,
+      voucherNo,
+      date,
+      amount,
+      netAmount,
+      gst,
+      gstPerc,
+      weight,
+      person,
+      remarks,
+      userId,
+      isEditing,
+      isCalendarOpen,
+      isTypeDropdownOpen
+    ])
+  );
 
   // Fetch initial configuration on mount
   useEffect(() => {
@@ -224,43 +260,35 @@ export default function MiscScreen() {
 
   const handleSave = async () => {
     if (!selectedType) {
-      showAlert('Information', 'Select Type');
+      showToast('Select Type', 'error');
       return;
     }
     if (!voucherNo || !voucherNo.trim()) {
-      showAlert('Information', 'Enter VoucherNo');
+      showToast('Enter VoucherNo', 'error');
       return;
     }
     if (isNaN(parseInt(voucherNo))) {
-      showAlert('Information', 'VoucherNo must be a valid number');
+      showToast('VoucherNo must be a valid number', 'error');
       return;
     }
     if (!date || !date.trim()) {
-      showAlert('Information', 'Select or enter Date');
+      showToast('Select or enter Date', 'error');
       return;
     }
     const dateParts = date.split('/');
     if (dateParts.length !== 3) {
-      showAlert('Information', 'Enter Date in dd/MM/yyyy format');
+      showToast('Enter Date in dd/MM/yyyy format', 'error');
       return;
     }
     const parsedDay = parseInt(dateParts[0]);
     const parsedMonth = parseInt(dateParts[1]);
     const parsedYear = parseInt(dateParts[2]);
     if (isNaN(parsedDay) || isNaN(parsedMonth) || isNaN(parsedYear) || parsedMonth < 1 || parsedMonth > 12 || parsedDay < 1 || parsedDay > 31) {
-      showAlert('Information', 'Enter a valid Date');
+      showToast('Enter a valid Date', 'error');
       return;
     }
-    if (!netAmount || !netAmount.trim() || parseFloat(netAmount) === 0) {
-      showAlert('Information', 'Enter Net Amount');
-      return;
-    }
-    if (isNaN(parseFloat(netAmount))) {
-      showAlert('Information', 'Net Amount must be a valid number');
-      return;
-    }
-    if (parseFloat(amount || '0') === 0) {
-      showAlert('Information', 'Enter Amount');
+    if (parseFloat(amount || '0') === 0 && (!netAmount || !netAmount.trim() || parseFloat(netAmount) === 0)) {
+      showToast('Enter Amount', 'error');
       return;
     }
 
@@ -341,18 +369,11 @@ export default function MiscScreen() {
     };
 
     if (Platform.OS === 'web') {
-      if (window.confirm(`Do you want to delete ${selectedType.label} Type?`)) {
+      if (typeof window !== 'undefined' && window.confirm(`Do you want to delete ${selectedType.label} Type?`)) {
         executeDelete();
       }
     } else {
-      Alert.alert(
-        'Confirm Delete',
-        `Do you want to delete ${selectedType.label} Type?`,
-        [
-          { text: 'No', style: 'cancel' },
-          { text: 'Yes', style: 'destructive', onPress: executeDelete },
-        ]
-      );
+      executeDelete();
     }
   };
 

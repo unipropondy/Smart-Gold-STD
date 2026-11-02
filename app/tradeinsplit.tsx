@@ -112,15 +112,15 @@ export default function TradeInSplitScreen() {
     const w = parseFloat(weight);
 
     if (isNaN(sw) || sw <= 0) {
-      showToast('Split weight should be greater than Zero.', 'error');
+      showToast('Split weight shold be greater than Zero.', 'error');
       return;
     }
     if (sw < swSt) {
-      showToast('Split weight should not be less than Stone Weight.', 'error');
+      showToast('Split weight shold not be greater than StoneWeight.', 'error');
       return;
     }
     if (sw >= w) {
-      showToast('Split Weight should be less than Inventory Weight.', 'error');
+      showToast('Split Weight should be less then Inventory Weight.', 'error');
       return;
     }
 
@@ -153,7 +153,7 @@ export default function TradeInSplitScreen() {
 
   const handleUpdate = async () => {
     if (!splitInvCode.trim()) {
-      showToast('The split Inventory Code should not be blank. Click Split first.', 'error');
+      showToast('The split InventoryCode should not be blank.', 'error');
       return;
     }
     if (
@@ -162,7 +162,7 @@ export default function TradeInSplitScreen() {
       !splitInvWeight ||
       parseFloat(splitInvWeight) === 0
     ) {
-      showToast('Invalid partition weights calculated.', 'error');
+      showToast('Invalid weight entered.', 'error');
       return;
     }
 
@@ -189,10 +189,10 @@ export default function TradeInSplitScreen() {
       });
       const data = await res.json();
       if (data.success) {
-        showToast('Trade-In Split Successfully', 'success');
+        showToast('Updated sucessfully', 'success');
         handleClear();
       } else {
-        showToast(data.message || 'Failed to execute split', 'error');
+        showToast(data.message || 'Error in save', 'error');
       }
     } catch (err: any) {
       showToast('Network error while saving split', 'error');

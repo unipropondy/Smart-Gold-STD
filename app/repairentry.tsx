@@ -76,6 +76,10 @@ export default function RepairEntryScreen() {
   const [invoices, setInvoices] = useState<any[]>([]);
   const [invoiceSearch, setInvoiceSearch] = useState('');
 
+  // RePrint Modal State
+  const [isReprintModalVisible, setIsReprintModalVisible] = useState(false);
+  const [reprintBillNo, setReprintBillNo] = useState('');
+
   const showToast = (message: string, type: 'success' | 'error' = 'success') => {
     setToast({ message, type });
     setTimeout(() => setToast(null), 3000);
@@ -98,6 +102,7 @@ export default function RepairEntryScreen() {
       if (json.success) {
         setSalesManCode(json.salesmanCode || '');
         setIsPasswordVisible(false);
+        handleGenerateNextNo();
       } else {
         showToast('Invalid Salesman Password', 'error');
       }
@@ -110,15 +115,45 @@ export default function RepairEntryScreen() {
 
   // 2. Fetch Customer LOV
   const fetchCustomers = async () => {
+    setIsCustomerModalVisible(true);
     setLoading(true);
     try {
+      let data: any[] = [];
       const res = await fetch(`${API_URL}/customers`);
       const json = await res.json();
-      if (json.success) {
-        setCustomers(json.data || []);
-        setIsCustomerModalVisible(true);
+      if (json.success && Array.isArray(json.data) && json.data.length > 0) {
+        data = json.data;
+      } else {
+        // Fallback to customer API if repairentry/customers returns empty
+        const fallbackRes = await fetch(`${API_BASE_URL}/customer`);
+        const fallbackJson = await fallbackRes.json();
+        if (fallbackJson.success && Array.isArray(fallbackJson.data) && fallbackJson.data.length > 0) {
+          data = fallbackJson.data;
+        } else {
+          const lovRes = await fetch(`${API_BASE_URL}/installmentorderentry/lov?type=customer`);
+          const lovJson = await lovRes.json();
+          if (lovJson.success && Array.isArray(lovJson.data)) {
+            data = lovJson.data.map((c: any) => ({
+              CustomerCode: c.Code || c.CustomerCode,
+              CustomerName: c.Name || c.CustomerName,
+              Address1: c.Address1,
+              Address2: c.Address2,
+              Address3: c.Address3,
+            }));
+          }
+        }
       }
+      setCustomers(data);
     } catch (err) {
+      console.error('Fetch customers error:', err);
+      try {
+        const fallbackRes = await fetch(`${API_BASE_URL}/customer`);
+        const fallbackJson = await fallbackRes.json();
+        if (fallbackJson.success && Array.isArray(fallbackJson.data)) {
+          setCustomers(fallbackJson.data);
+          return;
+        }
+      } catch (fErr) {}
       showToast('Failed to load customers', 'error');
     } finally {
       setLoading(false);
@@ -126,8 +161,8 @@ export default function RepairEntryScreen() {
   };
 
   const handleSelectCustomer = (cust: any) => {
-    setCustomerCode(cust.CustomerCode);
-    setCustomerName(cust.CustomerName);
+    setCustomerCode(cust.CustomerCode ? String(cust.CustomerCode).trim() : '');
+    setCustomerName(cust.CustomerName ? String(cust.CustomerName).trim() : '');
     setAddress(`${cust.Address1 || ''} ${cust.Address2 || ''} ${cust.Address3 || ''}`.trim());
     setIsCustomerModalVisible(false);
   };
@@ -137,18 +172,24 @@ export default function RepairEntryScreen() {
     try {
       const res = await fetch(`${API_URL}/customers`);
       const json = await res.json();
-      if (json.success && Array.isArray(json.data)) {
-        const found = json.data.find(
-          (c: any) => (c.CustomerCode || '').trim().toLowerCase() === code.trim().toLowerCase()
-        );
-        if (found) {
-          setCustomerCode(found.CustomerCode);
-          setCustomerName(found.CustomerName || '');
-          setAddress(`${found.Address1 || ''} ${found.Address2 || ''} ${found.Address3 || ''}`.trim());
+      let list = json.success && Array.isArray(json.data) ? json.data : [];
+      if (list.length === 0) {
+        const fallbackRes = await fetch(`${API_BASE_URL}/customer`);
+        const fallbackJson = await fallbackRes.json();
+        if (fallbackJson.success && Array.isArray(fallbackJson.data)) {
+          list = fallbackJson.data;
         }
       }
+      const found = list.find(
+        (c: any) => (c.CustomerCode || '').trim().toLowerCase() === code.trim().toLowerCase()
+      );
+      if (found) {
+        setCustomerCode(found.CustomerCode ? String(found.CustomerCode).trim() : code);
+        setCustomerName(found.CustomerName ? String(found.CustomerName).trim() : '');
+        setAddress(`${found.Address1 || ''} ${found.Address2 || ''} ${found.Address3 || ''}`.trim());
+      }
     } catch (err) {
-      console.error(err);
+      console.error('Lookup customer error:', err);
     }
   };
 
@@ -255,20 +296,23 @@ export default function RepairEntryScreen() {
       return;
     }
     if (items.length === 0) {
-      showToast('No Item to save in the repair grid.', 'error');
+      showToast('No Item to save.', 'error');
       return;
     }
 
     setSaving(true);
     try {
       let currentInvoiceNo = invoiceNo;
-      if (!currentInvoiceNo) {
+      if (!currentInvoiceNo || currentInvoiceNo.startsWith('RP-17') || currentInvoiceNo.startsWith('RP-18')) {
         const noRes = await fetch(`${API_URL}/next-no`);
         const noJson = await noRes.json();
-        currentInvoiceNo = noJson.success ? noJson.repairNo : `RP-${Date.now()}`;
-        setInvoiceNo(currentInvoiceNo);
+        if (noJson.success && noJson.repairNo) {
+          currentInvoiceNo = noJson.repairNo;
+          setInvoiceNo(currentInvoiceNo);
+        }
       }
 
+      const adv = parseFloat(advancePaid) || 0;
       const payload = {
         repairNo: currentInvoiceNo,
         repairDate,
@@ -277,13 +321,30 @@ export default function RepairEntryScreen() {
         customerCode,
         supplierCode,
         remarks,
-        advancePaid: parseFloat(advancePaid) || 0,
+        advancePaid: adv,
         totalCostEstimated: parseFloat(totalCost) || 0,
         tradeInAmount: parseFloat(tradeInAmount) || 0,
         tradeInType: tradeInOption.substring(0, 1),
-        salesManCode,
+        isService,
+        salesManCode: salesManCode || 'ADMIN',
         items,
       };
+
+      // If Advance Paid > 0, navigate through payingmode
+      if (adv > 0) {
+        router.push({
+          pathname: '/payingmode',
+          params: {
+            totalNet: adv.toFixed(2),
+            customerCode: customerCode,
+            apiEndpoint: `${API_URL}/save`,
+            payload: JSON.stringify(payload),
+            returnPath: '/repairentry',
+          },
+        });
+        setSaving(false);
+        return;
+      }
 
       const res = await fetch(`${API_URL}/save`, {
         method: 'POST',
@@ -295,12 +356,35 @@ export default function RepairEntryScreen() {
         showToast('Repair Entry Saved Successfully', 'success');
         handleClear();
       } else {
-        showToast(json.message || 'Failed to save', 'error');
+        showToast(json.error || json.message || 'Failed to save', 'error');
       }
     } catch (err) {
       showToast('Network error while saving', 'error');
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleReprintDocket = async () => {
+    if (!reprintBillNo || !reprintBillNo.trim()) {
+      showToast('Please enter Repair No to reprint', 'error');
+      return;
+    }
+    setLoading(true);
+    try {
+      const res = await fetch(`${API_URL}/reprint/${encodeURIComponent(reprintBillNo.trim())}`);
+      const json = await res.json();
+      if (json.success) {
+        showToast(`Repair Docket ${reprintBillNo} found. Printing receipt...`, 'success');
+        setIsReprintModalVisible(false);
+        setReprintBillNo('');
+      } else {
+        showToast(json.message || 'Repair docket not found', 'error');
+      }
+    } catch (err) {
+      showToast('Error loading repair docket', 'error');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -354,6 +438,7 @@ export default function RepairEntryScreen() {
     setCurrentDescription('');
     setCurrentWeight('');
     setCurrentCost('');
+    handleGenerateNextNo();
   };
 
   // Grid Operations
@@ -481,7 +566,7 @@ export default function RepairEntryScreen() {
 
           <TouchableOpacity
             style={[styles.actionBtn, styles.reprintBtn]}
-            onPress={() => showToast('RePrinting repair docket...', 'success')}
+            onPress={() => setIsReprintModalVisible(true)}
             activeOpacity={0.8}
           >
             <Ionicons name="print-outline" size={14} color="#5C4A28" />
@@ -1035,7 +1120,7 @@ export default function RepairEntryScreen() {
                   (c.CustomerCode || '').toLowerCase().includes(customerSearch.toLowerCase()) ||
                   (c.CustomerName || '').toLowerCase().includes(customerSearch.toLowerCase())
               )}
-              keyExtractor={(item) => item.CustomerCode}
+              keyExtractor={(item, index) => item.CustomerCode || index.toString()}
               initialNumToRender={50}
               maxToRenderPerBatch={50}
               ListEmptyComponent={
@@ -1213,6 +1298,62 @@ export default function RepairEntryScreen() {
                 </TouchableOpacity>
               )}
             />
+          </View>
+        </View>
+      </Modal>
+      {/* REPRINT REPAIR DOCKET MODAL (matching PnlReprint in frmRepairEntry.vb) */}
+      <Modal visible={isReprintModalVisible} transparent animationType="fade">
+        <View style={styles.modalOverlay}>
+          <View style={[styles.lovModalCard, { maxHeight: 250, width: '90%', maxWidth: 450 }]}>
+            <View style={styles.modalHeaderBanner}>
+              <View style={styles.headerTitleContainer}>
+                <View style={styles.headerIconBadgeSmall}>
+                  <Ionicons name="print-outline" size={13} color="#B48218" />
+                </View>
+                <ThemedText style={styles.modalHeaderTitle}>RePrint Repair Docket</ThemedText>
+              </View>
+              <TouchableOpacity
+                onPress={() => setIsReprintModalVisible(false)}
+                activeOpacity={0.7}
+                style={styles.closeModalBtn}
+              >
+                <Ionicons name="close" size={18} color="#3B2D17" />
+              </TouchableOpacity>
+            </View>
+
+            <View style={{ padding: 16 }}>
+              <ThemedText style={[styles.inlineFieldLabel, { marginBottom: 6 }]}>
+                Repair Invoice / Docket No:
+              </ThemedText>
+              <TextInput
+                style={[styles.formInput, { height: 38 }]}
+                value={reprintBillNo}
+                onChangeText={setReprintBillNo}
+                placeholder="e.g. RP-HQ00000001"
+                placeholderTextColor="#9E8D77"
+                autoFocus
+              />
+
+              <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 10, marginTop: 18 }}>
+                <TouchableOpacity
+                  style={[styles.actionBtn, styles.clearBtn, { paddingHorizontal: 16, height: 36 }]}
+                  onPress={() => setIsReprintModalVisible(false)}
+                  activeOpacity={0.8}
+                >
+                  <ThemedText style={styles.clearBtnText}>Cancel</ThemedText>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[styles.actionBtn, styles.saveBtn, { paddingHorizontal: 20, height: 36 }]}
+                  onPress={handleReprintDocket}
+                  activeOpacity={0.8}
+                  disabled={loading}
+                >
+                  <Ionicons name="print" size={14} color="#9E6D08" />
+                  <ThemedText style={styles.saveBtnText}>Print</ThemedText>
+                </TouchableOpacity>
+              </View>
+            </View>
           </View>
         </View>
       </Modal>

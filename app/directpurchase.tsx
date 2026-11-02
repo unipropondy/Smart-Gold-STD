@@ -28,9 +28,9 @@ const getInitialHeaderState = () => ({
   InvoiceDate: new Date().toISOString().split('T')[0],
   SupplierCode: '',
   SupplierName: '',
-  CurrencyCode: 'SGD',
-  CurrencyName: 'SGD',
-  CurrencyRate: '1.00',
+  CurrencyCode: '',
+  CurrencyName: '',
+  CurrencyRate: '',
   CostPerGram: '0.00',
   TotalCost: '0.00',
   TotalMC: '0.00',
@@ -45,7 +45,7 @@ const getInitialHeaderState = () => ({
   TranType: 'DP',
   TotalWeight24K: '0.000',
   TEAL: '0.00',
-  TEALPercent: '.92',
+  TEALPercent: '',
   Payable: 'Cash',
   FixUnFix: 'Fix',
   Ordered: false,
@@ -120,7 +120,7 @@ const recalculateDetailCosts = (detail: any, currentAutoSMC: boolean = false, cu
 
   let pmcCost = 0;
   if (detail.PurchaseMCType === 'PerGram') {
-    pmcCost = pmc * netWeight;
+    pmcCost = pmc * weight;
   } else {
     pmcCost = pmc * (pcs > 0 ? pcs : 1);
   }
@@ -129,19 +129,19 @@ const recalculateDetailCosts = (detail: any, currentAutoSMC: boolean = false, cu
   if (currentAutoSMC) {
     smc = Math.round(pmc * 4);
     if (detail.SalesMCType === 'PerGram') {
-      smcCost = Math.round(pmc * netWeight * 4);
+      smcCost = Math.round(pmc * weight * 4);
     } else {
       smcCost = Math.round(pmc * (pcs > 0 ? pcs : 1) * 4);
     }
   } else {
     if (detail.SalesMCType === 'PerGram') {
-      smcCost = Math.round(smc * netWeight);
+      smcCost = Math.round(smc * weight);
     } else {
       smcCost = Math.round(smc * (pcs > 0 ? pcs : 1));
     }
   }
 
-  let dCost = (netWeight + goldLoss) * costPerGram + pmcCost;
+  let dCost = (weight + goldLoss) * costPerGram + pmcCost;
 
   if (detail.AddlDesc) {
     const c1 = parseFloat(detail.Cost1) || 0;
@@ -150,9 +150,15 @@ const recalculateDetailCosts = (detail: any, currentAutoSMC: boolean = false, cu
     const c4 = parseFloat(detail.Cost4) || 0;
     dCost += c1 + c2 + c3 + c4;
     pmcCost += c1 + c2 + c3 + c4;
+
+    const sp1 = parseFloat(detail.SellingPrice1) || 0;
+    const sp2 = parseFloat(detail.SellingPrice2) || 0;
+    const sp3 = parseFloat(detail.SellingPrice3) || 0;
+    const sp4 = parseFloat(detail.SellingPrice4) || 0;
+    smcCost += sp1 + sp2 + sp3 + sp4;
   }
 
-  const dLocalCost = currencyRate !== 0 ? dCost : dCost;
+  const dLocalCost = dCost;
 
   return {
     ...detail,
@@ -253,32 +259,86 @@ const calculateTealFromCostPerGram = (
 };
 
 const validateInventoryLine = (item: any, header: any, salesPCS: boolean = false) => {
+  if (!item.InventoryCode?.trim()) {
+    return { isValid: false, message: 'Inventory Code Cannot be Blank ....' };
+  }
   if (!item.CatalogueCode?.trim()) {
-    return { isValid: false, message: 'Please select a catalogue code' };
+    return { isValid: false, message: 'Catalogue Code Cannot be Blank ....' };
   }
   if (!item.CategoryCode?.trim()) {
-    return { isValid: false, message: 'Please select a category code' };
+    return { isValid: false, message: 'Category Code Cannot be Blank ....' };
   }
-  if (!item.InventoryCode?.trim()) {
-    return { isValid: false, message: 'Inventory Code is required' };
+  if (!item.TrayId?.trim()) {
+    return { isValid: false, message: 'Tray Id Cannot be Blank ....' };
   }
+  if (!item.InventoryDescription?.trim() && !item.Description?.trim()) {
+    return { isValid: false, message: 'Description Cannot be Blank ....' };
+  }
+
   const weight = parseFloat(item.Weight) || 0;
-  if (weight <= 0 && !salesPCS) {
-    return { isValid: false, message: 'Please enter a valid weight (> 0)' };
+  if (weight <= 0 && !salesPCS && item.PurchaseMCType !== 'PerPCS') {
+    return { isValid: false, message: 'Invalid weight!' };
   }
+
   const pcs = parseInt(item.PCS, 10) || 0;
-  if (pcs <= 0) {
-    return { isValid: false, message: 'Please enter a valid PCS (> 0)' };
+  if (pcs < 1) {
+    return { isValid: false, message: 'Invalid pcs!' };
   }
+
+  // CostPerGram validation
+  const costPerGram = parseFloat(item.CostPerGram) || 0;
+  if (costPerGram <= 0 && item.PurchaseMCType !== 'PerPCS') {
+    return { isValid: false, message: 'Invalid cost per gram!' };
+  }
+
+  // IPM checks if IPM active
+  if (item.IPM) {
+    if (!item.IPMType?.trim()) {
+      return { isValid: false, message: 'Type Cannot be Blank ....' };
+    }
+    if (!item.IPMBarNo?.trim()) {
+      return { isValid: false, message: 'BarNo Cannot be Blank ....' };
+    }
+    if (!item.IPMPurity?.trim()) {
+      return { isValid: false, message: 'Purity Cannot be Blank ....' };
+    }
+    if (!item.IPMGSTType?.trim()) {
+      return { isValid: false, message: 'GST Type Cannot be Blank ....' };
+    }
+    if (!item.IPMRefiner?.trim()) {
+      return { isValid: false, message: 'Refiner Cannot be Blank ....' };
+    }
+    if (!item.IPMCountry?.trim()) {
+      return { isValid: false, message: 'Country Cannot be Blank ....' };
+    }
+  }
+
+  // Ordered inventory code check
+  if (header.Ordered && header.OrderNo?.trim()) {
+    if (!item.TradeInInventoryCode?.trim() && !item.OrderInventoryCode?.trim()) {
+      return { isValid: false, message: 'Please select the order inventory code.' };
+    }
+  }
+
   return { isValid: true, message: '' };
 };
 
 const validatePurchaseSave = (header: any, details: any[]) => {
   if (!header.SupplierCode?.trim()) {
-    return { isValid: false, message: 'Please select a supplier' };
+    return { isValid: false, message: 'Enter supplier code.' };
   }
-  if (!header.InvoiceNo?.trim()) {
-    return { isValid: false, message: 'Please enter an Invoice No.' };
+  if (!header.InvoiceDate || isNaN(Date.parse(header.InvoiceDate))) {
+    return { isValid: false, message: 'Enter valid invoice date.' };
+  }
+  if (!header.CurrencyCode?.trim()) {
+    return { isValid: false, message: 'Enter currency code.' };
+  }
+  const currRate = parseFloat(header.CurrencyRate) || 0;
+  if (currRate <= 0) {
+    return { isValid: false, message: 'Enter currency rate.' };
+  }
+  if (!header.Payable?.trim()) {
+    return { isValid: false, message: 'Select payment type.' };
   }
   if (!details || details.length === 0) {
     return { isValid: false, message: 'Please add at least one line item to the grid' };
@@ -374,9 +434,27 @@ const fetchPurchasesApi = async () => {
   return res.json();
 };
 
+const fetchOrdersApi = async () => {
+  const res = await fetch(`${API_URL}/orderinventory/orders`);
+  return res.json();
+};
+
+const fetchOrderDetailsApi = async (orderNo: string) => {
+  const res = await fetch(`${API_URL}/orderinventory/order-details/${encodeURIComponent(orderNo)}`);
+  return res.json();
+};
+
+const fetchTradeBillsApi = async () => {
+  const res = await fetch(`${API_URL}/tradeinissue/tradebills`);
+  return res.json();
+};
+
 const fetchNextJobSheetNoApi = async () => {
   try {
-    const res = await fetch(`${API_URL}/jobsheet/next-number`);
+    let res = await fetch(`${API_URL}/jobsheet/next-number`);
+    if (!res.ok) {
+      res = await fetch(`${API_URL}/jobsheet/nextNo`);
+    }
     const json = await res.json();
     if (json.success && json.nextNo) {
       return json.nextNo;
@@ -426,13 +504,32 @@ const saveDirectPurchaseApi = async (header: any, details: any[]) => {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
   });
-  return res.json();
+  let json: any = {};
+  try {
+    json = await res.json();
+  } catch (err: any) {
+    json = { success: false, message: `Server error (${res.status}): ${res.statusText}` };
+  }
+  if (!res.ok && json.success === undefined) {
+    json.success = false;
+  }
+  return json;
 };
 
 const deletePurchaseBillApi = async (billNo: string) => {
   const res = await fetch(`${API_URL}/directpurchase/${encodeURIComponent(billNo)}`, {
     method: 'DELETE',
   });
+  return res.json();
+};
+
+const deletePurchaseItemApi = async (billNo: string, inventoryCode: string) => {
+  const res = await fetch(
+    `${API_URL}/directpurchase/${encodeURIComponent(billNo)}/item/${encodeURIComponent(inventoryCode)}`,
+    {
+      method: 'DELETE',
+    }
+  );
   return res.json();
 };
 
@@ -546,7 +643,7 @@ export default function DirectPurchaseScreen() {
     // Replace all alert popups with Toast message
     const toastType: 'success' | 'error' | 'info' =
       title.toLowerCase().includes('error') ? 'error' :
-      title.toLowerCase().includes('success') ? 'success' : 'info';
+        title.toLowerCase().includes('success') ? 'success' : 'info';
     showToast(message, toastType);
     if (buttons && buttons[0]?.onPress) {
       buttons[0].onPress();
@@ -562,17 +659,53 @@ export default function DirectPurchaseScreen() {
   const [lovColumns, setLovColumns] = useState<string[]>([]);
   const [onLovSelect, setOnLovSelect] = useState<((item: any) => void) | null>(null);
 
-  // Initial load: Fetch Company configuration (GST %, Default Currency, etc.)
+  // Keyboard Shortcuts (F6: BillClear, F7: BillClose, F8: Save, F9: Report, F10: Auto/Manual)
+  useEffect(() => {
+    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      const handleKeyDown = (e: KeyboardEvent) => {
+        if (e.key === 'F6') {
+          e.preventDefault();
+          handleClearForm();
+        } else if (e.key === 'F7') {
+          e.preventDefault();
+          handleBillClose();
+        } else if (e.key === 'F8') {
+          e.preventDefault();
+          handleSavePurchase();
+        } else if (e.key === 'F9') {
+          e.preventDefault();
+          router.push({
+            pathname: '/reports' as any,
+            params: {
+              reportName: 'PurchaseDetail',
+              jobSheetNo: headerState.JobSheetNo,
+              invoiceNo: headerState.InvoiceNo,
+            },
+          });
+        } else if (e.key === 'F10') {
+          e.preventDefault();
+          setIsManual((prev) => {
+            const next = !prev;
+            showToast(next ? 'Switched to MANUAL mode' : 'Switched to AUTO mode', 'info');
+            return next;
+          });
+        }
+      };
+
+      window.addEventListener('keydown', handleKeyDown);
+      return () => window.removeEventListener('keydown', handleKeyDown);
+    }
+  }, [headerState, details]);
+
+  // Initial load: Fetch Company configuration (GST %, etc.)
   useEffect(() => {
     async function initCompany() {
       const comp = await fetchCompanyInfo();
       if (comp) {
-        const gstVal = comp.GstPerc || comp.GSTPerc || comp.GSTPercent || comp.GstPercentage || comp.GST || '9';
-        const currVal = comp.CurrencyCode || comp.DefaultCurrency || 'SGD';
+        const gstVal = comp.GstPerc || comp.GSTPerc || comp.GSTPercent || comp.GstPercentage || comp.GST || '';
         setHeaderState((prev: any) => ({
           ...prev,
-          CurrencyCode: prev.CurrencyCode || currVal,
-          GSTPercent: prev.GSTPercent === '0' && gstVal ? String(gstVal) : prev.GSTPercent || String(gstVal),
+          GSTPercent: prev.GSTPercent && prev.GSTPercent !== '0' ? prev.GSTPercent : (gstVal ? String(gstVal) : prev.GSTPercent),
         }));
       }
     }
@@ -708,10 +841,10 @@ export default function DirectPurchaseScreen() {
       const json = await fetchCurrenciesApi();
       setLoading(false);
       if (json.success && Array.isArray(json.data)) {
-        openLov('Select Currency', json.data, ['CurrencyCode', 'CurrencyName', 'Rate'], (item) => {
-          updateHeader('CurrencyCode', item.CurrencyCode || 'SGD');
+        openLov('Select Currency', json.data, ['CurrencyCode', 'CurrencyName', 'CurrencyRate'], (item) => {
+          updateHeader('CurrencyCode', item.CurrencyCode || '');
           updateHeader('CurrencyName', item.CurrencyName || item.CurrencyCode || '');
-          updateHeader('CurrencyRate', (item.Rate || '1.00').toString());
+          updateHeader('CurrencyRate', (item.CurrencyRate ?? item.Rate ?? '').toString());
         });
       }
     } catch (e: any) {
@@ -895,21 +1028,70 @@ export default function DirectPurchaseScreen() {
   const fetchTradeInSearch = async () => {
     try {
       setLoading(true);
-      const json = await fetchInventoryApi();
+      const json = await fetchTradeBillsApi();
       setLoading(false);
       if (json.success && Array.isArray(json.data)) {
-        openLov('Search Trade In Inventory', json.data, ['InventoryCode', 'Description', 'Weight', 'InvoiceNo'], (item) => {
+        openLov('Search Trade In Inventory', json.data, ['InventoryCode', 'InvoiceNo', 'Balanceweight', 'TotalWeight'], (item) => {
           updateDetail({
             TradeInInventoryCode: item.InventoryCode || '',
-            TradeInDescription: item.Description || '',
+            TradeInDescription: item.Description || item.InventoryCode || '',
             TradeInInvoice: item.InvoiceNo || '',
-            TradeInWeight: (item.Weight || '').toString(),
+            TradeInWeight: (item.Balanceweight != null ? item.Balanceweight : item.TotalWeight || '').toString(),
           });
         });
       }
     } catch (e: any) {
       setLoading(false);
       showAlert('Error', e.message || 'Error searching trade-in inventory');
+    }
+  };
+
+  const fetchOrdersSearch = async () => {
+    try {
+      setLoading(true);
+      const json = await fetchOrdersApi();
+      setLoading(false);
+      if (json.success && Array.isArray(json.data)) {
+        openLov('Select Order No', json.data, ['OrderNo', 'CustomerCode', 'SupplierCode', 'OrderDate'], (item) => {
+          updateHeader('OrderNo', item.OrderNo || '');
+          if (item.SupplierCode) {
+            updateHeader('SupplierCode', item.SupplierCode);
+            fetchSupplierByCodeApi(item.SupplierCode).then((sJson) => {
+              if (sJson.success && sJson.data) {
+                updateHeader('SupplierName', sJson.data.SupplierName || '');
+              }
+            }).catch(() => { });
+          }
+        });
+      }
+    } catch (e: any) {
+      setLoading(false);
+      showAlert('Error', e.message || 'Error fetching orders');
+    }
+  };
+
+  const fetchOrderInventoryDetailsSearch = async () => {
+    const orderNo = (headerState.OrderNo || '').trim();
+    if (!orderNo) {
+      showToast('Please select or enter Order No first', 'info');
+      return;
+    }
+    try {
+      setLoading(true);
+      const json = await fetchOrderDetailsApi(orderNo);
+      setLoading(false);
+      if (json.success && Array.isArray(json.data)) {
+        openLov('Select Order Inventory Item', json.data, ['OrderInventoryCode', 'Description', 'WeightEstimated'], (item) => {
+          updateDetail({
+            OrderInventoryCode: item.OrderInventoryCode || '',
+            InventoryDescription: item.Description || currentDetail.InventoryDescription,
+            Weight: item.WeightEstimated ? String(item.WeightEstimated) : currentDetail.Weight,
+          });
+        });
+      }
+    } catch (e: any) {
+      setLoading(false);
+      showAlert('Error', e.message || 'Error fetching order items');
     }
   };
 
@@ -1042,8 +1224,8 @@ export default function DirectPurchaseScreen() {
                 InvoiceNo: h.PurchaseBillNo || '',
                 SupplierCode: h.SupplierCode || '',
                 SupplierName: h.SupplierName || '',
-                CurrencyCode: h.CurrencyCode || 'SGD',
-                CurrencyRate: h.CurrencyRate?.toString() || '1.00',
+                CurrencyCode: h.CurrencyCode || '',
+                CurrencyRate: h.CurrencyRate != null ? h.CurrencyRate.toString() : '',
                 Remarks: h.Remarks || '',
               }));
 
@@ -1127,16 +1309,55 @@ export default function DirectPurchaseScreen() {
     setDetailModalVisible(true);
   };
 
-  const handleDeleteDetail = () => {
+  const handleDeleteDetail = async () => {
     if (selectedIndex === null) {
       showToast('Please select a line item from the grid to delete', 'info');
       return;
     }
-    const updated = details.filter((_, i) => i !== selectedIndex);
-    setDetails(updated);
-    setSelectedIndex(null);
-    setCurrentDetail(getInitialDetailState());
-    showToast('Line item removed');
+
+    if (headerState.BillClose === 'Y') {
+      showAlert('Warning', 'This bill is closed. Cannot delete!');
+      return;
+    }
+
+    if (headerState.TranType === 'JP') {
+      showAlert('Warning', 'This is not a direct purchase bill. Cannot delete!');
+      return;
+    }
+
+    const itemToDelete = details[selectedIndex];
+    const itemCode = (itemToDelete?.InventoryCode || '').trim();
+
+    showAlert('Confirmation', `Do you want to delete item no. ${itemCode || selectedIndex + 1}?`, [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            // If the item exists in the backend under InvoiceNo, call backend delete
+            if (headerState.InvoiceNo?.trim() && itemCode) {
+              setLoading(true);
+              const delRes = await deletePurchaseItemApi(headerState.InvoiceNo.trim(), itemCode);
+              setLoading(false);
+              if (!delRes.success) {
+                showAlert('Error', delRes.message || 'Cannot delete item!');
+                return;
+              }
+            }
+
+            const updated = details.filter((_, i) => i !== selectedIndex);
+            setDetails(updated);
+            setSelectedIndex(null);
+            setCurrentDetail(getInitialDetailState());
+            showToast('Item deleted successfully', 'success');
+          } catch (err: any) {
+            setLoading(false);
+            showAlert('Error', err.message || 'Error deleting item');
+          }
+        },
+      },
+    ]);
   };
 
   const handleClearDetail = () => {
@@ -1170,14 +1391,25 @@ export default function DirectPurchaseScreen() {
         }
       }
 
-      const saveHeader = { ...headerState, JobSheetNo: jsNo || headerState.JobSheetNo };
+      let invoiceNo = (headerState.InvoiceNo || '').trim();
+      if (!invoiceNo) {
+        invoiceNo = jsNo || `DP${Date.now().toString().slice(-8)}`;
+        setHeaderState((prev: any) => ({ ...prev, InvoiceNo: invoiceNo }));
+      }
+
+      const saveHeader = {
+        ...headerState,
+        JobSheetNo: jsNo || headerState.JobSheetNo,
+        InvoiceNo: invoiceNo,
+      };
+
       const res = await saveDirectPurchaseApi(saveHeader, details);
       setSaving(false);
 
       if (res.success) {
         showToast('Direct purchase saved successfully!', 'success');
       } else {
-        showAlert('Error', res.message || 'Failed to save direct purchase');
+        showAlert('Error', res.message || res.error || 'Failed to save direct purchase');
       }
     } catch (e: any) {
       setSaving(false);
@@ -1270,9 +1502,35 @@ export default function DirectPurchaseScreen() {
                 </ThemedText>
               </TouchableOpacity>
 
-              {/* Clear Button (F6) */}
+              {/* Bill Clear Button (Clears entire bill and unlocks header) */}
               <TouchableOpacity style={styles.topActionBtn} onPress={handleClearForm}>
                 <ThemedText style={{ color: '#5C4A28', fontWeight: 'bold', fontSize: 11 }}>Clear</ThemedText>
+              </TouchableOpacity>
+
+
+
+              {/* Report Button */}
+              <TouchableOpacity
+                style={[
+                  styles.topActionBtn,
+                  { backgroundColor: '#E8EAF6', borderColor: '#7986CB' }
+                ]}
+                onPress={() => {
+                  if (!headerState.JobSheetNo?.trim() && !headerState.InvoiceNo?.trim()) {
+                    showToast('Please enter or load a JobSheet / Invoice No. first', 'info');
+                    return;
+                  }
+                  router.push({
+                    pathname: '/reports' as any,
+                    params: {
+                      reportName: 'PurchaseDetail',
+                      jobSheetNo: headerState.JobSheetNo,
+                      invoiceNo: headerState.InvoiceNo,
+                    },
+                  });
+                }}
+              >
+                <ThemedText style={{ color: '#283593', fontWeight: 'bold', fontSize: 11 }}>Report</ThemedText>
               </TouchableOpacity>
 
               {/* Save Button (F8) */}
@@ -1371,6 +1629,17 @@ export default function DirectPurchaseScreen() {
                       style={[styles.input, { width: 106, borderTopRightRadius: 0, borderBottomRightRadius: 0, borderRightWidth: 0 }]}
                       value={headerState.SupplierCode}
                       onChangeText={(t) => updateHeader('SupplierCode', t)}
+                      onBlur={async () => {
+                        const sCode = (headerState.SupplierCode || '').trim();
+                        if (sCode) {
+                          try {
+                            const sJson = await fetchSupplierByCodeApi(sCode);
+                            if (sJson.success && sJson.data) {
+                              updateHeader('SupplierName', sJson.data.SupplierName || '');
+                            }
+                          } catch (_) { }
+                        }
+                      }}
                       editable={!isFormLocked}
                     />
                     <TouchableOpacity
@@ -1396,6 +1665,21 @@ export default function DirectPurchaseScreen() {
                       style={[styles.input, { width: 106, borderTopRightRadius: 0, borderBottomRightRadius: 0, borderRightWidth: 0 }]}
                       value={headerState.CurrencyCode}
                       onChangeText={(t) => updateHeader('CurrencyCode', t)}
+                      onBlur={async () => {
+                        const cCode = (headerState.CurrencyCode || '').trim();
+                        if (cCode) {
+                          try {
+                            const cRes = await fetch(`${API_URL}/currency/${encodeURIComponent(cCode)}`);
+                            const cJson = await cRes.json();
+                            if (cJson.success && cJson.data) {
+                              updateHeader('CurrencyName', cJson.data.CurrencyName || cCode);
+                              if (cJson.data.CurrencyRate != null) {
+                                updateHeader('CurrencyRate', String(cJson.data.CurrencyRate));
+                              }
+                            }
+                          } catch (_) { }
+                        }
+                      }}
                       editable={!isFormLocked}
                     />
                     <TouchableOpacity style={styles.lookupBtn} onPress={fetchCurrencies}>
@@ -1508,12 +1792,20 @@ export default function DirectPurchaseScreen() {
                       onPress={() => updateHeader('Ordered', !headerState.Ordered)}
                     />
                     {headerState.Ordered && (
-                      <TextInput
-                        style={[styles.input, { width: 80, marginLeft: 4 }]}
-                        placeholder="Order No"
-                        value={headerState.OrderNo}
-                        onChangeText={(t) => updateHeader('OrderNo', t)}
-                      />
+                      <View style={{ flexDirection: 'row', marginLeft: 4 }}>
+                        <TextInput
+                          style={[styles.input, { width: 85, borderTopRightRadius: 0, borderBottomRightRadius: 0 }]}
+                          placeholder="Order No"
+                          value={headerState.OrderNo}
+                          onChangeText={(t) => updateHeader('OrderNo', t)}
+                        />
+                        <TouchableOpacity
+                          style={[styles.lookupBtn, { width: 26 }]}
+                          onPress={fetchOrdersSearch}
+                        >
+                          <ThemedText style={styles.lookupBtnText}>...</ThemedText>
+                        </TouchableOpacity>
+                      </View>
                     )}
                   </View>
                 </View>
@@ -1828,6 +2120,34 @@ export default function DirectPurchaseScreen() {
                         style={{ width: 102, paddingHorizontal: 6, paddingVertical: 2, fontSize: 11.5, color: '#2B2114' }}
                         value={currentDetail.CatalogueCode}
                         onChangeText={(t) => updateDetail('CatalogueCode', t)}
+                        onBlur={async () => {
+                          const catCode = (currentDetail.CatalogueCode || '').trim();
+                          if (catCode) {
+                            try {
+                              const cRes = await fetchCatalogueByCodeApi(catCode);
+                              if (cRes.success && cRes.data) {
+                                const item = cRes.data;
+                                const categoryCodeVal = item.CategoryCode || currentDetail.CategoryCode;
+                                const updates: any = {
+                                  CatalogueCode: item.CatalogueCode || catCode,
+                                  CategoryCode: categoryCodeVal,
+                                  TrayId: item.TrayId || currentDetail.TrayId || '',
+                                  InventoryDescription: item.CatalogueName || currentDetail.InventoryDescription,
+                                };
+                                if (categoryCodeVal) {
+                                  updates.ClassCode = categoryCodeVal.substring(0, 3);
+                                  const catJson = await fetchCategoryByCodeApi(categoryCodeVal);
+                                  if (catJson.success && catJson.data) {
+                                    if (!isManual && catJson.data.NextInventoryCode) {
+                                      updates.InventoryCode = catJson.data.NextInventoryCode.trim();
+                                    }
+                                  }
+                                }
+                                updateDetail(updates);
+                              }
+                            } catch (_) { }
+                          }
+                        }}
                       />
                       <TouchableOpacity
                         style={{ width: 26, backgroundColor: '#FAF4E6', borderLeftWidth: 1, borderColor: '#D8CEBD', justifyContent: 'center', alignItems: 'center', flexShrink: 0 }}
@@ -2237,6 +2557,30 @@ export default function DirectPurchaseScreen() {
                       value={currentDetail.TradeInInvoice}
                       editable={false}
                     />
+                  </View>
+                </View>
+              )}
+
+              {/* ORDER INVENTORY ITEM LINK EXPANDABLE BOX (When Ordered is checked in header) */}
+              {headerState.Ordered && (
+                <View style={[styles.tradeInContainer, { backgroundColor: '#F0F7FF', borderColor: '#B3D4FC' }]}>
+                  <ThemedText style={[styles.tradeInHeader, { color: '#0D47A1' }]}>Linked Order Inventory Item</ThemedText>
+                  <View style={styles.tradeInRow}>
+                    <ThemedText style={[styles.tradeInLabel, { color: '#1565C0' }]}>Order Item Code:</ThemedText>
+                    <View style={{ flexDirection: 'row', width: 170 }}>
+                      <TextInput
+                        style={[styles.input, { flex: 1, borderTopRightRadius: 0, borderBottomRightRadius: 0 }]}
+                        value={currentDetail.OrderInventoryCode}
+                        onChangeText={(t) => updateDetail('OrderInventoryCode', t)}
+                        placeholder="Select item..."
+                      />
+                      <TouchableOpacity style={[styles.lookupBtn, { width: 28 }]} onPress={fetchOrderInventoryDetailsSearch}>
+                        <ThemedText style={styles.lookupBtnText}>...</ThemedText>
+                      </TouchableOpacity>
+                    </View>
+                    <ThemedText style={{ fontSize: 11, color: '#546E7A', marginLeft: 8 }}>
+                      {currentDetail.OrderInventoryCode ? `Linked to Order ${headerState.OrderNo}` : `Pick item from Order ${headerState.OrderNo || '(Select Order No first)'}`}
+                    </ThemedText>
                   </View>
                 </View>
               )}

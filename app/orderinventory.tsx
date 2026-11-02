@@ -304,6 +304,7 @@ export default function OrderInventoryScreen() {
           items: gridItems.map((item) => ({
             OrderInventoryCode: item.OrderInventoryCode,
             InventoryCode: item.InventoryCode,
+            InvWeight: item.InvWeight,
           })),
           userId: 'sys',
         }),

@@ -127,9 +127,15 @@ export default function HomeScreen() {
           <View style={[styles.sidebar, { backgroundColor: cardColor, borderRightColor: borderColor }]}>
             {/* Logo */}
             <View style={styles.logoContainer}>
-              <ThemedText style={[styles.logoText, { color: textColor }]}>
-                SMART <ThemedText style={{ color: accentColor, fontWeight: '800' }}>GOLD</ThemedText>
-              </ThemedText>
+              <View style={[styles.logoIconBadge, { backgroundColor: `${accentColor}15`, borderColor: accentColor }]}>
+                <Ionicons name="diamond" size={20} color={accentColor} />
+              </View>
+              <View>
+                <ThemedText style={[styles.logoText, { color: textColor }]}>
+                  SMART <ThemedText style={{ color: accentColor, fontWeight: '800' }}>GOLD</ThemedText>
+                </ThemedText>
+
+              </View>
             </View>
 
             {/* Menu List */}
@@ -186,7 +192,7 @@ export default function HomeScreen() {
                   setIsSettingsOpen(!isSettingsOpen);
                 }}
               >
-                <Ionicons name="color-palette-outline" size={18} color={subtitleColor} style={[styles.sidebarMenuIcon, { marginLeft: 16 }]} />
+                <Ionicons name="color-palette-outline" size={18} color={accentColor} style={[styles.sidebarMenuIcon, { marginLeft: 16 }]} />
                 <ThemedText style={[styles.sidebarMenuText, { color: textColor, flex: 1 }]}>Appearance</ThemedText>
                 <Ionicons name={isSettingsOpen ? "chevron-up" : "chevron-down"} size={16} color={subtitleColor} style={{ marginRight: 16 }} />
               </TouchableOpacity>
@@ -315,13 +321,6 @@ export default function HomeScreen() {
                 />
               </View>
 
-              {/* Notifications */}
-              <TouchableOpacity style={[styles.iconButton, { marginRight: 16 }]}>
-                <Ionicons name="notifications-outline" size={22} color={textColor} />
-                <Animated.View style={[styles.notificationBadge, { transform: [{ scale: pulseAnim }] }]}>
-                  <ThemedText style={styles.notificationText}>3</ThemedText>
-                </Animated.View>
-              </TouchableOpacity>
 
               {/* User Profile */}
               <View style={styles.userProfile}>
@@ -639,29 +638,34 @@ const styles = StyleSheet.create({
   logoContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 16,
-    paddingTop: 16,
-    paddingBottom: 8,
+    paddingHorizontal: 20,
+    paddingTop: 20,
+    paddingBottom: 16,
+    gap: 12,
   },
-  logoIcon: {
-    width: 36,
-    height: 36,
-    borderRadius: 12,
-    backgroundColor: '#E6AF2E',
+  logoIconBadge: {
+    width: 40,
+    height: 40,
+    borderRadius: 10,
+    borderWidth: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 12,
-  },
-  logoIconText: {
-
-    fontSize: 18,
-    fontWeight: 'bold',
   },
   logoText: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    letterSpacing: 1,
+    fontSize: 19,
+    fontWeight: '800',
+    letterSpacing: 2.5,
+    fontFamily: Platform.select({
+      web: "'Cinzel', 'Playfair Display', Georgia, 'Times New Roman', serif",
+      ios: 'Georgia',
+      default: 'serif',
+    }),
+  },
+  logoSubtext: {
+    fontSize: 9,
+    fontWeight: '700',
+    letterSpacing: 2,
+    marginTop: 2,
   },
   sidebarMenu: {
     flex: 1,

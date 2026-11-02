@@ -1,6 +1,14 @@
+/** Developer: durairaj */
 const express = require("express");
 const router = express.Router();
-const { sql } = require("../db");
+const { sql, poolPromise } = require("../db");
+
+// Helper to acquire database connection pool reliably
+const getPool = async (req) => {
+  if (req && req.pool) return req.pool;
+  if (poolPromise) return await poolPromise;
+  throw new Error("Database pool is not available.");
+};
 
 // Helper to ensure table exists
 async function ensureTableExists(pool) {
@@ -28,7 +36,7 @@ async function ensureTableExists(pool) {
 // GET all payout masters
 router.get("/", async (req, res) => {
   try {
-    const pool = req.pool;
+    const pool = await getPool(req);
     await ensureTableExists(pool);
 
     const result = await pool.request().query("SELECT * FROM tblPayOutMaster ORDER BY Code ASC");

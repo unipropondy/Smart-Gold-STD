@@ -1,11 +1,11 @@
+/** Developer: durairaj */
 import { ThemedText } from '@/components/themed-text';
 import { API_BASE_URL } from '@/constants/api';
 import { Ionicons } from '@expo/vector-icons';
-import { Stack, useRouter } from 'expo-router';
-import React, { useEffect, useState } from 'react';
+import { Stack, useFocusEffect, useRouter } from 'expo-router';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   FlatList,
   KeyboardAvoidingView,
   Modal,
@@ -72,14 +72,6 @@ export default function CreditSalesPaymentScreen() {
   const showToast = (message: string, type: 'success' | 'error' = 'success') => {
     setToast({ message, type });
     setTimeout(() => setToast(null), 3000);
-  };
-
-  const showAlert = (title: string, message: string) => {
-    if (Platform.OS === 'web') {
-      window.alert(`${title}: ${message}`);
-    } else {
-      Alert.alert(title, message);
-    }
   };
 
   // Initial Load
@@ -194,30 +186,30 @@ export default function CreditSalesPaymentScreen() {
   // UPDATE / SAVE payment details
   const handleUpdatePayment = async () => {
     if (!selectedInvoiceNo.trim()) {
-      showToast('Please select an Invoice details from the list to update', 'error');
+      showToast('Please Select The Invoice details to update', 'error');
       return;
     }
 
     if (!paymode.trim()) {
-      showToast('Please select a Paymode', 'error');
+      showToast('Please Enter the Paymode', 'error');
       return;
     }
 
     const payVal = parseFloat(amountToPay) || 0;
-    if (payVal <= 0) {
-      showToast('Please Enter a valid Amount greater than zero', 'error');
+    if (payVal === 0 || isNaN(payVal)) {
+      showToast('Please Enter the Amount', 'error');
       return;
     }
 
     const currentPaid = parseFloat(paidAmount) || 0;
     const totalVal = parseFloat(totalAmount) || 0;
     if (payVal + currentPaid > totalVal) {
-      showToast('Please Check the Amount: Total Paid exceeds Invoice Total Amount', 'error');
+      showToast('Please Check the Amount, Total Amount Greater than Paid Amount', 'error');
       return;
     }
 
     if (paymode === 'CHEQUE' && !remarks.trim()) {
-      showToast('Please Enter the Remarks (Cheque Details)', 'error');
+      showToast('Please Enter the Remarks', 'error');
       return;
     }
 
@@ -261,7 +253,7 @@ export default function CreditSalesPaymentScreen() {
   };
 
   // Clear everything
-  const handleClearAll = () => {
+  const handleClearAll = useCallback(() => {
     setCustomerCode('');
     setCustomerName('');
     setSelectedInvoiceNo('');
@@ -273,9 +265,40 @@ export default function CreditSalesPaymentScreen() {
     setAmountToPay('');
     setRemarks('');
     setPaymode('CASH');
+    setStatusFilter('UNPAID');
     setInvoiceList([]);
     fetchNextPaymentNo();
-  };
+  }, []);
+
+  // Keyboard Shortcuts (F6 -> Clear, Escape -> Close / Back)
+  useFocusEffect(
+    useCallback(() => {
+      if (Platform.OS !== 'web') return;
+
+      const handleKeyDown = (e: any) => {
+        if (e.key === 'F6') {
+          e.preventDefault();
+          handleClearAll();
+        } else if (e.key === 'Escape') {
+          e.preventDefault();
+          if (isCustomerModalVisible) {
+            setIsCustomerModalVisible(false);
+          } else if (isCalendarOpen) {
+            setIsCalendarOpen(false);
+          } else if (isPaymodePickerVisible) {
+            setIsPaymodePickerVisible(false);
+          } else {
+            router.back();
+          }
+        }
+      };
+
+      window.addEventListener('keydown', handleKeyDown);
+      return () => {
+        window.removeEventListener('keydown', handleKeyDown);
+      };
+    }, [handleClearAll, isCustomerModalVisible, isCalendarOpen, isPaymodePickerVisible, router])
+  );
 
   // Calendar helpers
   const handlePrevMonth = () => {
@@ -612,7 +635,14 @@ export default function CreditSalesPaymentScreen() {
                       {item.InvoiceNo}
                     </ThemedText>
                     <ThemedText style={[styles.tableRowText, { flex: 1.3 }]}>
-                      {item.InvoiceDate ? new Date(item.InvoiceDate).toLocaleDateString() : ''}
+                      {item.InvoiceDate ? (() => {
+                        const d = new Date(item.InvoiceDate);
+                        if (isNaN(d.getTime())) return String(item.InvoiceDate);
+                        const dd = String(d.getDate()).padStart(2, '0');
+                        const mm = String(d.getMonth() + 1).padStart(2, '0');
+                        const yyyy = d.getFullYear();
+                        return `${dd}/${mm}/${yyyy}`;
+                      })() : ''}
                     </ThemedText>
                     <ThemedText style={[styles.tableRowText, { flex: 1.2 }]}>
                       {item.CustomerCode}

@@ -1,13 +1,20 @@
 const express = require('express');
 const router = express.Router();
-const { sql } = require('../db');
+const { sql, poolPromise } = require('../db');
+
+// Helper to acquire database connection pool reliably
+const getPool = async (req) => {
+  if (req && req.pool) return req.pool;
+  if (poolPromise) return await poolPromise;
+  throw new Error("Database pool is not available.");
+};
 
 // GET /api/payingmode/initData
 // Fetches initial data required for the paying mode transaction screen
 router.get('/initData', async (req, res) => {
     try {
-        const pool = req.pool;
-        const { customerCode, date } = req.query;
+        const pool = await getPool(req);
+        const { customerCode, customerType, date } = req.query;
 
         // 1. Get PayModes
         let payModes = [];
@@ -26,79 +33,74 @@ router.get('/initData', async (req, res) => {
         let depositTradeInDetails = null;
 
         if (customerCode) {
-            // 2 & 3. Reward and Redeemed Points (Simulated or Real depending on schema)
+            // 2 & 3. Reward and Redeemed Points
             // As per VB.NET code: GetsumRewardPointsByCustomer, GetsumRedeemedPointsByCustomer
             try {
-                // If tblCustomer doesn't have these, we return 0.
-                const custResult = await pool.request()
+                const pointsResult = await pool.request()
                     .input('CustomerCode', sql.VarChar, customerCode)
-                    .query("SELECT * FROM sysobjects WHERE name='tblCustomer' AND xtype='U'");
-                
-                if (custResult.recordset.length > 0) {
-                    const pointsResult = await pool.request()
-                        .input('CustomerCode', sql.VarChar, customerCode)
-                        .query(`
-                            SELECT 
-                                ISNULL(RewardPoints, 0) as RewardPoints, 
-                                ISNULL(RedeemPoints, 0) as RedeemPoints 
-                            FROM tblCustomer 
-                            WHERE CustomerCode = @CustomerCode
-                        `);
-                    if (pointsResult.recordset.length > 0) {
-                        rewardPoints = pointsResult.recordset[0].RewardPoints;
-                        redeemPoints = pointsResult.recordset[0].RedeemPoints;
-                    }
+                    .query(`
+                        SELECT 
+                            ISNULL(RewardPoints, 0) as RewardPoints, 
+                            ISNULL(RedeemPoints, 0) as RedeemPoints 
+                        FROM tblCustomer 
+                        WHERE CustomerCode = @CustomerCode
+                    `);
+                if (pointsResult.recordset.length > 0) {
+                    rewardPoints = parseFloat(pointsResult.recordset[0].RewardPoints) || 0;
+                    redeemPoints = parseFloat(pointsResult.recordset[0].RedeemPoints) || 0;
                 }
             } catch (err) {
                 console.error("Error fetching reward points:", err);
             }
 
-            // 4. Deposit Details
+            // Customer today redeemed points
             try {
-                 const depResult = await pool.request()
+                const redToday = await pool.request()
                     .input('CustomerCode', sql.VarChar, customerCode)
                     .query(`
-                        SELECT name FROM sysobjects WHERE name='tblDeposit' AND xtype='U'
+                        SELECT ISNULL(SUM(RedeemPoints), 0) as RedeemedToday
+                        FROM tblPosMemberTransaction
+                        WHERE CustomerCode = @CustomerCode AND CAST(TransDate AS DATE) = CAST(GETDATE() AS DATE)
                     `);
-                 if (depResult.recordset.length > 0) {
-                     const depData = await pool.request()
-                        .input('CustomerCode', sql.VarChar, customerCode)
-                        .query(`
-                            SELECT TOP 1 DepositNo, (ISNULL(DepositAmount,0) + ISNULL(AmountPaid,0)) as DepositAmount 
-                            FROM tblDeposit 
-                            WHERE CustomerCode = @CustomerCode AND ISNULL(IsUsed, 0) = 0
-                            ORDER BY DepositDate DESC
-                        `);
-                     if (depData.recordset.length > 0) {
-                         depositDetails = depData.recordset[0];
-                     }
-                 }
+                if (redToday.recordset.length > 0) {
+                    redeemedPoints = parseFloat(redToday.recordset[0].RedeemedToday) || 0;
+                }
             } catch (err) {
-                console.error("Error fetching deposit:", err);
+                // Table might not exist or alternate schema
+            }
+
+            // 4. Deposit Details
+            try {
+                const depData = await pool.request()
+                    .input('CustomerCode', sql.VarChar, customerCode)
+                    .query(`
+                        SELECT TOP 1 DepositNo, (ISNULL(DepositAmount,0) + ISNULL(AmountPaid,0)) as DepositAmount 
+                        FROM tblDeposit 
+                        WHERE CustomerCode = @CustomerCode AND ISNULL(IsUsed, 0) = 0
+                        ORDER BY DepositDate DESC
+                    `);
+                if (depData.recordset.length > 0) {
+                    depositDetails = depData.recordset[0];
+                }
+            } catch (err) {
+                // Ignore missing table
             }
 
             // 5. TradeIn Details
             try {
-                 const trdResult = await pool.request()
+                const trdData = await pool.request()
                     .input('CustomerCode', sql.VarChar, customerCode)
                     .query(`
-                        SELECT name FROM sysobjects WHERE name='tblSalesReturn' AND xtype='U'
+                        SELECT TOP 1 SalesReturnNo, ISNULL(Amount,0) as Amount 
+                        FROM tblSalesReturn 
+                        WHERE CustomerCode = @CustomerCode AND ReturnType = 'TRADEIN' AND ISNULL(IsUsed, 0) = 0
+                        ORDER BY ReturnDate DESC
                     `);
-                 if (trdResult.recordset.length > 0) {
-                     const trdData = await pool.request()
-                        .input('CustomerCode', sql.VarChar, customerCode)
-                        .query(`
-                            SELECT TOP 1 SalesReturnNo, ISNULL(Amount,0) as Amount 
-                            FROM tblSalesReturn 
-                            WHERE CustomerCode = @CustomerCode AND ReturnType = 'TRADEIN' AND ISNULL(IsUsed, 0) = 0
-                            ORDER BY ReturnDate DESC
-                        `);
-                     if (trdData.recordset.length > 0) {
-                         depositTradeInDetails = trdData.recordset[0];
-                     }
-                 }
+                if (trdData.recordset.length > 0) {
+                    depositTradeInDetails = trdData.recordset[0];
+                }
             } catch (err) {
-                console.error("Error fetching tradein deposit:", err);
+                // Ignore missing table
             }
         }
 

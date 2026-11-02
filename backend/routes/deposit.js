@@ -1,6 +1,13 @@
 const express = require("express");
 const router = express.Router();
-const { sql } = require("../db");
+const { sql, poolPromise } = require("../db");
+
+// Helper to acquire database connection pool reliably
+const getPool = async (req) => {
+  if (req && req.pool) return req.pool;
+  if (poolPromise) return await poolPromise;
+  throw new Error("Database pool is not available.");
+};
 
 // Helper to pad voucher numbers
 function padZero(num, size) {
@@ -12,7 +19,7 @@ function padZero(num, size) {
 // GET all deposits
 router.get("/", async (req, res) => {
   try {
-    const pool = req.pool;
+    const pool = await getPool(req);
     const result = await pool.request().query("SELECT * FROM tblDepositSave ORDER BY CreateDate DESC");
     res.json({ success: true, data: result.recordset });
   } catch (err) {
@@ -24,7 +31,7 @@ router.get("/", async (req, res) => {
 // 1. GET next numbers (Deposit No and Payment No)
 router.get("/next-numbers", async (req, res) => {
   try {
-    const pool = req.pool;
+    const pool = await getPool(req);
     const result = await pool.request().query(
       "SELECT TOP 1 LocationCode, NextDepositNo, NextCustomerDepositNumber FROM tblCompany"
     );
@@ -58,7 +65,7 @@ router.get("/next-numbers", async (req, res) => {
 // 2. GET specific Deposit and its linked payment details
 router.get("/fetch", async (req, res) => {
   try {
-    const pool = req.pool;
+    const pool = await getPool(req);
     const { depositNo } = req.query;
 
     if (!depositNo) {
@@ -107,7 +114,7 @@ router.get("/fetch", async (req, res) => {
 
 // 3. POST - Insert new Deposit or Add Payment to existing Deposit
 router.post(["/", "/save"], async (req, res) => {
-  const pool = req.pool;
+  const pool = await getPool(req);
   const transaction = new sql.Transaction(pool);
 
   try {
@@ -346,7 +353,7 @@ router.post(["/", "/save"], async (req, res) => {
 
 // 4. DELETE - Delete a deposit record and all its associated details
 router.delete("/", async (req, res) => {
-  const pool = req.pool;
+  const pool = await getPool(req);
   const transaction = new sql.Transaction(pool);
 
   try {

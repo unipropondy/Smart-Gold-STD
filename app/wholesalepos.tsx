@@ -1,13 +1,15 @@
+/** Developer: durairaj */
 import { ThemedText } from '@/components/themed-text';
 import { API_BASE_URL } from '@/constants/api';
 import { Ionicons } from '@expo/vector-icons';
-import { Stack, useRouter } from 'expo-router';
-import React, { useEffect, useState } from 'react';
+import { Stack, useFocusEffect, useRouter } from 'expo-router';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
   FlatList,
   Modal,
+  Platform,
   ScrollView,
   StyleSheet,
   TextInput,
@@ -196,7 +198,7 @@ export default function WholeSalePOSScreen() {
   const handleAddDetail = async () => {
     const code = (currentDetail.InventoryCode || '').trim();
     if (!code) {
-      Alert.alert('Validation Error', 'Inventory Code is required.');
+      showToast('Inventory Code is required.', 'error');
       return;
     }
 
@@ -229,12 +231,12 @@ export default function WholeSalePOSScreen() {
           const val = (w + gl) * cpg + smc * pcsVal;
           itemToAdd.TotalValue = val.toFixed(2);
         } else {
-          Alert.alert('Item Error', data.message || 'Inventory item not found in stock.');
+          showToast(data.message || 'Inventory item not found in stock.', 'error');
           setLoading(false);
           return;
         }
       } catch {
-        Alert.alert('Network Error', 'Could not fetch item details.');
+        showToast('Could not fetch item details.', 'error');
         setLoading(false);
         return;
       } finally {
@@ -244,7 +246,7 @@ export default function WholeSalePOSScreen() {
 
     const pcs = parseFloat(itemToAdd.PCS) || 0;
     if (pcs <= 0) {
-      Alert.alert('Validation Error', 'Pieces must be at least 1.');
+      showToast('Pieces must be at least 1.', 'error');
       return;
     }
 
@@ -254,7 +256,7 @@ export default function WholeSalePOSScreen() {
         d => d.InventoryCode.trim().toUpperCase() === code.toUpperCase()
       );
       if (existing) {
-        Alert.alert('Validation Error', `Item ${code} is already added in this invoice.`);
+        showToast(`Item ${code} is already added in this invoice.`, 'error');
         return;
       }
     }
@@ -390,15 +392,15 @@ export default function WholeSalePOSScreen() {
 
   const saveInvoice = async () => {
     if (!headerState.SalesManCode || !headerState.SalesManCode.trim()) {
-      Alert.alert('Validation Error', 'Salesman Code is mandatory.');
+      showToast('Salesman Code is mandatory.', 'error');
       return;
     }
     if (!headerState.CustomerCode || !headerState.CustomerCode.trim()) {
-      Alert.alert('Validation Error', 'Customer Code is mandatory.');
+      showToast('Customer Code is mandatory.', 'error');
       return;
     }
     if (details.length === 0) {
-      Alert.alert('Validation Error', 'Please add at least one line item.');
+      showToast('Please add at least one line item.', 'error');
       return;
     }
 
@@ -571,16 +573,20 @@ export default function WholeSalePOSScreen() {
     }
     setVerifyingPassword(true);
     try {
-      const response = await fetch(`${API_BASE_URL}/salesreturn/verifypassword`, {
+      const response = await fetch(`${API_URL}/wholesalepos/verify-salesman`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ password: salesmanPassword.trim() })
       });
       const data = await response.json();
-      if (data.success && data.salesman) {
-        updateHeader('SalesManCode', data.salesman.SalesManCode || data.salesman.SalesManName || '');
+      if (data.success && data.data) {
+        updateHeader('SalesManCode', data.data.SalesManCode || '');
+        if (!headerState.CustomerCode) {
+          updateHeader('CustomerCode', 'CASH');
+          updateHeader('CustomerName', 'CASH CUSTOMER');
+        }
         setPasswordModalVisible(false);
-        showToast('Authorized successfully', 'success');
+        showToast(`Welcome ${data.data.SalesManName || data.data.SalesManCode}`, 'success');
         fetchNextInvoiceNo();
       } else {
         showToast(data.message || 'Invalid salesman password', 'error');
@@ -591,6 +597,31 @@ export default function WholeSalePOSScreen() {
       setVerifyingPassword(false);
     }
   };
+
+  // Keyboard shortcuts matching frmGPOSWholeSale KeyDown: F7 (Save/Pay), Escape (Back)
+  useFocusEffect(
+    useCallback(() => {
+      if (Platform.OS === 'web') {
+        const handleKeyDown = (e: KeyboardEvent) => {
+          if (e.key === 'F7') {
+            e.preventDefault();
+            saveInvoice();
+          } else if (e.key === 'Escape') {
+            e.preventDefault();
+            if (lovVisible) {
+              setLovVisible(false);
+            } else if (passwordModalVisible) {
+              setPasswordModalVisible(false);
+            } else {
+              router.back();
+            }
+          }
+        };
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+      }
+    }, [headerState, details, paymentState, lovVisible, passwordModalVisible])
+  );
 
   return (
     <SafeAreaView style={styles.safeArea} edges={['top']}>
@@ -676,9 +707,6 @@ export default function WholeSalePOSScreen() {
                       placeholder="Salesman code"
                       placeholderTextColor="#9E8D77"
                     />
-                    <TouchableOpacity style={styles.lookupBtn} onPress={() => openLOV('Salesman')}>
-                      <ThemedText style={styles.lookupBtnText}>...</ThemedText>
-                    </TouchableOpacity>
                   </View>
                 </View>
 

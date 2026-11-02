@@ -1,13 +1,15 @@
+/**
+ * Developer: durairaj
+ */
+
 const express = require("express");
-const { sql } = require("../db");
+const { sql, poolPromise } = require("../db");
 const router = express.Router();
 
-
-// GET JobSheet LOV for GoldBar Fix (Filtered by SupplierCode='STM' as in VB: frmHelpSearch("tblJobSheetHeader", "L", 4, "JobSheetNo", "SupplierCode='STM'"))
-// Also returns fallback unfiltered list if STM returns 0 rows so user isn't stuck if sample data uses different suppliers
+// GET JobSheet LOV for GoldBar Fix (matching frmHelpSearch("tblJobSheetHeader", "L", 4, "JobSheetNo", "SupplierCode='STM'"))
 router.get("/lov/jobsheets", async (req, res) => {
   try {
-    const pool = req.pool;
+    const pool = req.pool || (await poolPromise);
     let result = await pool.request().query(`
       SELECT 
         RTRIM(JobSheetNo) AS JobSheetNo,
@@ -38,11 +40,11 @@ router.get("/lov/jobsheets", async (req, res) => {
   }
 });
 
-// GET JobSheet Info for GoldBar Fix
+// GET JobSheet Info for GoldBar Fix matching subGetJobSheet in frmGoldBarFix.vb
 router.get("/:jobSheetNo", async (req, res) => {
   try {
     const { jobSheetNo } = req.params;
-    const pool = req.pool;
+    const pool = req.pool || (await poolPromise);
 
     const result = await pool.request()
       .input("JobSheetNo", sql.VarChar, jobSheetNo.trim())
@@ -81,11 +83,11 @@ router.get("/:jobSheetNo", async (req, res) => {
       }
     }
 
-    // Attempt to fetch PurchaseFix from tblPurchase or similar if available, or default
+    // Attempt to fetch PurchaseFix from tblPurchase matching GetPurchaseFix in frmGoldBarFix.vb
     let purchaseFix = 0;
     try {
       const fixResult = await pool.request()
-        .input("PurchaseBillNo", sql.VarChar, row.PurchaseBillNo || "")
+        .input("PurchaseBillNo", sql.VarChar, (row.PurchaseBillNo || "").trim())
         .query(`
           SELECT TOP 1 PurchaseFix 
           FROM tblPurchase 
@@ -94,9 +96,7 @@ router.get("/:jobSheetNo", async (req, res) => {
       if (fixResult.recordset.length > 0 && fixResult.recordset[0].PurchaseFix !== undefined) {
         purchaseFix = fixResult.recordset[0].PurchaseFix || 0;
       }
-    } catch (ignoreErr) {
-      // Table or column might not have PurchaseFix
-    }
+    } catch (ignoreErr) {}
 
     res.json({
       success: true,
@@ -112,9 +112,9 @@ router.get("/:jobSheetNo", async (req, res) => {
   }
 });
 
-// POST to save Purchase Fix
+// POST to save Purchase Fix matching fncInventory() & btnSave_Click in frmGoldBarFix.vb
 router.post("/save", async (req, res) => {
-  const pool = req.pool;
+  const pool = req.pool || (await poolPromise);
 
   try {
     const {
@@ -147,42 +147,75 @@ router.post("/save", async (req, res) => {
     const mcVal = parseFloat(TotalMC) || 0;
     const glVal = parseFloat(GoldLoss) || 0;
     const gstAmtVal = parseFloat(GstAmount) || 0;
-    const hasGSTVal = !!HasGST;
     const userVal = UserId || "sys";
 
-    // 1. Update tblJobSheetHeader with all values: TaelPercent, TotalWeight24k, FixStatus, Cost, MC, Weight, GoldLoss, GST
-    const result = await pool.request()
-      .input("JobSheetNo", sql.VarChar, trimmedJS)
-      .input("TaelPercent", sql.Decimal(18, 4), tpVal)
-      .input("TotalWeight24k", sql.Decimal(18, 4), wt24Val)
-      .input("ManualWeight", sql.Decimal(18, 4), wtVal)
-      .input("ManualLocalCOST", sql.Decimal(18, 4), costVal)
-      .input("ManualMc", sql.Decimal(18, 4), mcVal)
-      .input("ManualGoldLoss", sql.Decimal(18, 4), glVal)
-      .input("Gst", sql.Decimal(18, 4), gstAmtVal)
-      .input("FixStatus", sql.Char(1), "F")
-      .input("ModifyUser", sql.VarChar, userVal)
-      .query(`
+    // Inspect columns of tblJobSheetHeader dynamically to avoid errors on schema variations
+    let jsCols = [];
+    try {
+      const colRes = await pool.request().query(`
+        SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'tblJobSheetHeader'
+      `);
+      jsCols = colRes.recordset.map(c => c.COLUMN_NAME.toLowerCase());
+    } catch (e) {}
+
+    const hasCol = (col) => jsCols.length === 0 || jsCols.includes(col.toLowerCase());
+
+    const updateFields = [];
+    const jsReq = pool.request().input("JobSheetNo", sql.VarChar, trimmedJS);
+
+    if (hasCol("TaelPercent")) {
+      updateFields.push("TaelPercent = @TaelPercent");
+      jsReq.input("TaelPercent", sql.Decimal(18, 4), tpVal);
+    }
+    if (hasCol("TotalWeight24k")) {
+      updateFields.push("TotalWeight24k = @TotalWeight24k");
+      jsReq.input("TotalWeight24k", sql.Decimal(18, 4), wt24Val);
+    }
+    if (hasCol("ManualWeight")) {
+      updateFields.push("ManualWeight = @ManualWeight");
+      jsReq.input("ManualWeight", sql.Decimal(18, 4), wtVal);
+    }
+    if (hasCol("ManualLocalCOST")) {
+      updateFields.push("ManualLocalCOST = @ManualLocalCOST");
+      jsReq.input("ManualLocalCOST", sql.Decimal(18, 4), costVal);
+    }
+    if (hasCol("ManualMc")) {
+      updateFields.push("ManualMc = @ManualMc");
+      jsReq.input("ManualMc", sql.Decimal(18, 4), mcVal);
+    }
+    if (hasCol("ManualGoldLoss")) {
+      updateFields.push("ManualGoldLoss = @ManualGoldLoss");
+      jsReq.input("ManualGoldLoss", sql.Decimal(18, 4), glVal);
+    }
+    if (hasCol("Gst")) {
+      updateFields.push("Gst = @Gst");
+      jsReq.input("Gst", sql.Decimal(18, 4), gstAmtVal);
+    }
+    if (hasCol("FixStatus")) {
+      updateFields.push("FixStatus = @FixStatus");
+      jsReq.input("FixStatus", sql.Char(1), "F");
+    }
+    if (hasCol("ModifyUser")) {
+      updateFields.push("ModifyUser = @ModifyUser");
+      jsReq.input("ModifyUser", sql.VarChar, userVal);
+    }
+    if (hasCol("ModifyDate")) {
+      updateFields.push("ModifyDate = GETDATE()");
+    }
+
+    if (updateFields.length > 0) {
+      const result = await jsReq.query(`
         UPDATE tblJobSheetHeader
-        SET 
-          TaelPercent = @TaelPercent,
-          TotalWeight24k = @TotalWeight24k,
-          ManualWeight = @ManualWeight,
-          ManualLocalCOST = @ManualLocalCOST,
-          ManualMc = @ManualMc,
-          ManualGoldLoss = @ManualGoldLoss,
-          Gst = @Gst,
-          FixStatus = @FixStatus,
-          ModifyUser = @ModifyUser,
-          ModifyDate = GETDATE()
+        SET ${updateFields.join(", ")}
         WHERE RTRIM(JobSheetNo) = @JobSheetNo
       `);
 
-    if (result.rowsAffected && result.rowsAffected[0] === 0) {
-      return res.status(404).json({ success: false, message: "JobSheet No. not found!" });
+      if (result.rowsAffected && result.rowsAffected[0] === 0) {
+        return res.status(404).json({ success: false, message: "JobSheet No. not found!" });
+      }
     }
 
-    // 2. Next, update tblPurchase if PurchaseBillNo is present
+    // 2. Update tblPurchase if PurchaseBillNo is present
     if (PurchaseBillNo && PurchaseBillNo.trim()) {
       const purBill = PurchaseBillNo.trim();
       try {
@@ -201,40 +234,13 @@ router.post("/save", async (req, res) => {
       }
     }
 
-    // 3. In case tblPurchaseFix exists in schema, update or insert
-    try {
-      const fixCheck = await pool.request()
-        .input("PurchaseBillNo", sql.VarChar, (PurchaseBillNo || '').trim())
-        .query(`SELECT 1 FROM tblPurchaseFix WHERE RTRIM(PurchaseBillNo) = @PurchaseBillNo`);
-      
-      if (fixCheck.recordset && fixCheck.recordset.length > 0) {
-        await pool.request()
-          .input("PurchaseBillNo", sql.VarChar, (PurchaseBillNo || '').trim())
-          .input("PurchaseFix", sql.Decimal(18, 4), fixVal)
-          .input("TotalWeight24k", sql.Decimal(18, 4), wt24Val)
-          .input("Weight", sql.Decimal(18, 4), wtVal)
-          .input("TotalCost", sql.Decimal(18, 4), costVal)
-          .input("TotalMC", sql.Decimal(18, 4), mcVal)
-          .query(`
-            UPDATE tblPurchaseFix
-            SET PurchaseFix = @PurchaseFix,
-                TotalWeight24k = @TotalWeight24k,
-                Weight = @Weight,
-                TotalCost = @TotalCost,
-                TotalMC = @TotalMC,
-                ModifyDate = GETDATE()
-            WHERE RTRIM(PurchaseBillNo) = @PurchaseBillNo
-          `);
-      }
-    } catch (ignoreFixTbl) {
-      // tblPurchaseFix table may not exist
-    }
-
     return res.json({ success: true, message: "Transaction Saved Successfully" });
   } catch (err) {
     console.error("Save GoldBar Fix Error:", err);
     return res.status(500).json({ success: false, message: "Transaction not saved: " + err.message });
   }
 });
+
+module.exports = router;
 
 module.exports = router;

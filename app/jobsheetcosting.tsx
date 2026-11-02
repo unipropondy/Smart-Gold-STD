@@ -4,10 +4,9 @@ import { useThemeColors } from '@/hooks/useThemeColors';
 import { useThemeContext } from '@/contexts/ThemeContext';
 import { Ionicons } from '@expo/vector-icons';
 import { Stack, useRouter } from 'expo-router';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   Platform,
   ScrollView,
   StyleSheet,
@@ -44,35 +43,58 @@ export default function JobSheetCostingScreen() {
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
 
+  // Toast Notification State
+  const [toast, setToast] = useState<{ visible: boolean; message: string; type: 'success' | 'error' | 'info' }>({
+    visible: false,
+    message: '',
+    type: 'success'
+  });
+
+  const showToast = (message: string, type: 'success' | 'error' | 'info' = 'success') => {
+    setToast({ visible: true, message, type });
+    setTimeout(() => {
+      setToast(prev => ({ ...prev, visible: false }));
+    }, 3500);
+  };
+
   // LOV State
   const [isLOVVisible, setIsLOVVisible] = useState(false);
   const [lovData, setLovData] = useState<any[]>([]);
   const [lovLoading, setLovLoading] = useState(false);
+  const [searchFilter, setSearchFilter] = useState('');
 
+  // Refs for auto-focusing
+  const newCostRef = useRef<TextInput>(null);
+  const jobSheetNoRef = useRef<TextInput>(null);
+
+  // Fetch LOV Data
   const fetchLOV = async () => {
     setLovLoading(true);
     setIsLOVVisible(true);
+    setSearchFilter('');
     try {
       const res = await fetch(`${API_URL}/list`);
       const json = await res.json();
       if (json.success) {
-        setLovData(json.data);
+        setLovData(json.data || []);
       } else {
-        Alert.alert('Error', json.message || 'Failed to fetch jobsheets');
+        showToast(json.message || 'Failed to fetch jobsheets', 'error');
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('LOV Error:', err);
+      showToast('Network error while fetching jobsheets', 'error');
     } finally {
       setLovLoading(false);
     }
   };
 
+  // subGetJobSheetDetail
   const fetchJobSheetDetails = async (sheetNo?: string | any) => {
     const targetNo = typeof sheetNo === 'string' ? sheetNo : jobSheetNo;
-    if (!targetNo.trim()) return;
+    if (!targetNo || !targetNo.trim()) return;
     setLoading(true);
     try {
-      const res = await fetch(`${API_URL}/details?JobSheetNo=${encodeURIComponent(targetNo)}`);
+      const res = await fetch(`${API_URL}/details?JobSheetNo=${encodeURIComponent(targetNo.trim())}`);
       const json = await res.json();
       if (json.success && json.data) {
         setInvoiceNo(json.data.PurchaseBillNo || '');
@@ -85,57 +107,73 @@ export default function JobSheetCostingScreen() {
           }
         }
         setSupplier(json.data.SupplierCode || '');
-        setClasses(['All', ...(json.data.classes || [])]);
+        const loadedClasses = ['All', ...(json.data.classes || [])];
+        setClasses(loadedClasses);
         setJobClass('All');
+        fetchOldCost(targetNo.trim(), 'All');
       } else {
-        Alert.alert('Error', json.message || 'JobSheet not found');
-        handleClear(false);
+        showToast('Jobsheet No not found.', 'error');
+        handleClear(true);
+        setTimeout(() => jobSheetNoRef.current?.focus(), 150);
       }
     } catch (err) {
       console.error(err);
-      Alert.alert('Error', 'Failed to fetch job sheet details');
+      showToast('Jobsheet No not found.', 'error');
     } finally {
       setLoading(false);
     }
   };
 
-  const fetchOldCost = async (selectedClass: string) => {
-    if (!jobSheetNo.trim()) return;
+  // subGetOldCostPerGram
+  const fetchOldCost = async (sheetNo: string, selectedClass: string) => {
+    if (!sheetNo.trim()) return;
     try {
-      const res = await fetch(`${API_URL}/oldcost?JobSheetNo=${encodeURIComponent(jobSheetNo)}&ClassName=${encodeURIComponent(selectedClass)}`);
+      const res = await fetch(`${API_URL}/oldcost?JobSheetNo=${encodeURIComponent(sheetNo.trim())}&ClassName=${encodeURIComponent(selectedClass)}`);
       const json = await res.json();
       if (json.success && json.data) {
-        setOldCost(json.data.CostPerGram?.toString() || '0');
+        const costNum = parseFloat(json.data.CostPerGram) || 0;
+        setOldCost(costNum.toFixed(2));
+        setTimeout(() => newCostRef.current?.focus(), 100);
+      } else {
+        setOldCost('0.00');
       }
     } catch (err) {
       console.error(err);
+      setOldCost('0.00');
     }
   };
 
-  useEffect(() => {
-    if (jobSheetNo) {
-      fetchOldCost(jobClass);
+  // On class combo selection changed
+  const handleClassChange = (newSelectedClass: string) => {
+    setJobClass(newSelectedClass);
+    if (jobSheetNo.trim()) {
+      fetchOldCost(jobSheetNo.trim(), newSelectedClass);
     }
-  }, [jobSheetNo, jobClass]);
+  };
 
+  // fncValidateMe & subSave
   const handleSave = async () => {
-    if (!jobSheetNo.trim()) {
-      const msg = 'JobSheetNo should not be blank.';
-      Platform.OS === 'web' ? window.alert(msg) : Alert.alert('Validation Error', msg);
+    // 1. JobsheeNo should not be blank. (Exact spelling in frmFixCostJobSheet.vb)
+    if (!jobSheetNo || jobSheetNo.trim() === '') {
+      showToast('JobsheeNo should not be blank.', 'error');
+      jobSheetNoRef.current?.focus();
       return;
     }
+
+    // 2. Class check
     if (!jobClass || jobClass.trim() === '') {
-      const msg = 'Please select the classCode.';
-      Platform.OS === 'web' ? window.alert(msg) : Alert.alert('Validation Error', msg);
+      showToast('Please select the classCode.', 'error');
       return;
     }
-    if (!newCost.trim()) {
-      const msg = 'New cost should not be blank.';
-      Platform.OS === 'web' ? window.alert(msg) : Alert.alert('Validation Error', msg);
+
+    // 3. New cost validations
+    if (!newCost || newCost.trim() === '') {
+      showToast('New cost should not be blank.', 'error');
+      newCostRef.current?.focus();
       return;
     } else if (isNaN(Number(newCost))) {
-      const msg = 'New cost should be numeric.';
-      Platform.OS === 'web' ? window.alert(msg) : Alert.alert('Validation Error', msg);
+      showToast('New cost should be numeric.', 'error');
+      newCostRef.current?.focus();
       return;
     }
 
@@ -145,9 +183,9 @@ export default function JobSheetCostingScreen() {
         JobSheetNo: jobSheetNo.trim(),
         ClassName: jobClass,
         OldCost: oldCost,
-        NewCost: newCost,
-        GoldValue: goldValue,
-        CashValue: cashValue
+        NewCost: parseFloat(newCost).toFixed(2),
+        GoldValue: goldValue ? parseFloat(goldValue) : 0,
+        CashValue: cashValue ? parseFloat(cashValue) : 0
       };
 
       const response = await fetch(`${API_URL}/updatecost`, {
@@ -158,19 +196,20 @@ export default function JobSheetCostingScreen() {
 
       const json = await response.json();
       if (json.success) {
-        Alert.alert('Success', 'Cost updated successfully!');
+        showToast('Cost updated successfully!', 'success');
         handleClear(true);
       } else {
-        Alert.alert('Error', json.message || 'Failed to save');
+        showToast(json.message || 'Error in Save.', 'error');
       }
     } catch (error) {
       console.error('Save error:', error);
-      Alert.alert('Error', 'Failed to save');
+      showToast('Error in Save.', 'error');
     } finally {
       setSaving(false);
     }
   };
 
+  // subClearMe
   const handleClear = (fullClear = true) => {
     if (fullClear) setJobSheetNo('');
     setInvoiceNo('');
@@ -186,11 +225,60 @@ export default function JobSheetCostingScreen() {
     setCashValue('');
   };
 
-  const inputBackgroundColor = isDark ? '#2A2A2A' : '#FFF';
+  // Keyboard shortcut handler (F6: Clear, F7: Save, Escape: Back)
+  useEffect(() => {
+    if (Platform.OS === 'web') {
+      const handleKeyDown = (e: KeyboardEvent) => {
+        if (e.key === 'F6') {
+          e.preventDefault();
+          handleClear(true);
+        } else if (e.key === 'F7') {
+          e.preventDefault();
+          handleSave();
+        } else if (e.key === 'Escape') {
+          if (isLOVVisible) {
+            setIsLOVVisible(false);
+          } else {
+            router.back();
+          }
+        }
+      };
+      window.addEventListener('keydown', handleKeyDown);
+      return () => window.removeEventListener('keydown', handleKeyDown);
+    }
+  }, [jobSheetNo, jobClass, oldCost, newCost, goldValue, cashValue, isLOVVisible]);
+
+  // Filtered LOV Data
+  const filteredLovData = lovData.filter(item => {
+    if (!searchFilter.trim()) return true;
+    const q = searchFilter.toLowerCase();
+    return (
+      (item.JobSheetNo && item.JobSheetNo.toLowerCase().includes(q)) ||
+      (item.SupplierCode && item.SupplierCode.toLowerCase().includes(q)) ||
+      (item.PurchaseBillNo && item.PurchaseBillNo.toLowerCase().includes(q))
+    );
+  });
 
   return (
     <SafeAreaView style={[styles.safeArea, { backgroundColor: '#FBF9F5' }]} edges={['top']}>
       <Stack.Screen options={{ headerShown: false }} />
+
+      {/* Floating In-App Toast Banner */}
+      {toast.visible && (
+        <View style={[
+          styles.toastBanner,
+          toast.type === 'error' ? styles.toastError : styles.toastSuccess
+        ]}>
+          <Ionicons
+            name={toast.type === 'error' ? 'alert-circle' : 'checkmark-circle'}
+            size={18}
+            color="#FFFFFF"
+            style={{ marginRight: 8 }}
+          />
+          <ThemedText style={styles.toastText}>{toast.message}</ThemedText>
+        </View>
+      )}
+
       {/* Header */}
       <View style={[styles.header, { borderBottomColor: '#EBE2D2', backgroundColor: '#FFFFFF' }]}>
         <View style={{ flexDirection: 'row', alignItems: 'center' }}>
@@ -200,11 +288,17 @@ export default function JobSheetCostingScreen() {
           <ThemedText style={[styles.title, { color: '#3B2D17', fontWeight: '500' }]}>Job Sheet Costing</ThemedText>
         </View>
         <View style={{ flexDirection: 'row', gap: 8 }}>
-          <TouchableOpacity style={styles.topActionBtn} onPress={() => handleClear()}>
-            <ThemedText style={{ color: '#5C4A28', fontSize: 12, fontWeight: 'bold' }}>Clear</ThemedText>
+          <TouchableOpacity style={styles.topActionBtn} onPress={() => handleClear(true)}>
+            <ThemedText style={{ color: '#5C4A28', fontSize: 12, fontWeight: 'bold' }}>Clear (F6)</ThemedText>
           </TouchableOpacity>
-          <TouchableOpacity style={[styles.topActionBtn, { backgroundColor: '#F9F2E2', borderColor: '#B8903B' }]} onPress={handleSave}>
-            <ThemedText style={{ color: '#9E6D08', fontSize: 12, fontWeight: 'bold' }}>{saving ? "Saving..." : "Save"}</ThemedText>
+          <TouchableOpacity
+            style={[styles.topActionBtn, { backgroundColor: '#F9F2E2', borderColor: '#B8903B' }]}
+            onPress={handleSave}
+            disabled={saving}
+          >
+            <ThemedText style={{ color: '#9E6D08', fontSize: 12, fontWeight: 'bold' }}>
+              {saving ? "Saving..." : "Save (F7)"}
+            </ThemedText>
           </TouchableOpacity>
         </View>
       </View>
@@ -226,16 +320,19 @@ export default function JobSheetCostingScreen() {
               <ThemedText style={styles.label}>JobSheet No</ThemedText>
               <View style={styles.rowInputs}>
                 <TextInput
+                  ref={jobSheetNoRef}
                   style={[styles.input, { flex: 1, borderTopRightRadius: 0, borderBottomRightRadius: 0, borderRightWidth: 0 }]}
                   value={jobSheetNo}
                   onChangeText={setJobSheetNo}
-                  onBlur={fetchJobSheetDetails}
+                  onBlur={() => fetchJobSheetDetails(jobSheetNo)}
+                  onSubmitEditing={() => fetchJobSheetDetails(jobSheetNo)}
+                  placeholder="Enter JobSheet No"
                 />
                 <TouchableOpacity
                   style={styles.lookupBtn}
                   onPress={fetchLOV}
                 >
-                  {loading ? <ActivityIndicator size="small" color="#9E6D08" /> : <ThemedText style={styles.lookupBtnText}>...</ThemedText>}
+                  {lovLoading ? <ActivityIndicator size="small" color="#9E6D08" /> : <ThemedText style={styles.lookupBtnText}>...</ThemedText>}
                 </TouchableOpacity>
               </View>
             </View>
@@ -302,10 +399,10 @@ export default function JobSheetCostingScreen() {
                       outline: 'none',
                       fontSize: '12px',
                       fontWeight: 'bold',
-                      height: '26px',
+                      height: '28px',
                     }}
                     value={jobClass}
-                    onChange={(e) => setJobClass(e.target.value)}
+                    onChange={(e) => handleClassChange(e.target.value)}
                   >
                     {classes.map(c => <option key={c} value={c}>{c}</option>)}
                   </select>
@@ -313,7 +410,7 @@ export default function JobSheetCostingScreen() {
                   <TextInput
                     style={{ paddingHorizontal: 8, paddingVertical: 4, color: '#2C2519', fontWeight: 'bold', fontSize: 12 }}
                     value={jobClass}
-                    onChangeText={setJobClass}
+                    onChangeText={handleClassChange}
                   />
                 )}
               </View>
@@ -334,6 +431,7 @@ export default function JobSheetCostingScreen() {
             <View style={styles.inputGroup}>
               <ThemedText style={styles.label}>New Cost Per Gram</ThemedText>
               <TextInput
+                ref={newCostRef}
                 style={[styles.input, { flex: 1, textAlign: 'right' }]}
                 value={newCost}
                 onChangeText={setNewCost}
@@ -380,10 +478,22 @@ export default function JobSheetCostingScreen() {
           <TouchableWithoutFeedback>
             <View style={[styles.modalContent, { backgroundColor: '#FFFFFF', borderColor: '#E8DCB8' }]}>
               <View style={[styles.modalHeader, { backgroundColor: '#F5E7CA', borderBottomColor: '#E2D3B3' }]}>
-                <ThemedText style={{ fontSize: 15, fontWeight: 'bold', color: '#3B2D17' }}>Select JobSheet</ThemedText>
+                <ThemedText style={{ fontSize: 15, fontWeight: 'bold', color: '#3B2D17' }}>Select JobSheet (FixStatus = 'N')</ThemedText>
                 <TouchableOpacity onPress={() => setIsLOVVisible(false)}>
                   <Ionicons name="close" size={20} color="#3B2D17" />
                 </TouchableOpacity>
+              </View>
+
+              {/* Search Bar in Modal */}
+              <View style={styles.modalSearchBox}>
+                <Ionicons name="search" size={16} color="#8F7E66" style={{ marginRight: 6 }} />
+                <TextInput
+                  style={styles.modalSearchInput}
+                  placeholder="Search JobSheet, Supplier, Bill No..."
+                  value={searchFilter}
+                  onChangeText={setSearchFilter}
+                  autoFocus
+                />
               </View>
 
               {/* Table Header */}
@@ -398,8 +508,8 @@ export default function JobSheetCostingScreen() {
                 <View style={styles.centered}><ActivityIndicator size="large" color="#9E6D08" /></View>
               ) : (
                 <FlatList
-                  data={lovData}
-                  style={{ maxHeight: 300 }}
+                  data={filteredLovData}
+                  style={{ maxHeight: 320 }}
                   keyExtractor={(item, index) => item.JobSheetNo || index.toString()}
                   renderItem={({ item, index }) => (
                     <TouchableOpacity
@@ -411,14 +521,14 @@ export default function JobSheetCostingScreen() {
                       }}
                     >
                       <View style={[styles.cell, { flex: 1.5 }]}><ThemedText style={{ color: '#2C2519', fontSize: 12, fontWeight: 'bold' }}>{item.JobSheetNo}</ThemedText></View>
-                      <View style={[styles.cell, { flex: 1 }]}><ThemedText style={{ color: '#2C2519', fontSize: 12 }}>{item.CostPerGram}</ThemedText></View>
+                      <View style={[styles.cell, { flex: 1 }]}><ThemedText style={{ color: '#2C2519', fontSize: 12 }}>{item.CostPerGram != null ? parseFloat(item.CostPerGram).toFixed(2) : '0.00'}</ThemedText></View>
                       <View style={[styles.cell, { flex: 1 }]}><ThemedText style={{ color: '#2C2519', fontSize: 12 }}>{item.SupplierCode}</ThemedText></View>
                       <View style={[styles.cell, { flex: 1 }]}><ThemedText style={{ color: '#2C2519', fontSize: 12 }}>{item.PurchaseBillNo}</ThemedText></View>
                     </TouchableOpacity>
                   )}
                   ListEmptyComponent={
                     <View style={styles.centered}>
-                      <ThemedText style={{ color: '#8F7E66', padding: 20 }}>No JobSheets found.</ThemedText>
+                      <ThemedText style={{ color: '#8F7E66', padding: 20 }}>No JobSheets pending costing found.</ThemedText>
                     </View>
                   }
                 />
@@ -457,6 +567,35 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
 
+  // Toast Banner
+  toastBanner: {
+    position: 'absolute',
+    top: 60,
+    alignSelf: 'center',
+    zIndex: 9999,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 18,
+    paddingVertical: 10,
+    borderRadius: 24,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 8,
+    elevation: 8,
+  },
+  toastError: {
+    backgroundColor: '#C53030',
+  },
+  toastSuccess: {
+    backgroundColor: '#276749',
+  },
+  toastText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: 'bold',
+  },
+
   // Luxury Gold Card
   goldCard: {
     width: '100%',
@@ -478,50 +617,51 @@ const styles = StyleSheet.create({
     backgroundColor: '#F5E7CA',
     borderBottomWidth: 1,
     borderBottomColor: '#E2D3B3',
-    paddingVertical: 8,
     paddingHorizontal: 14,
+    paddingVertical: 10,
   },
   headerIconBadge: {
     width: 24,
     height: 24,
-    borderRadius: 5,
-    backgroundColor: '#FFF8EA',
-    borderWidth: 1,
-    borderColor: '#E2D2AF',
+    borderRadius: 12,
+    backgroundColor: '#FFFFFF',
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 8,
+    borderWidth: 1,
+    borderColor: '#DECFA9',
   },
   cardHeaderTitle: {
-    fontSize: 13,
+    fontSize: 14,
     fontWeight: 'bold',
     color: '#3B2D17',
-    letterSpacing: 0.3,
   },
   cardBody: {
     padding: 16,
+    gap: 10,
   },
   inputGroup: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 10,
+    justifyContent: 'space-between',
   },
   label: {
     width: 140,
     fontSize: 12,
     fontWeight: 'bold',
-    color: '#3A2E19',
+    color: '#3B2D17',
   },
   input: {
     borderWidth: 1,
     borderColor: '#E2D7C5',
     borderRadius: 6,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
     fontSize: 12,
-    height: 30,
+    height: 32,
     backgroundColor: '#FFFFFF',
     color: '#2C2519',
+    justifyContent: 'center',
   },
   readonlyInput: {
     backgroundColor: '#F8F5EE',
@@ -535,7 +675,7 @@ const styles = StyleSheet.create({
   },
   lookupBtn: {
     width: 34,
-    height: 30,
+    height: 32,
     borderWidth: 1,
     borderColor: '#E2D7C5',
     borderLeftWidth: 1,
@@ -587,6 +727,21 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 10,
     borderBottomWidth: 1,
+  },
+  modalSearchBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E8DCB8',
+    backgroundColor: '#FAF7F0',
+  },
+  modalSearchInput: {
+    flex: 1,
+    fontSize: 12,
+    color: '#2C2519',
+    padding: 0,
   },
   tableHeader: {
     flexDirection: 'row',

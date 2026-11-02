@@ -9,6 +9,7 @@ import {
   ActivityIndicator,
   FlatList,
   Modal,
+  Platform,
   ScrollView,
   StyleSheet,
   TextInput,
@@ -60,6 +61,24 @@ export default function InventoryMaintenanceScreen() {
   const [lovVisible, setLovVisible] = useState(false);
   const [lovType, setLovType] = useState<'fromInventory' | 'toInventory' | 'size'>('fromInventory');
   const [lovData, setLovData] = useState<any[]>([]);
+  const [lovSearch, setLovSearch] = useState('');
+
+  const filteredLovData = useMemo(() => {
+    if (!lovSearch.trim()) return lovData;
+    const q = lovSearch.trim().toLowerCase();
+    return lovData.filter(item => {
+      if (lovType === 'size') {
+        const code = String(item.SizeCode || '').toLowerCase();
+        const type = String(item.SizeType || '').toLowerCase();
+        return code.includes(q) || type.includes(q);
+      } else {
+        const code = String(item.InventoryCode || '').toLowerCase();
+        const desc = String(item.Description || '').toLowerCase();
+        const weight = String(item.Weight || '').toLowerCase();
+        return code.includes(q) || desc.includes(q) || weight.includes(q);
+      }
+    });
+  }, [lovData, lovSearch, lovType]);
 
   // Current working list of inventories fetched
   const [fetchedInventoryList, setFetchedInventoryList] = useState<any[]>([]);
@@ -77,6 +96,7 @@ export default function InventoryMaintenanceScreen() {
 
   const fetchLOV = async (type: 'fromInventory' | 'toInventory' | 'size') => {
     setLovType(type);
+    setLovSearch('');
     setLovVisible(true);
     setLoading(true);
     try {
@@ -256,7 +276,8 @@ export default function InventoryMaintenanceScreen() {
         showAlert('Success', 'Inventories saved successfully!');
         handleClear();
       } else {
-        showAlert('Error', json.message || 'Failed to save');
+        const errorDetail = json.error ? `\nDetails: ${json.error}` : '';
+        showAlert('Error', `${json.message || 'Failed to save'}${errorDetail}`);
       }
     } catch (e) {
       console.error(e);
@@ -602,26 +623,66 @@ export default function InventoryMaintenanceScreen() {
                     <Ionicons name="close-circle-outline" size={24} color="#7A684C" />
                   </TouchableOpacity>
                 </View>
+                <View style={styles.modalSearchContainer}>
+                  <Ionicons name="search-outline" size={16} color="#7D6F5B" style={{ marginRight: 6 }} />
+                  <TextInput
+                    style={styles.modalSearchInput}
+                    placeholder={`Search ${lovType === 'size' ? 'sizes' : 'inventory'}...`}
+                    placeholderTextColor="#7D6F5B"
+                    value={lovSearch}
+                    onChangeText={setLovSearch}
+                    autoFocus
+                  />
+                  {lovSearch.length > 0 && (
+                    <TouchableOpacity onPress={() => setLovSearch('')}>
+                      <Ionicons name="close-circle" size={16} color="#A89E8D" />
+                    </TouchableOpacity>
+                  )}
+                </View>
+
+                {/* Table Header */}
+                <View style={styles.modalTableHeader}>
+                  {lovType === 'size' ? (
+                    <>
+                      <ThemedText style={[styles.modalTableHeaderText, { flex: 1 }]}>Size Code</ThemedText>
+                      <ThemedText style={[styles.modalTableHeaderText, { flex: 1 }]}>Size Type</ThemedText>
+                    </>
+                  ) : (
+                    <>
+                      <ThemedText style={[styles.modalTableHeaderText, { flex: 1.5 }]}>Inventory Code</ThemedText>
+                      <ThemedText style={[styles.modalTableHeaderText, { flex: 2.5 }]}>Description</ThemedText>
+                      <ThemedText style={[styles.modalTableHeaderText, { flex: 1, textAlign: 'right' }]}>Weight</ThemedText>
+                    </>
+                  )}
+                </View>
+
                 {loading ? (
                   <View style={{ padding: 30, alignItems: 'center' }}>
                     <ActivityIndicator size="large" color="#B48218" />
                   </View>
+                ) : filteredLovData.length === 0 ? (
+                  <View style={{ padding: 24, alignItems: 'center' }}>
+                    <ThemedText style={{ color: '#7D6F5B', fontSize: 12 }}>No matching results</ThemedText>
+                  </View>
                 ) : (
                   <FlatList
-                    data={lovData}
+                    data={filteredLovData}
                     keyExtractor={(i, idx) => idx.toString()}
-                    style={{ marginTop: 8, maxHeight: 350 }}
-                    renderItem={({ item }) => (
-                      <TouchableOpacity style={styles.modalItem} onPress={() => handleSelectLOV(item)}>
+                    style={{ maxHeight: 350 }}
+                    renderItem={({ item, index }) => (
+                      <TouchableOpacity
+                        style={[styles.modalItem, index % 2 === 1 && { backgroundColor: '#FCFAF6' }]}
+                        onPress={() => handleSelectLOV(item)}
+                      >
                         {lovType === 'size' ? (
                           <View style={styles.modalRow}>
-                            <ThemedText style={[styles.modalText, { fontWeight: 'bold' }]}>{item.SizeCode}</ThemedText>
-                            <ThemedText style={[styles.modalText, { color: '#7A684C' }]}>{item.SizeType}</ThemedText>
+                            <ThemedText style={[styles.modalText, { fontWeight: 'bold', flex: 1 }]}>{item.SizeCode}</ThemedText>
+                            <ThemedText style={[styles.modalText, { color: '#7A684C', flex: 1 }]}>{item.SizeType}</ThemedText>
                           </View>
                         ) : (
                           <View style={styles.modalRow}>
                             <ThemedText style={[styles.modalText, { fontWeight: 'bold', flex: 1.5 }]}>{item.InventoryCode}</ThemedText>
-                            <ThemedText style={[styles.modalText, { flex: 2.5 }]}>{item.Description}</ThemedText>
+                            <ThemedText style={[styles.modalText, { flex: 2.5 }]} numberOfLines={1}>{item.Description}</ThemedText>
                             <ThemedText style={[styles.modalText, { flex: 1, textAlign: 'right' }]}>{item.Weight}</ThemedText>
                           </View>
                         )}
@@ -770,6 +831,9 @@ const styles = StyleSheet.create({
     flex: 1,
     padding: 12,
     backgroundColor: '#FBF9F5',
+    width: '100%',
+    maxWidth: 1100,
+    alignSelf: 'center',
   },
 
   // Search Filter Card
@@ -787,7 +851,7 @@ const styles = StyleSheet.create({
     elevation: 2,
   },
   searchFilterBody: {
-    padding: 12,
+    padding: 8,
   },
   cardHeaderBanner: {
     flexDirection: 'row',
@@ -795,8 +859,8 @@ const styles = StyleSheet.create({
     backgroundColor: '#F5E7CA',
     borderBottomWidth: 1,
     borderBottomColor: '#E2D3B3',
-    paddingVertical: 7,
-    paddingHorizontal: 12,
+    paddingVertical: 5,
+    paddingHorizontal: 10,
   },
   headerIconBadge: {
     width: 20,
@@ -888,16 +952,16 @@ const styles = StyleSheet.create({
     elevation: 2,
   },
   panelBody: {
-    padding: 12,
-    gap: 6,
+    padding: 8,
+    gap: 4,
   },
   panelFieldRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 4,
+    marginBottom: 2,
   },
   panelLabel: {
-    width: 140,
+    width: 130,
     fontSize: 11,
     fontWeight: 'bold',
     color: '#4C3B24',
@@ -1074,6 +1138,40 @@ const styles = StyleSheet.create({
   },
   modalTitle: {
     fontSize: 14,
+    fontWeight: 'bold',
+    color: '#3B2D17',
+  },
+  modalSearchContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FAF5EA',
+    borderWidth: 1,
+    borderColor: '#E2D7C5',
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    height: 32,
+    marginBottom: 8,
+  },
+  modalSearchInput: {
+    flex: 1,
+    fontSize: 12,
+    color: '#2C2519',
+    height: '100%',
+    padding: 0,
+    ...(Platform.OS === 'web' ? { outlineStyle: 'none' } : {}),
+  } as any,
+  modalTableHeader: {
+    flexDirection: 'row',
+    backgroundColor: '#F5E7CA',
+    borderBottomWidth: 1,
+    borderBottomColor: '#E2D3B3',
+    paddingVertical: 6,
+    paddingHorizontal: 8,
+    borderRadius: 4,
+    marginBottom: 4,
+  },
+  modalTableHeaderText: {
+    fontSize: 11,
     fontWeight: 'bold',
     color: '#3B2D17',
   },

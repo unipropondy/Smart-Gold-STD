@@ -280,6 +280,28 @@ export default function SplitInventoryScreen() {
     showToast("Calculated Split Weights.", "success");
   };
 
+  // LOV Inventory Search
+  const handleInventoryLov = async () => {
+    setLoading(true);
+    try {
+      const res = await fetch(`${API_URL}/lov/inventory`);
+      const json = await res.json();
+      if (json.success && json.data) {
+        openLov("Select Inventory Item", json.data, ["InventoryCode", "Description", "Weight"], (item) => {
+          setInventoryCode(item.InventoryCode.trim());
+          setLovVisible(false);
+          handleFetchDetail(item.InventoryCode.trim());
+        });
+      } else {
+        showToast("No active inventories available", "error");
+      }
+    } catch (e) {
+      showToast("Failed to load inventory LOV", "error");
+    } finally {
+      setLoading(false);
+    }
+  };
+
   // LOV Category Org
   const handleOrgCategoryLov = async () => {
     if (!panelsEnabled) return;
@@ -553,7 +575,8 @@ export default function SplitInventoryScreen() {
         showToast(json.message || "Split Saved Successfully.", "success");
         handleClearAll();
       } else {
-        showToast(json.message || "Failed to split inventory.", "error");
+        const errorDetail = json.error ? `\nDetails: ${json.error}` : '';
+        showToast(`${json.message || "Failed to split inventory."}${errorDetail}`, "error");
       }
     } catch (e) {
       showToast("Network save failed.", "error");
@@ -628,8 +651,8 @@ export default function SplitInventoryScreen() {
                         placeholder="Scan / Type Code"
                         placeholderTextColor="#A89D8B"
                       />
-                      <TouchableOpacity style={styles.lookupBtn} onPress={() => handleFetchDetail()}>
-                        <Ionicons name="search" size={13} color="#6E5528" />
+                      <TouchableOpacity style={styles.lookupBtn} onPress={handleInventoryLov}>
+                        <ThemedText style={styles.lookupBtnText}>...</ThemedText>
                       </TouchableOpacity>
                     </View>
                   </View>

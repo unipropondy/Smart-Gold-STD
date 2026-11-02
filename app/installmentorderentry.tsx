@@ -544,21 +544,27 @@ export default function InstallmentOrderEntryScreen() {
         customerCode,
         customerName,
         customerType,
+        supplierCode: supplierCode || '',
+        costPerGram: parseFloat(costPerGram) || 0,
+        supplierCost: 0,
+        estimatedGst: parseFloat(estimatedGst) || 0,
         address1,
         address2,
         address3,
         remarks,
-        salesManCode: salesman,
-        depositAmt: depositAmount,
-        amtPaid: amountPaid,
-        installmentAmt: installmentAmt,
-        totalCost: totalAmount,
-        tradeInAmount: tradeIn,
+        salesManCode: salesman || 'ADMIN',
+        depositAmt: parseFloat(depositAmount) || 0,
+        amtPaid: parseFloat(amountPaid) || 0,
+        installmentAmt: parseFloat(installmentAmt) || 0,
+        totalCost: parseFloat(totalAmount) || 0,
+        tradeInAmount: parseFloat(tradeIn) || 0,
+        tradeInType: paymentMode === 'Both' || (parseFloat(tradeIn) > 0) ? '1' : '0',
         date: new Date().toISOString(),
         lastDate: parseDate(dueDate).toISOString(),
         orderDate: parseDate(orderDate).toISOString(),
         issueDate: parseDate(issueDate).toISOString(),
         rateFixed: mode === 'Order' ? rateFixed : undefined,
+        status: 'O',
       };
 
       const payload = {
@@ -573,14 +579,15 @@ export default function InstallmentOrderEntryScreen() {
         body: JSON.stringify(payload),
       });
       const data = await res.json();
-      if (data.success) {
+      if (res.ok && data.success) {
         showToast('Success', 'Transaction Saved Successfully');
         clearForm();
       } else {
-        showToast('Error', data.message || 'Failed to save transaction');
+        showToast('Error', data?.message || data?.error || 'Failed to save transaction');
       }
-    } catch (e) {
-      showToast('Error', 'Failed to save');
+    } catch (e: any) {
+      console.error('Save entry catch error:', e);
+      showToast('Error', e?.message || 'Failed to save');
     } finally {
       setSaving(false);
     }
@@ -703,7 +710,7 @@ export default function InstallmentOrderEntryScreen() {
       </View>
 
       {/* TOAST ALERTS */}
-      {(successMsg || errorMsg) && (
+      {Boolean(successMsg || errorMsg) && (
         <View style={[styles.toast, errorMsg ? styles.toastError : styles.toastSuccess]}>
           <Ionicons
             name={errorMsg ? 'alert-circle' : 'checkmark-circle'}

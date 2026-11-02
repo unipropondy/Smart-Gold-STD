@@ -1,8 +1,9 @@
+/** Developer: durairaj */
 import { ThemedText } from '@/components/themed-text';
 import { API_BASE_URL } from '@/constants/api';
 import { Ionicons } from '@expo/vector-icons';
-import { Stack, useRouter } from 'expo-router';
-import React, { useEffect, useRef, useState } from 'react';
+import { Stack, useFocusEffect, useRouter } from 'expo-router';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
@@ -313,6 +314,33 @@ export default function PaymodeModificationScreen() {
       setVerifyingPwd(false);
     }
   };
+
+  // Keyboard shortcuts matching VB frmPaymodeModification_KeyDown:
+  // F4: Save, F6: Clear, Escape: Back
+  useFocusEffect(
+    useCallback(() => {
+      if (Platform.OS === 'web') {
+        const handleKeyDown = (e: KeyboardEvent) => {
+          if (e.key === 'F4') {
+            e.preventDefault();
+            handleSaveInit();
+          } else if (e.key === 'F6') {
+            e.preventDefault();
+            handleClear();
+          } else if (e.key === 'Escape') {
+            e.preventDefault();
+            if (pwdVisible) {
+              setPwdVisible(false);
+            } else {
+              router.back();
+            }
+          }
+        };
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+      }
+    }, [invoiceData, paymodes, netAmount, totalPaid, balance, remarks, pwdVisible])
+  );
 
   return (
     <SafeAreaView style={styles.safeArea} edges={['top']}>

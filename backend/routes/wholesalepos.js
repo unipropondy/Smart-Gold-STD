@@ -1,12 +1,19 @@
+/** Developer: durairaj */
 const express = require("express");
-const { sql } = require("../db");
+const { sql, poolPromise } = require("../db");
 const router = express.Router();
 
+// Helper to acquire database connection pool reliably
+const getPool = async (req) => {
+  if (req && req.pool) return req.pool;
+  if (poolPromise) return await poolPromise;
+  throw new Error("Database pool is not available.");
+};
 
 // ================= GET ALL WHOLESALE INVOICES (LOV) =================
 router.get("/", async (req, res) => {
   try {
-    const pool = req.pool;
+    const pool = await getPool(req);
     const result = await pool.request().query(`
       SELECT DISTINCT 
         InvoiceNo, 
@@ -23,7 +30,7 @@ router.get("/", async (req, res) => {
       WHERE SalesType = 'Wholesale'
       ORDER BY CreateDate DESC
     `);
-    return res.status(200).json({ success: true, data: result.recordset });
+    return res.status(200).json({ success: true, data: result.recordset || [] });
   } catch (err) {
     console.error("🔥 GET ALL WHOLESALE POS ERROR:", err);
     return res.status(500).json({ success: false, message: "Server Error", error: err.message });
@@ -33,7 +40,7 @@ router.get("/", async (req, res) => {
 // ================= GET NEXT WHOLESALE INVOICE NUMBER =================
 router.get("/next-invoice", async (req, res) => {
   try {
-    const pool = req.pool;
+    const pool = await getPool(req);
     // Check if next invoice format exists or generate standard prefix WS-YYMMDD-XXX
     const now = new Date();
     const datePrefix = now.getFullYear().toString().slice(-2) +
@@ -50,7 +57,7 @@ router.get("/next-invoice", async (req, res) => {
       `);
 
     let nextNo = `WS-${datePrefix}-001`;
-    if (result.recordset.length > 0) {
+    if (result.recordset && result.recordset.length > 0) {
       const lastNo = result.recordset[0].InvoiceNo;
       const parts = lastNo.split('-');
       if (parts.length >= 3) {
@@ -71,15 +78,43 @@ router.get("/next-invoice", async (req, res) => {
 // ================= GET SALESMEN LOV FOR WHOLESALE =================
 router.get("/lov/salesmen", async (req, res) => {
   try {
-    const pool = req.pool;
+    const pool = await getPool(req);
     const result = await pool.request().query(`
       SELECT SalesManCode, SalesManName 
       FROM tblSalesman
       ORDER BY SalesManCode
     `);
-    return res.status(200).json({ success: true, data: result.recordset });
+    return res.status(200).json({ success: true, data: result.recordset || [] });
   } catch (err) {
     console.error("🔥 WHOLESALE SALESMEN LOV ERROR:", err);
+    return res.status(500).json({ success: false, message: "Server Error", error: err.message });
+  }
+});
+
+// ================= VERIFY SALESMAN PASSWORD (subGetSalesManPassword) =================
+router.post("/verify-salesman", async (req, res) => {
+  try {
+    const pool = await getPool(req);
+    const { password } = req.body;
+    if (!password) {
+      return res.status(400).json({ success: false, message: "Password is required." });
+    }
+
+    const result = await pool.request()
+      .input("Password", sql.VarChar, password.trim())
+      .query(`
+        SELECT SalesManCode, SalesManName, AllowSalesReturn, InvoiceNo, LastSalesAmount 
+        FROM tblSalesman 
+        WHERE Password = @Password
+      `);
+
+    if (result.recordset && result.recordset.length > 0) {
+      return res.status(200).json({ success: true, data: result.recordset[0] });
+    } else {
+      return res.status(401).json({ success: false, message: "Invalid Password." });
+    }
+  } catch (err) {
+    console.error("🔥 VERIFY SALESMAN ERROR:", err);
     return res.status(500).json({ success: false, message: "Server Error", error: err.message });
   }
 });
@@ -87,7 +122,7 @@ router.get("/lov/salesmen", async (req, res) => {
 // ================= GET CUSTOMERS LOV FOR WHOLESALE =================
 router.get("/lov/customers", async (req, res) => {
   try {
-    const pool = req.pool;
+    const pool = await getPool(req);
     const result = await pool.request().query(`
       SELECT 
         CustomerCode, 
@@ -98,7 +133,7 @@ router.get("/lov/customers", async (req, res) => {
       FROM tblCustomer
       ORDER BY CustomerCode
     `);
-    return res.status(200).json({ success: true, data: result.recordset });
+    return res.status(200).json({ success: true, data: result.recordset || [] });
   } catch (err) {
     console.error("🔥 WHOLESALE CUSTOMERS LOV ERROR:", err);
     return res.status(500).json({ success: false, message: "Server Error", error: err.message });
@@ -108,7 +143,7 @@ router.get("/lov/customers", async (req, res) => {
 // ================= GET INVENTORY LOV FOR WHOLESALE =================
 router.get("/lov/inventory", async (req, res) => {
   try {
-    const pool = req.pool;
+    const pool = await getPool(req);
     const result = await pool.request().query(`
       SELECT 
         a.InventoryCode,
@@ -130,7 +165,7 @@ router.get("/lov/inventory", async (req, res) => {
       WHERE (a.SalesBillNo IS NULL OR a.SalesBillNo = '' OR LTRIM(RTRIM(a.SalesBillNo)) = '')
       ORDER BY a.InventoryCode
     `);
-    return res.status(200).json({ success: true, data: result.recordset });
+    return res.status(200).json({ success: true, data: result.recordset || [] });
   } catch (err) {
     console.error("🔥 WHOLESALE INVENTORY LOV ERROR:", err);
     return res.status(500).json({ success: false, message: "Server Error: " + err.message, error: err.message });
@@ -141,10 +176,10 @@ router.get("/lov/inventory", async (req, res) => {
 router.get("/inventory/:code", async (req, res) => {
   try {
     const { code } = req.params;
-    const pool = req.pool;
+    const pool = await getPool(req);
 
     const result = await pool.request()
-      .input("InventoryCode", sql.VarChar, code)
+      .input("InventoryCode", sql.VarChar, (code || "").trim())
       .query(`
         SELECT 
           a.InventoryCode,
@@ -169,7 +204,7 @@ router.get("/inventory/:code", async (req, res) => {
         WHERE a.InventoryCode = @InventoryCode
       `);
 
-    if (result.recordset.length === 0) {
+    if (!result.recordset || result.recordset.length === 0) {
       return res.status(404).json({ success: false, message: "Inventory item not found." });
     }
 
@@ -193,10 +228,10 @@ router.get("/inventory/:code", async (req, res) => {
 router.get("/:invoiceNo", async (req, res) => {
   try {
     const { invoiceNo } = req.params;
-    const pool = req.pool;
+    const pool = await getPool(req);
 
     const headerResult = await pool.request()
-      .input("InvoiceNo", sql.VarChar, invoiceNo)
+      .input("InvoiceNo", sql.VarChar, (invoiceNo || "").trim())
       .query(`
         SELECT p.*, s.CustomerName AS CustomerFullName
         FROM tblSalesHeader p
@@ -204,12 +239,12 @@ router.get("/:invoiceNo", async (req, res) => {
         WHERE p.InvoiceNo = @InvoiceNo
       `);
 
-    if (headerResult.recordset.length === 0) {
+    if (!headerResult.recordset || headerResult.recordset.length === 0) {
       return res.status(404).json({ success: false, message: "Wholesale invoice not found." });
     }
 
     const detailsResult = await pool.request()
-      .input("InvoiceNo", sql.VarChar, invoiceNo)
+      .input("InvoiceNo", sql.VarChar, (invoiceNo || "").trim())
       .query(`
         SELECT * 
         FROM tblSalesDetail 
@@ -220,7 +255,7 @@ router.get("/:invoiceNo", async (req, res) => {
     return res.status(200).json({
       success: true,
       header: headerResult.recordset[0],
-      details: detailsResult.recordset
+      details: detailsResult.recordset || []
     });
   } catch (err) {
     console.error("🔥 GET WHOLESALE INVOICE BY NO ERROR:", err);
@@ -230,8 +265,8 @@ router.get("/:invoiceNo", async (req, res) => {
 
 // ================= SAVE/UPDATE WHOLESALE INVOICE =================
 router.post("/", async (req, res) => {
-  const pool = req.pool;
-  const transaction = new sql.Transaction(pool);
+  let pool;
+  let transaction;
 
   try {
     const { header, details, userId } = req.body;
@@ -248,6 +283,9 @@ router.post("/", async (req, res) => {
     if (!details || details.length === 0) {
       return res.status(400).json({ success: false, message: "At least one item is required" });
     }
+
+    pool = await getPool(req);
+    transaction = new sql.Transaction(pool);
 
     const sysUser = userId || "SYSTEM";
     const curDate = new Date();
@@ -454,10 +492,12 @@ router.post("/", async (req, res) => {
     });
   } catch (err) {
     console.error("🔥 WHOLESALE POS SAVE ERROR:", err);
-    try {
-      await transaction.rollback();
-    } catch (rbErr) {
-      console.error("Rollback failed:", rbErr);
+    if (transaction) {
+      try {
+        await transaction.rollback();
+      } catch (rbErr) {
+        console.error("Rollback failed:", rbErr);
+      }
     }
     return res.status(500).json({ success: false, message: "Save failed: " + err.message });
   }
@@ -465,27 +505,29 @@ router.post("/", async (req, res) => {
 
 // ================= DELETE / CANCEL WHOLESALE INVOICE =================
 router.delete("/:id", async (req, res) => {
-  const pool = req.pool;
-  const transaction = new sql.Transaction(pool);
+  let pool;
+  let transaction;
 
   try {
     const { id } = req.params;
+    pool = await getPool(req);
 
     // Check if invoice exists and verify type
     const checkReq = await pool.request()
-      .input("InvoiceNo", sql.VarChar, id)
+      .input("InvoiceNo", sql.VarChar, (id || "").trim())
       .query(`SELECT SalesType FROM tblSalesHeader WHERE InvoiceNo = @InvoiceNo`);
 
-    if (checkReq.recordset.length === 0) {
+    if (!checkReq.recordset || checkReq.recordset.length === 0) {
       return res.status(404).json({ success: false, message: "Invoice not found" });
     }
 
+    transaction = new sql.Transaction(pool);
     await transaction.begin();
 
     // Revert inventory items
     const revInvReq = new sql.Request(transaction);
     await revInvReq
-      .input("InvoiceNo", sql.VarChar, id)
+      .input("InvoiceNo", sql.VarChar, (id || "").trim())
       .query(`
         UPDATE tblInventory 
         SET SalesBillNo = '', SalesDate = NULL, SalesCostPerGram = 0, SalesMC = 0, SalesAmount = 0
@@ -495,7 +537,7 @@ router.delete("/:id", async (req, res) => {
     // Delete header and details
     const delReq = new sql.Request(transaction);
     await delReq
-      .input("InvoiceNo", sql.VarChar, id)
+      .input("InvoiceNo", sql.VarChar, (id || "").trim())
       .query(`
         DELETE FROM tblSalesHeader WHERE InvoiceNo = @InvoiceNo;
         DELETE FROM tblSalesDetail WHERE InvoiceNo = @InvoiceNo;
@@ -505,10 +547,12 @@ router.delete("/:id", async (req, res) => {
     return res.status(200).json({ success: true, message: `Wholesale Invoice ${id} cancelled successfully!` });
   } catch (err) {
     console.error("🔥 WHOLESALE DELETE ERROR:", err);
-    try {
-      await transaction.rollback();
-    } catch (rbErr) {
-      console.error("Rollback failed:", rbErr);
+    if (transaction) {
+      try {
+        await transaction.rollback();
+      } catch (rbErr) {
+        console.error("Rollback failed:", rbErr);
+      }
     }
     return res.status(500).json({ success: false, message: "Server Error", error: err.message });
   }

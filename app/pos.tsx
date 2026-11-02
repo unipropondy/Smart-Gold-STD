@@ -104,6 +104,14 @@ export default function PosScreen() {
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
   const [lineDetailModalVisible, setLineDetailModalVisible] = useState(false);
   const [classRates, setClassRates] = useState<any[]>([]);
+  const [auditStats, setAuditStats] = useState<any>({
+    LocationCode: 'HQ',
+    TerminalCode: 'T1',
+    NextInvoiceNo: '',
+    LastSalesMan: '0',
+    LastBillNo: '0',
+    LastBillAmount: '0.00'
+  });
 
   // Password Verification State
   const [passwordModalVisible, setPasswordModalVisible] = useState(true);
@@ -136,7 +144,21 @@ export default function PosScreen() {
     }
   };
 
-  // Fetch Class Rates on load
+  const fetchAuditStats = () => {
+    fetch(`${API_URL}/pos/audit/stats`)
+      .then(res => res.json())
+      .then(json => {
+        if (json.success && json.data) {
+          setAuditStats(json.data);
+          if (json.data.NextInvoiceNo && !headerState.InvoiceNo) {
+            updateHeader('InvoiceNo', json.data.NextInvoiceNo);
+          }
+        }
+      })
+      .catch(e => console.log('Error fetching audit stats', e));
+  };
+
+  // Fetch Class Rates and Initial Data on load
   useEffect(() => {
     fetch(`${API_URL}/pos/lov/market-rates`)
       .then(res => res.json())
@@ -144,6 +166,8 @@ export default function PosScreen() {
         if (json.success) setClassRates(json.data);
       })
       .catch(e => console.log('Error fetching market rates', e));
+
+    fetchAuditStats();
   }, []);
 
   // Line Totals calculations matching pos.txt txtSMC_LostFocus / txtGoldLoss_LostFocus
@@ -327,16 +351,65 @@ export default function PosScreen() {
       const res = await fetch(`${API_URL}/pos/lov/customers`);
       const json = await res.json();
       if (json.success) {
-        openLov('Select Customer', json.data, ['CustomerCode', 'CustomerName'], (item) => {
+        openLov('Select Customer', json.data, ['CustomerCode', 'CustomerName', 'CustomerType', 'Address1'], (item) => {
           updateHeader('CustomerCode', item.CustomerCode);
           updateHeader('CustomerName', item.CustomerName);
           updateHeader('CustomerAddress', item.Address1 || '');
+          if (item.NricNo) updateHeader('PassportNo', item.NricNo);
+          if (item.CustomerType) updateHeader('CustomerType', item.CustomerType);
         });
       } else {
         showToast("Failed to fetch customers", 'error');
       }
     } catch (e) {
       showToast("Error fetching customers", 'error');
+    }
+  };
+
+  const fetchPayModes = async () => {
+    try {
+      const res = await fetch(`${API_URL}/pos/lov/paymodes`);
+      const json = await res.json();
+      if (json.success) {
+        openLov('Select PayMode', json.data, ['PayMode', 'Description', 'Commission'], (item) => {
+          updatePayment('PayMode', item.PayMode);
+        });
+      }
+    } catch (e) {
+      showToast("Error fetching paymodes", 'error');
+    }
+  };
+
+  const fetchAdvDeposits = async () => {
+    try {
+      const res = await fetch(`${API_URL}/pos/lov/adv-deposits`);
+      const json = await res.json();
+      if (json.success) {
+        openLov('Select Advance Deposit', json.data, ['DepositNo', 'CustomerCode', 'CustomerName', 'Amount'], (item) => {
+          updateHeader('Advance', item.Amount?.toString() || '0');
+          if (item.CustomerCode) updateHeader('CustomerCode', item.CustomerCode);
+          if (item.CustomerName) updateHeader('CustomerName', item.CustomerName);
+        });
+      }
+    } catch (e) {
+      showToast("Error fetching advance deposits", 'error');
+    }
+  };
+
+  const fetchFlexiSubscriptions = async () => {
+    try {
+      const res = await fetch(`${API_URL}/pos/lov/flexi-subscriptions`);
+      const json = await res.json();
+      if (json.success && json.data.length > 0) {
+        openLov('Select Flexi Subscription', json.data, ['SubscriptionId', 'CustomerName', 'TotalAmount', 'TotalBonus'], (item) => {
+          updateHeader('FlexiAmount', item.TotalAmount?.toString() || '0');
+          updateHeader('FlexiBonus', item.TotalBonus?.toString() || '0');
+        });
+      } else {
+        showToast("No active Flexi Subscriptions found", 'info');
+      }
+    } catch (e) {
+      showToast("Error fetching flexi subscriptions", 'error');
     }
   };
 
@@ -408,23 +481,32 @@ export default function PosScreen() {
 
   const fetchInventory = async () => {
     try {
-      const res = await fetch(`${API_URL}/inventorysearch`);
+      const res = await fetch(`${API_URL}/pos/lov/inventory`);
       const json = await res.json();
       if (json.success) {
-        openLov('Select Inventory', json.data, ['InventoryCode', 'Description', 'Weight', 'CostPerGram', 'SMC'], async (item) => {
+        openLov('Select Inventory', json.data, ['InventoryCode', 'Description', 'Weight', 'CostPerGram', 'SMC', 'ClassCode'], async (item) => {
           updateDetail('InventoryCode', item.InventoryCode);
           updateDetail('Description', item.Description);
           updateDetail('Weight', item.Weight?.toString() || '0');
-          updateDetail('CostPerGram', item.CostPerGram?.toString() || '0');
+          updateDetail('CostPerGram', item.CostPerGram?.toString() || item.ClassRate?.toString() || '0');
           updateDetail('SMC', item.SMC?.toString() || '0');
           updateDetail('Class', item.ClassCode || '');
+          updateDetail('PCS', (typeof item.PCS === 'number' && item.PCS > 0) ? item.PCS.toString() : '1');
+          updateDetail('GoldLoss', item.GoldLoss?.toString() || '0');
+          updateDetail('StoneWeight', item.StoneWeight?.toString() || '0');
+          updateDetail('TotalCost', item.TotalCost?.toString() || '0');
 
           if (item.ClassCode) {
             try {
               const mrRes = await fetch(`${API_URL}/pos/lov/market-rate/${item.ClassCode}`);
               const mrJson = await mrRes.json();
-              if (mrJson.success && mrJson.data.length > 0) {
+              if (mrJson.success && mrJson.data && mrJson.data.length > 0 && parseFloat(mrJson.data[0].Rate) > 0) {
                 updateDetail('DailyClassRate', mrJson.data[0].Rate?.toString() || '0');
+                if (!item.CostPerGram || item.CostPerGram === 0) {
+                  updateDetail('CostPerGram', mrJson.data[0].Rate?.toString() || '0');
+                }
+              } else {
+                showToast("Market Rate Not Found for this Class. Please set market rate!", 'error');
               }
               const mcRes = await fetch(`${API_URL}/pos/lov/mc-discount/${item.ClassCode}`);
               const mcJson = await mcRes.json();
@@ -434,6 +516,8 @@ export default function PosScreen() {
             } catch (e) {
               console.log('LOV fetch error', e);
             }
+          } else {
+            showToast("Market Rate Not Found for this Class. Please set market rate!", 'error');
           }
         });
       }
@@ -473,27 +557,38 @@ export default function PosScreen() {
       showToast("Validation Error: Please select an Item Code", 'error');
       return;
     }
-    if (!currentDetail.Weight || parseFloat(currentDetail.Weight) <= 0) {
+    const isPcsSales = currentDetail.Class && currentDetail.Class.toUpperCase() === 'P';
+    if (!isPcsSales && (!currentDetail.DailyClassRate || parseFloat(currentDetail.DailyClassRate) <= 0)) {
+      showToast("Market Rate Not Found for this Class. Please set market rate!", 'error');
+      return;
+    }
+    if (!isPcsSales && (!currentDetail.Weight || parseFloat(currentDetail.Weight) <= 0)) {
       showToast("Validation Error: Weight must be greater than 0", 'error');
       return;
     }
-    if (!currentDetail.CostPerGram || parseFloat(currentDetail.CostPerGram) <= 0) {
+    if (!isPcsSales && (!currentDetail.CostPerGram || parseFloat(currentDetail.CostPerGram) <= 0)) {
       showToast("Validation Error: Cost per gram must be greater than 0", 'error');
       return;
     }
-    if (!currentDetail.PCS || parseFloat(currentDetail.PCS) <= 0) {
-      showToast("Validation Error: PCS must be greater than 0", 'error');
+    const pcsNum = parseInt(currentDetail.PCS, 10);
+    if (isNaN(pcsNum) || pcsNum <= 0) {
+      showToast("Validation Error: PCS must be a valid positive integer", 'error');
       return;
     }
 
+    const detailToSave = {
+      ...currentDetail,
+      PCS: String(pcsNum)
+    };
+
     if (selectedIndex !== null) {
       const newDetails = [...details];
-      newDetails[selectedIndex] = { ...currentDetail };
+      newDetails[selectedIndex] = detailToSave;
       setDetails(newDetails);
       setSelectedIndex(null);
       showToast("Line item updated successfully!", 'success');
     } else {
-      setDetails([...details, { ...currentDetail }]);
+      setDetails([...details, detailToSave]);
       showToast("Line item added successfully!", 'success');
     }
     setCurrentDetail({
@@ -633,13 +728,15 @@ export default function PosScreen() {
       });
       const json = await res.json();
       if (json.success) {
-        showToast("Invoice saved successfully!", 'success');
+        showToast(`Invoice ${json.invoiceNo || ''} saved successfully!`, 'success');
         clearForm();
+        fetchAuditStats();
       } else {
-        Alert.alert("Error", json.message || "Failed to save");
+        const errorDetail = json.error ? ` - ${json.error}` : '';
+        showToast((json.message || "Failed to save invoice") + errorDetail, 'error');
       }
     } catch (e: any) {
-      Alert.alert("Error", e.message || "Network error");
+      showToast(e.message || "Network error while saving invoice", 'error');
     } finally {
       setLoading(false);
     }
@@ -1014,7 +1111,7 @@ export default function PosScreen() {
                     {renderInputRow("Name", "CustomerName", headerState.CustomerName, updateHeader, undefined, false, 65)}
                   </View>
                   <View style={{ flex: 1 }}>
-                    {renderInputRow("Advance", "Advance", headerState.Advance, updateHeader, undefined, true, 55)}
+                    {renderInputRow("Advance", "Advance", headerState.Advance, updateHeader, fetchAdvDeposits, true, 55)}
                   </View>
                 </View>
 
@@ -1024,20 +1121,20 @@ export default function PosScreen() {
                     {renderInputRow("Address", "CustomerAddress", headerState.CustomerAddress, updateHeader, undefined, false, 65)}
                   </View>
                   <View style={{ flex: 1 }}>
-                    {renderInputRow("Passport", "PassportNo", headerState.PassportNo, updateHeader, undefined, false, 55)}
+                    {renderInputRow("Passport", "PassportNo", headerState.PassportNo, updateHeader, undefined, false, 60)}
                   </View>
                 </View>
 
-                {/* Combined Row: Remarks, Flexi Amt, and Flexi Bonus in one row */}
+                {/* Row 5: Remarks & Flexi */}
                 <View style={styles.formGridRow}>
-                  <View style={{ flex: 1.5 }}>
-                    {renderInputRow("Remarks", "Remarks", headerState.Remarks, updateHeader, undefined, false, 65)}
+                  <View style={{ flex: 1.2 }}>
+                    {renderInputRow("Remarks", "Remarks", headerState.Remarks, updateHeader, undefined, false, 60)}
                   </View>
                   <View style={{ flex: 1 }}>
-                    {renderInputRow("Flexi Amt", "FlexiAmount", headerState.FlexiAmount, updateHeader, undefined, true, 60)}
+                    {renderInputRow("Flexi Amt", "FlexiAmount", headerState.FlexiAmount, updateHeader, fetchFlexiSubscriptions, true, 55)}
                   </View>
                   <View style={{ flex: 1 }}>
-                    {renderInputRow("Flexi Bonus", "FlexiBonus", headerState.FlexiBonus, updateHeader, undefined, true, 72)}
+                    {renderInputRow("Bonus", "FlexiBonus", headerState.FlexiBonus, updateHeader, undefined, true, 45)}
                   </View>
                 </View>
 
@@ -1228,6 +1325,19 @@ export default function PosScreen() {
                 <ThemedText style={styles.totalLbl}>Net Value</ThemedText>
                 <ThemedText style={styles.totalVal}>$ {paymentState.NetValue}</ThemedText>
               </View>
+              <View style={styles.totalRow}>
+                <ThemedText style={styles.totalLbl}>PayMode</ThemedText>
+                <TouchableOpacity
+                  style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#FAF5EA', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 4, borderWidth: 1, borderColor: '#D8C59A' }}
+                  onPress={fetchPayModes}
+                  activeOpacity={0.7}
+                >
+                  <ThemedText style={{ fontSize: 11, fontWeight: 'bold', color: '#8D6409', marginRight: 4 }}>
+                    {paymentState.PayMode || 'CASH'}
+                  </ThemedText>
+                  <Ionicons name="chevron-down" size={12} color="#8D6409" />
+                </TouchableOpacity>
+              </View>
               <View style={[styles.totalRow, { borderBottomWidth: 0 }]}>
                 <ThemedText style={styles.totalLbl}>Tax (GST 9%)</ThemedText>
                 <ThemedText style={[styles.totalVal, { color: '#9E6D08' }]}>
@@ -1251,19 +1361,19 @@ export default function PosScreen() {
       <View style={styles.footerStatusBar}>
         <View style={styles.footerCol}>
           <ThemedText style={styles.footerLabel}>Location</ThemedText>
-          <ThemedText style={styles.footerVal}>HQ</ThemedText>
+          <ThemedText style={styles.footerVal}>{auditStats.LocationCode || 'HQ'}</ThemedText>
         </View>
         <View style={styles.footerCol}>
           <ThemedText style={styles.footerLabel}>Last SalesMan</ThemedText>
-          <ThemedText style={styles.footerVal}>0</ThemedText>
+          <ThemedText style={styles.footerVal}>{auditStats.LastSalesMan || '0'}</ThemedText>
         </View>
         <View style={styles.footerCol}>
           <ThemedText style={styles.footerLabel}>Last Bill No</ThemedText>
-          <ThemedText style={styles.footerVal}>0</ThemedText>
+          <ThemedText style={styles.footerVal}>{auditStats.LastBillNo || '0'}</ThemedText>
         </View>
         <View style={styles.footerCol}>
           <ThemedText style={styles.footerLabel}>Next Inv No</ThemedText>
-          <ThemedText style={styles.footerVal}>0</ThemedText>
+          <ThemedText style={styles.footerVal}>{auditStats.NextInvoiceNo || '0'}</ThemedText>
         </View>
         <View style={styles.footerCol}>
           <ThemedText style={styles.footerLabel}>Total Sales Amt</ThemedText>
@@ -1272,8 +1382,8 @@ export default function PosScreen() {
           </ThemedText>
         </View>
         <View style={styles.footerCol}>
-          <ThemedText style={styles.footerLabel}>Return Amount</ThemedText>
-          <ThemedText style={styles.footerVal}>$0.00</ThemedText>
+          <ThemedText style={styles.footerLabel}>Last Bill Amt</ThemedText>
+          <ThemedText style={styles.footerVal}>${auditStats.LastBillAmount || '0.00'}</ThemedText>
         </View>
       </View>
 
@@ -1366,6 +1476,18 @@ export default function PosScreen() {
                       <ThemedText style={styles.imageMatchedLookupBtnText}>...</ThemedText>
                     </TouchableOpacity>
                   </View>
+                </View>
+
+                {/* 1.5 Class */}
+                <View style={[styles.imageMatchedFieldCol, { width: 75 }]}>
+                  <ThemedText style={styles.imageMatchedFieldLabel}>Class</ThemedText>
+                  <TextInput
+                    style={[styles.imageMatchedInput, { textAlign: 'center', fontWeight: 'bold' }]}
+                    value={currentDetail.Class}
+                    onChangeText={(text) => updateDetail('Class', text)}
+                    placeholder=""
+                    placeholderTextColor="#9E8D77"
+                  />
                 </View>
 
                 {/* 2. Description */}
@@ -1798,7 +1920,7 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '600',
     color: '#4A3B2C',
-    marginRight: 10,
+    marginRight: 6,
     flexShrink: 0,
   },
   inputWithLookup: {
@@ -1818,25 +1940,26 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: '#2B2118',
     flex: 1,
+    minWidth: 40,
   },
   inputAttached: {
     borderTopRightRadius: 0,
     borderBottomRightRadius: 0,
   },
   attachedLookupBtn: {
-    width: 28,
+    width: 24,
     height: 26,
     flexShrink: 0,
     backgroundColor: '#FAF5EA',
     borderWidth: 1,
     borderColor: '#D4C3A3',
     borderRadius: 5,
-    marginLeft: 4,
+    marginLeft: 3,
     alignItems: 'center',
     justifyContent: 'center',
   },
   attachedLookupText: {
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: 'bold',
     color: '#6E5528',
     letterSpacing: 1,

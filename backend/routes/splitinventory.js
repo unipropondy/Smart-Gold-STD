@@ -1,11 +1,43 @@
+/**
+ * Developer: durairaj
+ */
+
 const express = require("express");
 const router = express.Router();
-const { sql } = require("../db");
+const { sql, poolPromise } = require("../db");
+
+// GET /api/splitinventory/lov/inventory
+// Matching VB6/VB.NET inventory search where QtyOnHand <> 0 (or not sold)
+router.get("/lov/inventory", async (req, res) => {
+  try {
+    const pool = req.pool || (await poolPromise);
+    const query = `
+      SELECT TOP 200 
+        a.InventoryCode, 
+        a.Description, 
+        a.Weight, 
+        a.StoneWeight,
+        a.CategoryCode,
+        a.LocationCode,
+        ISNULL(b.QtyOnHand, 1) as QtyOnHand
+      FROM tblInventory a
+      LEFT JOIN tblInventoryStock b ON a.InventoryCode = b.InventoryCode
+      WHERE (b.QtyOnHand IS NULL OR b.QtyOnHand > 0)
+        AND (a.SalesBillNo IS NULL OR LTRIM(RTRIM(a.SalesBillNo)) = '')
+      ORDER BY a.InventoryCode ASC
+    `;
+    const result = await pool.request().query(query);
+    res.json({ success: true, data: result.recordset });
+  } catch (err) {
+    console.error("Fetch Inventory LOV Error:", err);
+    res.status(500).json({ success: false, message: "Database error", error: err.message });
+  }
+});
 
 // GET /api/splitinventory/detail
 router.get("/detail", async (req, res) => {
   try {
-    const pool = req.pool;
+    const pool = req.pool || (await poolPromise);
     const { code } = req.query;
 
     if (!code) {
@@ -40,10 +72,10 @@ router.get("/detail", async (req, res) => {
         a.Remarks,
         a.SizeCode,
         a.SizeType,
-        b.QtyOnHand,
-        b.LocationCode
+        ISNULL(b.QtyOnHand, 1) as QtyOnHand,
+        a.LocationCode
       FROM tblInventory a
-      LEFT JOIN tblInventoryStock b ON a.InventoryCode = b.InventoryCode AND a.LocationCode = b.LocationCode
+      LEFT JOIN tblInventoryStock b ON a.InventoryCode = b.InventoryCode
       WHERE a.InventoryCode = @code
     `;
 
@@ -82,7 +114,7 @@ router.get("/detail", async (req, res) => {
 // GET /api/splitinventory/categories
 router.get("/categories", async (req, res) => {
   try {
-    const pool = req.pool;
+    const pool = req.pool || (await poolPromise);
     const { classCode } = req.query;
 
     let query = "SELECT CategoryCode, CategoryName, ClassCode, NextInventoryCode FROM tblCategory";
@@ -105,7 +137,7 @@ router.get("/categories", async (req, res) => {
 // GET /api/splitinventory/catalogues
 router.get("/catalogues", async (req, res) => {
   try {
-    const pool = req.pool;
+    const pool = req.pool || (await poolPromise);
     const { categoryCode } = req.query;
 
     let query = "SELECT CatalogueCode, CatalogueName, CategoryCode, GoldLoss FROM tblCatalogue";
@@ -128,7 +160,7 @@ router.get("/catalogues", async (req, res) => {
 // GET /api/splitinventory/sizes
 router.get("/sizes", async (req, res) => {
   try {
-    const pool = req.pool;
+    const pool = req.pool || (await poolPromise);
     const { categoryCode } = req.query;
 
     let query = "SELECT SizeCode, SizeType, CategoryCode, Remarks FROM tblSize";
@@ -151,7 +183,7 @@ router.get("/sizes", async (req, res) => {
 // GET /api/splitinventory/nextCode
 router.get("/nextCode", async (req, res) => {
   try {
-    const pool = req.pool;
+    const pool = req.pool || (await poolPromise);
     const { categoryCode } = req.query;
 
     if (!categoryCode) {
@@ -176,7 +208,7 @@ router.get("/nextCode", async (req, res) => {
 // GET /api/splitinventory/nextScrapCode
 router.get("/nextScrapCode", async (req, res) => {
   try {
-    const pool = req.pool;
+    const pool = req.pool || (await poolPromise);
     const result = await pool.request().query("SELECT LocationCode, NextScrapInventoryNo FROM tblCompany");
     
     let scrapNo = 1;
@@ -195,7 +227,7 @@ router.get("/nextScrapCode", async (req, res) => {
 
 // POST /api/splitinventory/split
 router.post("/split", async (req, res) => {
-  const pool = req.pool;
+  const pool = req.pool || (await poolPromise);
   const transaction = new sql.Transaction(pool);
 
   try {

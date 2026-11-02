@@ -111,6 +111,29 @@ export default function JobSheetScreen() {
     fetchCompanyGst();
   }, []);
 
+  // Keyboard shortcuts matching VB frmJobSheet_KeyDown: F6 Clear, F7 Save, F8 Delete, Escape Back
+  React.useEffect(() => {
+    if (Platform.OS !== 'web') return;
+    const handleKeyDown = (e: any) => {
+      if (e.key === 'F6') {
+        e.preventDefault();
+        clearForm();
+      } else if (e.key === 'F7') {
+        e.preventDefault();
+        saveJobSheet();
+      } else if (e.key === 'F8') {
+        e.preventDefault();
+        deleteJobSheet();
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        router.back();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [headerState, details]);
+
   // 1. First GST Checkbox (ChkGST1) Calculation Logic
   // VB Reference:
   // If Val(cboTealPercent.Text) <> 0 Then
@@ -419,17 +442,45 @@ export default function JobSheetScreen() {
   };
 
   const deleteSelectedDetail = async () => {
-    if (selectedIndex !== null) {
-      const newDetails = details.filter((_, i) => i !== selectedIndex);
-      setDetails(newDetails);
-      setSelectedIndex(null);
-      setCurrentDetail({ CatalogueCode: '', CategoryCode: '', Description: '', Weight: '', CostPerGram: '', MC: '', PCS: '', GoldLoss: '', TotalCost: '' });
-      await saveJobSheet(newDetails);
-      showToast('Line detail deleted successfully', 'success');
-      setDetailModalVisible(false);
-    } else {
+    if (selectedIndex === null) {
       showToast('Please select a detail to delete', 'error');
+      return;
     }
+
+    const itemToDelete = details[selectedIndex];
+    const catCode = itemToDelete.CatalogueCode?.trim();
+
+    Alert.alert('Confirm Delete', `Do you want to delete Catalogue - ${catCode || 'selected'}?`, [
+      { text: 'No', style: 'cancel' },
+      {
+        text: 'Yes',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            // If the jobsheet already exists in backend, call the catalogue delete endpoint
+            if (headerState.JobSheetNo?.trim() && catCode) {
+              const res = await fetch(`${API_URL}/${encodeURIComponent(headerState.JobSheetNo.trim())}/catalogue/${encodeURIComponent(catCode)}`, {
+                method: 'DELETE'
+              });
+              const data = await res.json();
+              if (!data.success) {
+                Alert.alert('Cannot Delete', data.message || 'Error deleting catalogue');
+                return;
+              }
+            }
+
+            const newDetails = details.filter((_, i) => i !== selectedIndex);
+            setDetails(newDetails);
+            setSelectedIndex(null);
+            setCurrentDetail({ CatalogueCode: '', CategoryCode: '', Description: '', Weight: '', CostPerGram: '', MC: '', PCS: '', GoldLoss: '', TotalCost: '' });
+            showToast('Catalogue deleted successfully!', 'success');
+            setDetailModalVisible(false);
+          } catch (err: any) {
+            Alert.alert('Error', err.message || 'Error deleting catalogue');
+          }
+        }
+      }
+    ]);
   };
 
   const clearForm = () => {
@@ -568,6 +619,11 @@ export default function JobSheetScreen() {
       const data = await res.json();
       if (data.success) {
         const h = data.header;
+        const isClosed = h.BillClose === 'Y';
+        const isDP = h.TranType === 'DP';
+        const isTaelGst = h.TaelGST === 'Y';
+
+        setChkGST1(isTaelGst);
         setHeaderState({
           ...headerState,
           ...h,
@@ -578,15 +634,23 @@ export default function JobSheetScreen() {
           SupplierCode: h.SupplierCode || '',
           SupplierName: h.SupplierName || '',
           CurrencyName: h.CurrencyName || '',
-          TaelGST: h.TaelGST === 'Y',
+          TaelGST: isTaelGst,
           SplCategory: h.SplCategory === 'Y',
           Accessories: h.Accessories === 'Y',
-          BillClose: h.BillClose === 'Y',
-          FixStatus: h.FixStatus || 'U',
+          BillClose: isClosed,
+          FixStatus: h.FixStatus === 'Y' ? 'F' : 'U',
+          GST: h.ClassType === '24K' ? 24 : 22,
           TaelPercent: h.TaelPercent === 0 ? '' : (h.TaelPercent?.toString() || '')
         });
         setDetails(data.details || []);
-        showToast('JobSheet loaded successfully');
+
+        if (isClosed) {
+          Alert.alert('Notice', 'This bill is closed. Cannot modify!');
+        } else if (isDP) {
+          Alert.alert('Notice', 'This is a direct purchase bill. Cannot modify from JobSheet screen!');
+        } else {
+          showToast('JobSheet loaded successfully');
+        }
       } else {
         showToast(data.message || 'JobSheet not found', 'error');
       }
@@ -614,29 +678,86 @@ export default function JobSheetScreen() {
       return false;
     }
     if (!headerState.CurrencyCode?.trim()) {
-      showToast('Currency Code cannot be blank!', 'error');
+      showToast('Currency cannot be blank!', 'error');
       return false;
     }
     const rate = parseFloat(headerState.CurrencyRate) || 0;
     if (rate <= 0) {
-      showToast('Currency Rate must be greater than zero!', 'error');
+      showToast('Rate must be greater than zero!', 'error');
       return false;
     }
     const costPerGram = parseFloat(headerState.CostPerGram) || 0;
     if (!headerState.CostPerGram?.toString().trim() || costPerGram <= 0) {
-      showToast('Cost/Gram cannot be empty and must be greater than zero!', 'error');
+      showToast('CostPerGram must be greater than zero!', 'error');
+      return false;
+    }
+    if (!headerState.PaymentType || !['G', 'C', 'B'].includes(headerState.PaymentType)) {
+      showToast('Please select the payment type!', 'error');
       return false;
     }
     if (activeDetails.length < 1) {
-      showToast('Please enter at least one line detail!', 'error');
+      showToast('Please enter catalogue details!', 'error');
       return false;
     }
     return true;
   };
 
+  // Check duplicate invoice helper
+  const checkDuplicateInvoice = async (supplierCode: string, invoiceNo: string, currentJobSheetNo?: string) => {
+    if (!supplierCode?.trim() || !invoiceNo?.trim()) return;
+    try {
+      const res = await fetch(`${API_URL}/check/duplicate?supplierCode=${encodeURIComponent(supplierCode.trim())}&invoiceNo=${encodeURIComponent(invoiceNo.trim())}&jobSheetNo=${encodeURIComponent(currentJobSheetNo || '')}`);
+      const data = await res.json();
+      if (data.success && data.isDuplicate) {
+        Alert.alert('Duplicate Invoice', data.message || 'Duplicate invoice number found for this supplier!');
+        setHeaderState(prev => ({ ...prev, PurchaseBillNo: '' }));
+      }
+    } catch (e) {
+      console.log('Error checking duplicate invoice:', e);
+    }
+  };
+
+  // Lookup Supplier Details (GSTType, AccountType) on selection or blur
+  const onSupplierSelected = (supplier: any) => {
+    const gstChecked = supplier.GSTType === 'E';
+    let pType = 'C';
+    if (supplier.AccountType === 'GL') pType = 'G';
+    else if (supplier.AccountType === 'C') pType = 'C';
+    else if (supplier.AccountType === 'B') pType = 'B';
+
+    setChkGST1(gstChecked);
+    setHeaderState(prev => {
+      const updated = {
+        ...prev,
+        SupplierCode: supplier.SupplierCode,
+        SupplierName: supplier.SupplierName || '',
+        PaymentType: pType,
+      };
+      if (parseFloat(updated.TaelRate) > 0) {
+        updated.CostPerGram = calculateCostPerGram(gstChecked, updated);
+      }
+      return updated;
+    });
+
+    if (headerState.PurchaseBillNo?.trim()) {
+      checkDuplicateInvoice(supplier.SupplierCode, headerState.PurchaseBillNo, headerState.JobSheetNo);
+    }
+  };
+
+  // Save JobSheet matching fncJobSheet in frmJobSheet.vb
   const saveJobSheet = async (overrideDetails?: DetailItem[]) => {
     const activeDetails = overrideDetails || details;
     if (!fncCheckValidity(activeDetails)) {
+      return;
+    }
+
+    if (headerState.BillClose) {
+      showToast('This bill is closed. Cannot modify!', 'error');
+      return;
+    }
+
+    if (headerState.TranType === 'DP') {
+      showToast('This is a direct purchase bill. Cannot modify from JobSheet screen!', 'error');
       return;
     }
 
@@ -657,12 +778,15 @@ export default function JobSheetScreen() {
         JobSheetNo: activeJobSheetNo,
         JobSheetDate: parseDDMMYYYY(headerState.JobSheetDate) || new Date().toISOString().split('T')[0],
         PurchaseBillDate: parseDDMMYYYY(headerState.PurchaseBillDate) || new Date().toISOString().split('T')[0],
-        DueDate: parseDDMMYYYY(headerState.DueDate)
+        DueDate: parseDDMMYYYY(headerState.DueDate),
+        TranType: headerState.TranType || 'JP',
+        FixStatus: headerState.FixStatus === 'F' ? 'Y' : 'N',
+        ClassType: Number(headerState.GST) === 24 ? '24K' : '22K'
       };
 
       const payload = {
         header: payloadToSave,
-        details: overrideDetails || details,
+        details: activeDetails,
         userId: 'ADMIN'
       };
 
@@ -673,17 +797,20 @@ export default function JobSheetScreen() {
       });
       const data = await res.json();
       if (data.success) {
-        showToast(`JobSheet saved successfully! Number: ${activeJobSheetNo}`);
         if (isNew) {
-          clearForm();
+          Alert.alert('Notice', `Please take note of the Job Sheet No: ${activeJobSheetNo}`, [
+            { text: 'OK', onPress: () => clearForm() }
+          ]);
+          showToast(`JobSheet created: ${activeJobSheetNo}`, 'success');
         } else {
+          showToast('JobSheet updated successfully!', 'success');
           loadJobSheet(activeJobSheetNo);
         }
       } else {
-        showToast('Save failed: ' + data.message, 'error');
+        showToast('Save failed: ' + (data.message || 'Unknown error'), 'error');
       }
-    } catch (err) {
-      showToast('Failed to save JobSheet', 'error');
+    } catch (err: any) {
+      showToast('Failed to save JobSheet: ' + err.message, 'error');
     }
   };
 
@@ -842,23 +969,21 @@ export default function JobSheetScreen() {
           <ThemedText style={[styles.title, { color: '#3B2D17', fontWeight: '500' }]}>JobSheet</ThemedText>
         </View>
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'flex-end', alignItems: 'center', flex: 1 }}>
-          {/* <TouchableOpacity style={[styles.mainActionBtn, { backgroundColor: cardColor, borderColor: borderColor, marginBottom: 0, paddingVertical: 6, paddingHorizontal: 10 }]}>
-              <ThemedText style={{ color: textColor, fontWeight: 'bold', fontSize: 12 }}>GoldBar Issue</ThemedText>
-           </TouchableOpacity> */}
-          {/* <TouchableOpacity style={[styles.mainActionBtn, { backgroundColor: cardColor, borderColor: borderColor, marginBottom: 0, paddingVertical: 6, paddingHorizontal: 10 }]}>
-              <ThemedText style={{ color: textColor, fontWeight: 'bold', fontSize: 12 }}>GoldBar Fix</ThemedText>
-           </TouchableOpacity> */}
+          <TouchableOpacity
+            style={[styles.mainActionBtn, { backgroundColor: '#FFFFFF', borderColor: '#DFD5C3', marginBottom: 0, paddingVertical: 6, paddingHorizontal: 10 }]}
+            onPress={() => router.push({ pathname: '/goldbarfix', params: { jobSheetNo: headerState.JobSheetNo } } as any)}
+          >
+            <ThemedText style={{ color: '#5C4A28', fontWeight: 'bold', fontSize: 12 }}>GoldBar Fix</ThemedText>
+          </TouchableOpacity>
           <TouchableOpacity style={[styles.mainActionBtn, { backgroundColor: '#FFFFFF', borderColor: '#DFD5C3', marginBottom: 0 }]} onPress={clearForm}>
             <ThemedText style={{ color: '#5C4A28', fontWeight: 'bold', fontSize: 12 }}>Clear</ThemedText>
           </TouchableOpacity>
           <TouchableOpacity style={[styles.mainActionBtn, { backgroundColor: '#F9F2E2', borderColor: '#B8903B', marginBottom: 0 }]} onPress={() => saveJobSheet()}>
             <ThemedText style={{ color: '#9E6D08', fontWeight: 'bold', fontSize: 12 }}>Save</ThemedText>
           </TouchableOpacity>
-
           <TouchableOpacity style={[styles.mainActionBtn, { backgroundColor: '#FFFFFF', borderColor: '#F2A8A2', marginBottom: 0 }]} onPress={deleteJobSheet}>
             <ThemedText style={{ color: '#D93829', fontWeight: 'bold', fontSize: 12 }}>Delete</ThemedText>
           </TouchableOpacity>
-
         </View>
       </View>
 
@@ -897,6 +1022,11 @@ export default function JobSheetScreen() {
                     style={[styles.input, { flex: 1, minWidth: 120 }]}
                     value={headerState.PurchaseBillNo}
                     onChangeText={(text) => updateHeader('PurchaseBillNo', text)}
+                    onBlur={() => {
+                      if (headerState.SupplierCode?.trim() && headerState.PurchaseBillNo?.trim()) {
+                        checkDuplicateInvoice(headerState.SupplierCode, headerState.PurchaseBillNo, headerState.JobSheetNo);
+                      }
+                    }}
                   />
 
                   <ThemedText style={[styles.labelRight, { width: 92 }]}>Invoice Date</ThemedText>
@@ -947,6 +1077,22 @@ export default function JobSheetScreen() {
                       style={[styles.input, { width: 104, borderTopRightRadius: 0, borderBottomRightRadius: 0, borderRightWidth: 0 }]}
                       value={headerState.SupplierCode}
                       onChangeText={(text) => updateHeader('SupplierCode', text)}
+                      onBlur={async () => {
+                        const code = headerState.SupplierCode?.trim();
+                        if (!code) return;
+                        try {
+                          const res = await fetch(`${API_BASE_URL}/supplier`);
+                          const data = await res.json();
+                          if (data.success && data.data) {
+                            const found = data.data.find((s: any) => s.SupplierCode?.trim().toUpperCase() === code.toUpperCase());
+                            if (found) {
+                              onSupplierSelected(found);
+                            }
+                          }
+                        } catch (e) {
+                          console.log('Error looking up supplier on blur:', e);
+                        }
+                      }}
                     />
                     <TouchableOpacity style={styles.lookupBtn} onPress={openSupplierLov}>
                       <ThemedText style={styles.lookupBtnText}>...</ThemedText>
@@ -1304,12 +1450,55 @@ export default function JobSheetScreen() {
             <View style={[styles.gridRow, { borderBottomWidth: 0, paddingVertical: 8 }]}>
               <View style={{ flex: 15, paddingRight: 4 }}>
                 <View style={styles.lookupContainer}>
-                  <TextInput style={[inputStyle, { flex: 1, padding: 4, height: 30 }]} value={currentDetail.CatalogueCode} onChangeText={(t: string) => updateDetail('CatalogueCode', t)} />
+                  <TextInput
+                    style={[inputStyle, { flex: 1, padding: 4, height: 30 }]}
+                    value={currentDetail.CatalogueCode}
+                    onChangeText={(t: string) => updateDetail('CatalogueCode', t)}
+                    onBlur={async () => {
+                      const code = currentDetail.CatalogueCode?.trim();
+                      if (!code) return;
+                      try {
+                        const res = await fetch(`${API_URL}/lookup/catalogue/${encodeURIComponent(code)}`);
+                        const data = await res.json();
+                        if (data.success && data.data) {
+                          updateDetail('CategoryCode', data.data.CategoryCode || '');
+                          updateDetail('Description', data.data.CatalogueName || '');
+                          if (!currentDetail.CostPerGram && headerState.CostPerGram) {
+                            updateDetail('CostPerGram', headerState.CostPerGram);
+                          }
+                          if (!currentDetail.PCS) updateDetail('PCS', '1');
+                        }
+                      } catch (e) {
+                        console.log('Error looking up catalogue:', e);
+                      }
+                    }}
+                  />
                   <TouchableOpacity style={[styles.lookupBtn, { backgroundColor: cardColor, borderColor: borderColor, width: 24, height: 30 }]} onPress={openCatalogueLov}><ThemedText style={{ color: textColor, fontSize: 10 }}>...</ThemedText></TouchableOpacity>
                 </View>
               </View>
               <View style={{ flex: 13, paddingRight: 4 }}>
-                <TextInput style={[inputStyle, { flex: 1, padding: 4, height: 30 }]} value={currentDetail.CategoryCode} onChangeText={(t: string) => updateDetail('CategoryCode', t)} />
+                <TextInput
+                  style={[inputStyle, { flex: 1, padding: 4, height: 30 }]}
+                  value={currentDetail.CategoryCode}
+                  onChangeText={(t: string) => updateDetail('CategoryCode', t)}
+                  onBlur={async () => {
+                    const code = currentDetail.CategoryCode?.trim();
+                    if (!code) return;
+                    try {
+                      const res = await fetch(`${API_URL}/lookup/category/${encodeURIComponent(code)}`);
+                      const data = await res.json();
+                      if (data.success && data.data) {
+                        if (!currentDetail.Description) updateDetail('Description', data.data.CategoryName || '');
+                        if (!currentDetail.CostPerGram && headerState.CostPerGram) {
+                          updateDetail('CostPerGram', headerState.CostPerGram);
+                        }
+                        if (!currentDetail.PCS) updateDetail('PCS', '1');
+                      }
+                    } catch (e) {
+                      console.log('Error looking up category:', e);
+                    }
+                  }}
+                />
               </View>
               <View style={{ flex: 20, paddingRight: 4 }}>
                 <TextInput style={[inputStyle, { flex: 1, padding: 4, height: 30 }]} value={currentDetail.Description} onChangeText={(t: string) => updateDetail('Description', t)} />
@@ -1410,7 +1599,7 @@ export default function JobSheetScreen() {
                   style={[styles.lovItem, { borderBottomColor: borderColor, flexDirection: 'row', paddingVertical: 10 }]}
                   onPress={() => {
                     setSupplierLovVisible(false);
-                    setHeaderState(prev => ({ ...prev, SupplierCode: item.SupplierCode, SupplierName: item.SupplierName }));
+                    onSupplierSelected(item);
                   }}
                 >
                   <ThemedText style={{ flex: 1, color: textColor, fontSize: 12 }}>{item.SupplierCode}</ThemedText>

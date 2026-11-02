@@ -35,6 +35,7 @@ export default function PayingModeScreen() {
   // Params passed from POS or Installment Payment
   const initialTotalNet = parseFloat(params.totalNet as string) || 0;
   const customerCode = (params.customerCode as string) || '';
+  const customerType = (params.customerType as string) || '';
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -181,12 +182,62 @@ export default function PayingModeScreen() {
   };
 
   const handleSave = async () => {
+    // 1. Balance check matching subEnableButtons in frmPayingmode.vb
     if (balance > 0) {
-      showToast('Balance amount should be zero before confirming.', 'error');
+      showToast('Balance Amount Should Be Zero', 'error');
       return;
     }
 
     const selectedModes = payModes.filter((m) => (parseFloat(m.Amount) || 0) > 0);
+
+    // 2. Validate REDEEMPOINTS if present (as in fnccheckPaid in frmPayingmode.vb)
+    for (const m of selectedModes) {
+      if (m.PayMode.toUpperCase() === 'REDEEMPOINTS') {
+        const amt = parseFloat(m.Amount) || 0;
+        const availablePoints = (customerData?.rewardPoints || 0) - (customerData?.redeemPoints || 0);
+
+        if (amt > 0 && availablePoints < ((amt / 5) * 1000)) {
+          showToast('Cannot Redeem. Please Check available Points', 'error');
+          return;
+        }
+
+        if (customerData?.redeemedPoints >= 10000) {
+          showToast('Customer already redeemed 10,000 Points Today', 'error');
+          return;
+        }
+
+        const custType = (customerType || '').toUpperCase().trim();
+        if (custType === 'RUBY') {
+          if (amt % 5 !== 0) {
+            showToast('Amount must be in multiples of 5 for RUBY member', 'error');
+            return;
+          }
+          if (amt > 50) {
+            showToast('Amount should be less than or equal to 50 for RUBY member', 'error');
+            return;
+          }
+        } else if (custType === 'EMERALD') {
+          if (amt % 7 !== 0) {
+            showToast('Amount must be in multiples of 7 for EMERALD member', 'error');
+            return;
+          }
+          if (amt > 70) {
+            showToast('Amount should be less than or equal to 70 for EMERALD member', 'error');
+            return;
+          }
+        } else if (custType === 'DIAMOND') {
+          if (amt % 9 !== 0) {
+            showToast('Amount must be in multiples of 9 for DIAMOND member', 'error');
+            return;
+          }
+          if (amt > 90) {
+            showToast('Amount should be less than or equal to 90 for DIAMOND member', 'error');
+            return;
+          }
+        }
+      }
+    }
+
     const apiEndpoint = params.apiEndpoint as string;
     const payloadStr = params.payload as string;
     const returnPath = params.returnPath as string;

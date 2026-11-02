@@ -1,11 +1,19 @@
+/** Developer: durairaj */
 const express = require('express');
 const router = express.Router();
-const { sql } = require('../db');
+const { sql, poolPromise } = require('../db');
+
+// Helper to acquire database connection pool reliably
+const getPool = async (req) => {
+    if (req && req.pool) return req.pool;
+    if (poolPromise) return await poolPromise;
+    throw new Error('Database pool is not available.');
+};
 
 // GET /api/paymententry/invoices
 router.get('/invoices', async (req, res) => {
     try {
-        const pool = req.pool;
+        const pool = await getPool(req);
         const result = await pool.request()
             .query(`
                 SELECT TOP 100 
@@ -29,7 +37,7 @@ router.get('/invoices', async (req, res) => {
                 FROM tblSalesHeader h
                 ORDER BY h.InvoiceDate DESC
             `);
-        res.json({ success: true, data: result.recordset });
+        res.json({ success: true, data: result.recordset || [] });
     } catch (err) {
         console.error("Error fetching invoices:", err);
         res.status(500).json({ success: false, message: err.message });
@@ -39,7 +47,7 @@ router.get('/invoices', async (req, res) => {
 // GET /api/paymententry/etrs
 router.get('/etrs', async (req, res) => {
     try {
-        const pool = req.pool;
+        const pool = await getPool(req);
         const result = await pool.request()
             .query(`
                 SELECT TOP 100 
@@ -51,7 +59,7 @@ router.get('/etrs', async (req, res) => {
                 FROM tbleTRSStatement 
                 ORDER BY InvoiceDate DESC
             `);
-        res.json({ success: true, data: result.recordset });
+        res.json({ success: true, data: result.recordset || [] });
     } catch (err) {
         console.error("Error fetching eTRS:", err);
         res.status(500).json({ success: false, message: err.message });
@@ -61,7 +69,7 @@ router.get('/etrs', async (req, res) => {
 // GET /api/paymententry/flexi
 router.get('/flexi', async (req, res) => {
     try {
-        const pool = req.pool;
+        const pool = await getPool(req);
         const result = await pool.request()
             .query(`
                 SELECT TOP 100 
@@ -75,7 +83,7 @@ router.get('/flexi', async (req, res) => {
                 FROM tblPayModeDetailForFlexi 
                 ORDER BY InvoiceNo DESC
             `);
-        res.json({ success: true, data: result.recordset });
+        res.json({ success: true, data: result.recordset || [] });
     } catch (err) {
         console.error("Error fetching flexi:", err);
         res.status(500).json({ success: false, message: err.message });
@@ -85,16 +93,16 @@ router.get('/flexi', async (req, res) => {
 // GET /api/paymententry/paymode/:invoiceNo
 router.get('/paymode/:invoiceNo', async (req, res) => {
     try {
-        const invoiceNo = req.params.invoiceNo;
-        const pool = req.pool;
+        const invoiceNo = (req.params.invoiceNo || '').trim();
+        const pool = await getPool(req);
         const result = await pool.request()
-            .input('InvoiceNo', invoiceNo)
+            .input('InvoiceNo', sql.VarChar, invoiceNo)
             .query(`
                 SELECT Paymode, Amount, SlipNo 
                 FROM tblPayModeDetail 
                 WHERE InvoiceNo = @InvoiceNo
             `);
-        res.json({ success: true, data: result.recordset });
+        res.json({ success: true, data: result.recordset || [] });
     } catch (err) {
         console.error("Error fetching paymodes:", err);
         res.status(500).json({ success: false, message: err.message });
@@ -104,20 +112,21 @@ router.get('/paymode/:invoiceNo', async (req, res) => {
 // GET /api/paymententry/paymodes-lov
 router.get('/paymodes-lov', async (req, res) => {
     try {
-        const pool = req.pool;
+        const pool = await getPool(req);
         const result = await pool.request()
             .query(`
                 SELECT Paymode, Description 
                 FROM tblPayModeMaster 
                 ORDER BY Paymode ASC
             `);
-        res.json({ success: true, data: result.recordset });
+        res.json({ success: true, data: result.recordset || [] });
     } catch (err) {
         // Fallback to DISTINCT from tblPayModeDetail if master table not present
         try {
-            const fallback = await req.pool.request()
+            const pool = await getPool(req);
+            const fallback = await pool.request()
                 .query(`SELECT DISTINCT PayMode as Paymode FROM tblPayModeDetail WHERE PayMode IS NOT NULL AND PayMode <> '' ORDER BY PayMode ASC`);
-            res.json({ success: true, data: fallback.recordset });
+            res.json({ success: true, data: fallback.recordset || [] });
         } catch (fErr) {
             console.error("Error fetching paymodes LOV:", fErr);
             res.status(500).json({ success: false, message: fErr.message });
@@ -128,10 +137,10 @@ router.get('/paymodes-lov', async (req, res) => {
 // GET /api/paymententry/invoice/:invoiceNo
 router.get('/invoice/:invoiceNo', async (req, res) => {
     try {
-        const invoiceNo = req.params.invoiceNo;
-        const pool = req.pool;
+        const invoiceNo = (req.params.invoiceNo || '').trim();
+        const pool = await getPool(req);
         const result = await pool.request()
-            .input('InvoiceNo', invoiceNo)
+            .input('InvoiceNo', sql.VarChar, invoiceNo)
             .query(`
                 SELECT 
                     h.InvoiceNo, 
@@ -152,10 +161,10 @@ router.get('/invoice/:invoiceNo', async (req, res) => {
                         ).value('.', 'NVARCHAR(MAX)'), 1, 3, '')
                     ) as InvoicePaymode
                 FROM tblSalesHeader h
-                WHERE h.InvoiceNo LIKE '%' + @InvoiceNo + '%'
+                WHERE h.InvoiceNo = @InvoiceNo OR h.InvoiceNo LIKE @InvoiceNo + '%'
                 ORDER BY h.InvoiceDate DESC
             `);
-        res.json({ success: true, data: result.recordset });
+        res.json({ success: true, data: result.recordset || [] });
     } catch (err) {
         console.error("Error fetching single invoice:", err);
         res.status(500).json({ success: false, message: err.message });
@@ -165,8 +174,8 @@ router.get('/invoice/:invoiceNo', async (req, res) => {
 // POST /api/paymententry/save
 router.post('/save', async (req, res) => {
     const { type, invoiceNo, paymodes, actualPaidAmount, gst, userId } = req.body;
-    const pool = req.pool;
-    const transaction = new sql.Transaction(pool);
+    let pool;
+    let transaction;
     let isTransactionActive = false;
 
     try {
@@ -174,16 +183,33 @@ router.post('/save', async (req, res) => {
             return res.status(400).json({ success: false, message: "InvoiceNo is required" });
         }
 
+        pool = await getPool(req);
+        transaction = new sql.Transaction(pool);
+
         await transaction.begin();
         isTransactionActive = true;
 
         const sysUser = userId || 'ADMIN';
-        const curDate = new Date();
 
         if (type === 'Invoice') {
-            // 0. Fetch existing Invoice Date and LocationCode if available
+            // Check existing columns of tblSalesHeader to safely update BalanceAmt and avoid missing column errors
+            let hasBalanceAmt = false;
             let invDate = new Date();
             let locCode = 'HQ';
+
+            try {
+                const colCheck = await new sql.Request(transaction).query(`
+                    SELECT COLUMN_NAME 
+                    FROM INFORMATION_SCHEMA.COLUMNS 
+                    WHERE TABLE_NAME = 'tblSalesHeader' AND COLUMN_NAME = 'BalanceAmt'
+                `);
+                if (colCheck.recordset && colCheck.recordset.length > 0) {
+                    hasBalanceAmt = true;
+                }
+            } catch (cErr) {
+                console.warn("Could not check tblSalesHeader columns:", cErr.message);
+            }
+
             try {
                 const headerCheck = await new sql.Request(transaction)
                     .input('InvoiceNo', sql.VarChar, String(invoiceNo).trim())
@@ -202,17 +228,31 @@ router.post('/save', async (req, res) => {
 
             // 1. Update tblSalesHeader Modify details & amounts
             const updateHeaderReq = new sql.Request(transaction);
-            await updateHeaderReq
-                .input('InvoiceNo', sql.VarChar, String(invoiceNo).trim())
-                .input('UserId', sql.VarChar, sysUser)
-                .input('PaidAmt', sql.Numeric(18, 4), parseFloat(actualPaidAmount) || 0)
-                .input('GST', sql.Numeric(18, 4), parseFloat(gst) || 0)
-                .query(`
+            updateHeaderReq.input('InvoiceNo', sql.VarChar, String(invoiceNo).trim());
+            updateHeaderReq.input('UserId', sql.VarChar, sysUser);
+            updateHeaderReq.input('PaidAmt', sql.Numeric(18, 4), parseFloat(actualPaidAmount) || 0);
+            updateHeaderReq.input('GST', sql.Numeric(18, 4), parseFloat(gst) || 0);
+
+            if (hasBalanceAmt) {
+                await updateHeaderReq.query(`
                     UPDATE tblSalesHeader 
-                    SET ModifyUser = @UserId, ModifyDate = GETDATE(),
-                        PaidAmt = @PaidAmt, GST = @GST 
+                    SET ModifyUser = @UserId, 
+                        ModifyDate = GETDATE(),
+                        PaidAmt = @PaidAmt, 
+                        GST = @GST,
+                        BalanceAmt = ISNULL(NetTotal, 0) - @PaidAmt
                     WHERE InvoiceNo = @InvoiceNo
                 `);
+            } else {
+                await updateHeaderReq.query(`
+                    UPDATE tblSalesHeader 
+                    SET ModifyUser = @UserId, 
+                        ModifyDate = GETDATE(),
+                        PaidAmt = @PaidAmt, 
+                        GST = @GST 
+                    WHERE InvoiceNo = @InvoiceNo
+                `);
+            }
 
             // 2. Remove old paymodes to replace with updated paymodes
             const deletePmReq = new sql.Request(transaction);
@@ -264,7 +304,7 @@ router.post('/save', async (req, res) => {
         res.json({ success: true, message: "Payment saved successfully" });
     } catch (err) {
         console.error("Error saving payment:", err);
-        if (isTransactionActive) {
+        if (isTransactionActive && transaction) {
             try {
                 await transaction.rollback();
             } catch (rbErr) {
@@ -278,7 +318,7 @@ router.post('/save', async (req, res) => {
 // POST /api/paymententry/cashdrawer
 router.post('/cashdrawer', async (req, res) => {
     try {
-        const pool = req.pool;
+        const pool = await getPool(req);
         const { terminalId, terminalCode, userId } = req.body || {};
         try {
             await pool.request()

@@ -56,8 +56,8 @@ export default function PurchaseScreen() {
     InvoiceDate: new Date().toISOString().split('T')[0],
     SupplierCode: '',
     SupplierName: '',
-    Currency: 'SGD',
-    Rate: '1',
+    Currency: '',
+    Rate: '',
     PayableGold: false,
     PayableCash: true,
     GST: false,
@@ -176,7 +176,7 @@ export default function PurchaseScreen() {
     // Replace all alert popups with Toast message
     const toastType: 'success' | 'error' | 'info' =
       title.toLowerCase().includes('error') ? 'error' :
-      title.toLowerCase().includes('success') ? 'success' : 'info';
+        title.toLowerCase().includes('success') ? 'success' : 'info';
     showToast(message, toastType);
     if (buttons && buttons[0]?.onPress) {
       buttons[0].onPress();
@@ -659,8 +659,8 @@ export default function PurchaseScreen() {
       const json = await res.json();
       if (json.success) {
         openLov('Select Currency', json.data, ['CurrencyCode', 'CurrencyName', 'CurrencyRate'], (item) => {
-          updateHeader('Currency', item.CurrencyCode);
-          updateHeader('Rate', (item.CurrencyRate || 1).toString());
+          updateHeader('Currency', item.CurrencyCode || '');
+          updateHeader('Rate', (item.CurrencyRate ?? '').toString());
         });
       }
     } catch (e) {
@@ -880,15 +880,39 @@ export default function PurchaseScreen() {
     }
 
     const itemToDelete = details[selectedIndex];
+    const invCode = itemToDelete?.InventoryCode?.trim();
+    const billNo = headerState.InvoiceNo?.trim();
+
     showAlert(
       "Confirm Deletion",
-      `Do you want to delete item no. ${itemToDelete?.InventoryCode || selectedIndex + 1}?`,
+      `Do you want to delete item no. ${invCode || selectedIndex + 1}?`,
       [
         { text: "No", style: "cancel" },
         {
           text: "Yes",
           style: "destructive",
-          onPress: () => {
+          onPress: async () => {
+            // If item has an inventory code and bill number already persisted, delete on server first
+            if (billNo && invCode) {
+              try {
+                setLoading(true);
+                const res = await fetch(`${API_URL}/purchase/${encodeURIComponent(billNo)}/item/${encodeURIComponent(invCode)}`, {
+                  method: 'DELETE'
+                });
+                const json = await res.json();
+                setLoading(false);
+
+                if (!json.success) {
+                  showAlert("Deletion Error", json.message || "Failed to delete item from database");
+                  return;
+                }
+              } catch (err) {
+                setLoading(false);
+                showAlert("Server Error", "Could not connect to server to delete item");
+                return;
+              }
+            }
+
             let newDetails = [...details];
             newDetails.splice(selectedIndex, 1);
             setDetails(newDetails);
@@ -1007,11 +1031,12 @@ export default function PurchaseScreen() {
         showToast("Purchase saved successfully!", "success");
         clearAll();
       } else {
-        showToast(json.message || "Error saving purchase", "error");
+        const errorDetail = json.error ? ` - ${json.error}` : '';
+        showToast((json.message || "Error saving purchase") + errorDetail, "error");
       }
-    } catch (e) {
+    } catch (e: any) {
       setLoading(false);
-      showToast("Error saving purchase", "error");
+      showToast(e.message || "Error saving purchase", "error");
     }
   };
 
@@ -1118,6 +1143,31 @@ export default function PurchaseScreen() {
   };
 
   const isFormLocked = headerState.BillClose === 'Y' || headerState.TranType === 'DP';
+
+  // Keyboard shortcut handler (VB.NET frmPurchase_KeyDown: F6 Clear, F7 BillClose, F10 Auto/Manual)
+  useEffect(() => {
+    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      const handleKeyDown = (e: KeyboardEvent) => {
+        if (e.key === 'F6') {
+          e.preventDefault();
+          clearAll();
+        } else if (e.key === 'F7') {
+          e.preventDefault();
+          if (!isFormLocked) handleBillClose();
+        } else if (e.key === 'F10') {
+          e.preventDefault();
+          setIsAutoManual(prev => {
+            const next = !prev;
+            showToast(next ? "Switched to AUTO mode" : "Switched to MANUAL mode", "info");
+            return next;
+          });
+        }
+      };
+
+      window.addEventListener('keydown', handleKeyDown);
+      return () => window.removeEventListener('keydown', handleKeyDown);
+    }
+  }, [isFormLocked, headerState.JobSheetNo, headerState.TotalWeight24K, details]);
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: '#FBF9F5' }}>
@@ -1456,11 +1506,9 @@ export default function PurchaseScreen() {
         </ScrollView>
 
         {/* MIDDLE SECTION: LINE DETAILS GRID */}
-        <ScrollView horizontal style={{ marginBottom: 14 }} contentContainerStyle={{ flexGrow: 1 }}>
-          <View style={{ width: '100%', minWidth: 1400 }}>
-            <View style={styles.goldCard}>
-              <View style={[styles.cardHeaderBanner, { justifyContent: 'space-between' }]}>
-                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+        <View style={[styles.goldCard, { marginBottom: 14 }]}>
+          <View style={[styles.cardHeaderBanner, { justifyContent: 'space-between' }]}>
+            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                   <View style={styles.headerIconBadge}>
                     <Ionicons name="list" size={15} color="#B48218" />
                   </View>
@@ -1501,8 +1549,10 @@ export default function PurchaseScreen() {
                 </View>
               </View>
 
-              {/* Table Header */}
-              <View style={styles.tableHeader}>
+              <ScrollView horizontal contentContainerStyle={{ width: '100%' }}>
+                <View style={{ width: '100%', minWidth: 1400 }}>
+                  {/* Table Header */}
+                  <View style={styles.tableHeader}>
                 <ThemedText style={[styles.tableHeaderText, { width: 130, textAlign: 'center' }]}>ItemCode</ThemedText>
                 <ThemedText style={[styles.tableHeaderText, { width: 70, textAlign: 'center' }]}>Class</ThemedText>
                 <ThemedText style={[styles.tableHeaderText, { width: 190, textAlign: 'center' }]}>Description</ThemedText>
@@ -1585,8 +1635,8 @@ export default function PurchaseScreen() {
                 </ThemedText>
               </View>
             </View>
-          </View>
-        </ScrollView>
+          </ScrollView>
+        </View>
       </ScrollView>
 
       {/* ================= DETAIL MODAL ================= */}

@@ -126,6 +126,11 @@ export default function TransferOutScreen() {
   const handleScanInventory = async () => {
     if (!inventoryCode.trim()) return;
 
+    if (!toLocation || !toLocation.trim()) {
+      showToast('Select the ToLocation Code', 'error');
+      return;
+    }
+
     if (gridData.some((item) => item.InventoryCode.trim().toLowerCase() === inventoryCode.trim().toLowerCase())) {
       showToast('Item already in transfer list', 'error');
       setInventoryCode('');
@@ -138,16 +143,25 @@ export default function TransferOutScreen() {
       const res = await fetch(`${API_URL}/inventory/${encodeURIComponent(inventoryCode.trim())}`);
       const data = await res.json();
 
-      if (data.success && data.data) {
-        setScannedItem(data.data);
-        showToast('Item scanned: ' + (data.data.Description || data.data.InventoryCode), 'success');
+      if (res.ok && data.success && data.data) {
+        const item = data.data;
+        // In frmTransferOut.vb: If msClsSalesType <> "P" Then btnAdd_Click (auto-add to grid)
+        if (item.SalesType !== 'P') {
+          setGridData((prev) => [...prev, item]);
+          setInventoryCode('');
+          setScannedItem(null);
+          showToast('Item added: ' + (item.Description || item.InventoryCode), 'success');
+        } else {
+          setScannedItem(item);
+          showToast('Item scanned: ' + (item.Description || item.InventoryCode), 'success');
+        }
       } else {
         showToast(data.message || 'Inventory item not found or out of stock', 'error');
         setInventoryCode('');
         setScannedItem(null);
       }
     } catch (err: any) {
-      showToast('Network error scanning inventory item', 'error');
+      showToast('Error fetching inventory item', 'error');
     } finally {
       setLoading(false);
     }

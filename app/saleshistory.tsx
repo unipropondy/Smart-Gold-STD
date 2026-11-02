@@ -1,13 +1,14 @@
+/** Developer: durairaj */
 import { ThemedText } from '@/components/themed-text';
 import { API_BASE_URL } from '@/constants/api';
 import { Ionicons } from '@expo/vector-icons';
-import { Stack, useRouter } from 'expo-router';
-import React, { useEffect, useState } from 'react';
+import { Stack, useFocusEffect, useRouter } from 'expo-router';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   FlatList,
   Modal,
+  Platform,
   ScrollView,
   StyleSheet,
   TextInput,
@@ -322,7 +323,7 @@ export default function SalesHistoryScreen() {
   };
 
   // Clear / New
-  const handleClear = () => {
+  const handleClear = useCallback(() => {
     setInvoiceNo('');
     setTodayDate();
     setLocationCode('HQ');
@@ -337,7 +338,33 @@ export default function SalesHistoryScreen() {
     setDetails([]);
     setPayments([]);
     fetchNextInvoiceNo();
-  };
+  }, []);
+
+  // Keyboard Shortcuts (F6 -> Clear, Escape -> Close / Back) matching frmSalesHistory.vb
+  useFocusEffect(
+    useCallback(() => {
+      if (Platform.OS !== 'web') return;
+
+      const handleKeyDown = (e: any) => {
+        if (e.key === 'F6') {
+          e.preventDefault();
+          handleClear();
+        } else if (e.key === 'Escape') {
+          e.preventDefault();
+          if (lovType !== null) {
+            setLovType(null);
+          } else {
+            router.back();
+          }
+        }
+      };
+
+      window.addEventListener('keydown', handleKeyDown);
+      return () => {
+        window.removeEventListener('keydown', handleKeyDown);
+      };
+    }, [handleClear, lovType, router])
+  );
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>

@@ -1,8 +1,9 @@
+/** Developer: durairaj */
 import { ThemedText } from '@/components/themed-text';
 import { API_BASE_URL } from '@/constants/api';
 import { Ionicons } from '@expo/vector-icons';
-import { Stack, useRouter } from 'expo-router';
-import React, { useEffect, useState } from 'react';
+import { Stack, useFocusEffect, useRouter } from 'expo-router';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
@@ -47,6 +48,32 @@ export default function PayOutScreen() {
       setToast(null);
     }, 3000);
   };
+
+  // Keyboard Shortcuts: Enter to Next, F7 to Save, F6 to Clear/New, Escape to Back
+  useFocusEffect(
+    useCallback(() => {
+      if (Platform.OS === 'web') {
+        const handleKeyDown = (e: KeyboardEvent) => {
+          if (e.key === 'F7') {
+            e.preventDefault();
+            handleSave();
+          } else if (e.key === 'F6') {
+            e.preventDefault();
+            handleClear();
+          } else if (e.key === 'Escape') {
+            e.preventDefault();
+            if (lovVisible) {
+              setLovVisible(false);
+            } else {
+              router.back();
+            }
+          }
+        };
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+      }
+    }, [payoutCode, payoutDescription, amount, remarks, codeDescription, lovVisible])
+  );
 
   // Fetch next payout sequence number
   const fetchNextCode = async () => {

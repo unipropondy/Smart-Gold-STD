@@ -51,7 +51,9 @@ export default function RepairPaymentScreen() {
   // History
   const [historyList, setHistoryList] = useState<any[]>([]);
 
-  // LOV State
+  // RePrint Modal State
+  const [isReprintModalVisible, setIsReprintModalVisible] = useState(false);
+  const [reprintRepairNo, setReprintRepairNo] = useState('');
   const [isRepairModalVisible, setIsRepairModalVisible] = useState(false);
   const [repairList, setRepairList] = useState<any[]>([]);
   const [repairSearchQuery, setRepairSearchQuery] = useState('');
@@ -112,6 +114,30 @@ export default function RepairPaymentScreen() {
     setHistoryList([]);
   };
 
+  const handleReprint = async () => {
+    const targetNo = (reprintRepairNo || repairNo || '').trim();
+    if (!targetNo) {
+      showToast('Please enter Repair No to reprint', 'error');
+      return;
+    }
+    setLoading(true);
+    try {
+      const res = await fetch(`${API_URL}/reprint/${encodeURIComponent(targetNo)}`);
+      const json = await res.json();
+      if (json.success) {
+        showToast(`Repair voucher for ${targetNo} found. Printing receipt...`, 'success');
+        setIsReprintModalVisible(false);
+        setReprintRepairNo('');
+      } else {
+        showToast(json.message || 'Repair docket not found for reprinting', 'error');
+      }
+    } catch (err) {
+      showToast('Error loading receipt', 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleOpenRepairLookup = async () => {
     setLoading(true);
     try {
@@ -131,9 +157,12 @@ export default function RepairPaymentScreen() {
   };
 
   const handleSelectRepair = (rep: any) => {
-    setRepairNo(rep.RepairNo);
+    const selectedNo = (rep.RepairNo || '').trim();
+    setRepairNo(selectedNo);
     setIsRepairModalVisible(false);
-    fetchBalance(rep.RepairNo);
+    if (selectedNo) {
+      fetchBalance(selectedNo);
+    }
   };
 
   const handleClear = () => {
@@ -180,12 +209,20 @@ export default function RepairPaymentScreen() {
   const handleSave = async () => {
     const currentState = latestState.current;
     if (!currentState.repairNo.trim()) {
-      showToast('Please select or enter a Repair No.', 'error');
+      showToast('Please enter OrderNo.', 'error');
       return;
     }
     const tot = parseFloat(currentState.amountPaid) || 0;
-    if (tot <= 0) {
-      showToast('Pay amount must be greater than zero.', 'error');
+    if (tot === 0) {
+      showToast('Please enter pay amount.', 'error');
+      return;
+    }
+    if (isNaN(tot)) {
+      showToast('Please enter valid Pay Amount.', 'error');
+      return;
+    }
+    if (tot < 0) {
+      showToast('Pay amount should be greater than zero.', 'error');
       return;
     }
 
@@ -194,33 +231,34 @@ export default function RepairPaymentScreen() {
       // 1. Fetch next payment no
       const noRes = await fetch(`${API_URL}/next-no`);
       const noJson = await noRes.json();
-      const repairPaymentNo = noJson.success ? noJson.paymentNo : `RP-${Date.now()}`;
+      const repairPaymentNo = noJson.success ? noJson.paymentNo : `RP${Date.now()}`;
 
-      // 2. Save payment
+      // 2. Prepare payload for paying mode tender
       const payload = {
         repairNo: currentState.repairNo.trim(),
         repairPaymentNo,
         amountPaid: currentState.amountPaid,
         remarks: remarks.trim() || 'REPAIR PAYMENT',
-        paymodeDetails: [{ payMode: 'CASH', amount: currentState.amountPaid }],
+        locationCode: 'HQ',
+        createUser: 'ADMIN'
       };
 
-      const res = await fetch(`${API_URL}/pay`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
+      // Navigate to payingmode screen to allocate payment across cash/card/transfer
+      router.push({
+        pathname: '/payingmode',
+        params: {
+          totalNet: currentState.amountPaid,
+          customerCode: customerCode,
+          customerType: customerType || 'NORMAL',
+          apiEndpoint: `${API_URL}/pay`,
+          payload: JSON.stringify(payload),
+          returnPath: '/repairpayment',
+        },
       });
-      const json = await res.json();
-      if (json.success) {
-        showToast('Repair Payment Saved Successfully', 'success');
-        setAmountPaid('0.00');
-        setRemarks('');
-        fetchBalance(currentState.repairNo);
-      } else {
-        showToast(json.message || 'Failed to save payment', 'error');
-      }
-    } catch (err) {
-      showToast('Network error while saving payment', 'error');
+
+      setAmountPaid('0.00');
+    } catch (err: any) {
+      showToast(err.message || 'Error opening payment mode', 'error');
     } finally {
       setSaving(false);
     }
@@ -256,11 +294,14 @@ export default function RepairPaymentScreen() {
 
           <TouchableOpacity
             style={[styles.actionBtn, styles.reprintBtn]}
-            onPress={() => showToast('Printing repair receipt...', 'success')}
+            onPress={() => {
+              setReprintRepairNo(repairNo);
+              setIsReprintModalVisible(true);
+            }}
             activeOpacity={0.8}
           >
             <Ionicons name="print-outline" size={14} color="#5C4A28" />
-            <ThemedText style={styles.clearBtnText}>Print</ThemedText>
+            <ThemedText style={styles.clearBtnText}>RePrint</ThemedText>
           </TouchableOpacity>
 
           <TouchableOpacity
@@ -325,7 +366,7 @@ export default function RepairPaymentScreen() {
                       style={[styles.formInput, styles.inputAttached, { flex: 1 }]}
                       value={repairNo}
                       onChangeText={setRepairNo}
-                      onBlur={() => repairNo && fetchBalance(repairNo)}
+                      onSubmitEditing={() => repairNo.trim() && fetchBalance(repairNo.trim())}
                       placeholder="Search/Enter Repair No..."
                       placeholderTextColor="#9E8D77"
                     />
@@ -615,17 +656,20 @@ export default function RepairPaymentScreen() {
             </View>
 
             <View style={styles.lovHeadRow}>
-              <ThemedText style={[styles.lovHeadText, { flex: 1.6 }]}>Repair No</ThemedText>
-              <ThemedText style={[styles.lovHeadText, { flex: 1.4 }]}>Customer Code</ThemedText>
-              <ThemedText style={[styles.lovHeadText, { flex: 1.2 }]}>Repair Date</ThemedText>
-              <ThemedText style={[styles.lovHeadText, { flex: 1.4, textAlign: 'right' }]}>Est Cost</ThemedText>
+              <ThemedText style={[styles.lovHeadText, { flex: 1.4 }]}>Repair No</ThemedText>
+              <ThemedText style={[styles.lovHeadText, { flex: 1.1 }]}>Date</ThemedText>
+              <ThemedText style={[styles.lovHeadText, { flex: 1.3 }]}>Customer</ThemedText>
+              <ThemedText style={[styles.lovHeadText, { flex: 1.0, textAlign: 'right' }]}>Est Cost</ThemedText>
+              <ThemedText style={[styles.lovHeadText, { flex: 1.0, textAlign: 'right' }]}>Advance</ThemedText>
+              <ThemedText style={[styles.lovHeadText, { flex: 1.0, textAlign: 'right' }]}>Balance</ThemedText>
             </View>
 
             <FlatList
               data={repairList.filter(
                 (o) =>
                   (o.RepairNo || '').toLowerCase().includes(repairSearchQuery.toLowerCase()) ||
-                  (o.CustomerCode || '').toLowerCase().includes(repairSearchQuery.toLowerCase())
+                  (o.CustomerCode || '').toLowerCase().includes(repairSearchQuery.toLowerCase()) ||
+                  (o.CustomerName || '').toLowerCase().includes(repairSearchQuery.toLowerCase())
               )}
               keyExtractor={(item, index) => item.RepairNo || index.toString()}
               initialNumToRender={50}
@@ -642,19 +686,79 @@ export default function RepairPaymentScreen() {
                   onPress={() => handleSelectRepair(item)}
                   activeOpacity={0.7}
                 >
-                  <ThemedText style={[styles.lovItemText, styles.codeCell, { flex: 1.6 }]}>
+                  <ThemedText style={[styles.lovItemText, styles.codeCell, { flex: 1.4 }]}>
                     {item.RepairNo}
                   </ThemedText>
-                  <ThemedText style={[styles.lovItemText, { flex: 1.4 }]}>{item.CustomerCode}</ThemedText>
-                  <ThemedText style={[styles.lovItemText, { flex: 1.2 }]}>
+                  <ThemedText style={[styles.lovItemText, { flex: 1.1 }]}>
                     {item.RepairDate ? new Date(item.RepairDate).toLocaleDateString() : ''}
                   </ThemedText>
-                  <ThemedText style={[styles.lovItemText, styles.amountCell, { flex: 1.4, textAlign: 'right' }]}>
+                  <ThemedText style={[styles.lovItemText, { flex: 1.3 }]} numberOfLines={1}>
+                    {item.CustomerName || item.CustomerCode || '-'}
+                  </ThemedText>
+                  <ThemedText style={[styles.lovItemText, styles.amountCell, { flex: 1.0, textAlign: 'right' }]}>
                     {parseFloat(item.TotalCostEstimated || 0).toFixed(2)}
+                  </ThemedText>
+                  <ThemedText style={[styles.lovItemText, styles.amountCell, { flex: 1.0, textAlign: 'right' }]}>
+                    {parseFloat(item.AdvancePaid || 0).toFixed(2)}
+                  </ThemedText>
+                  <ThemedText style={[styles.lovItemText, styles.amountCell, { flex: 1.0, textAlign: 'right', color: '#B48218' }]}>
+                    {parseFloat(item.BalanceAmount != null ? item.BalanceAmount : (item.TotalCostEstimated || 0) - (item.AdvancePaid || 0)).toFixed(2)}
                   </ThemedText>
                 </TouchableOpacity>
               )}
             />
+          </View>
+        </View>
+      </Modal>
+
+      {/* REPRINT MODAL */}
+      <Modal visible={isReprintModalVisible} transparent animationType="fade">
+        <View style={styles.modalOverlay}>
+          <View style={[styles.lovModalCard, { maxHeight: 260 }]}>
+            <View style={styles.modalHeaderBanner}>
+              <View style={styles.headerTitleContainer}>
+                <View style={styles.headerIconBadgeSmall}>
+                  <Ionicons name="print-outline" size={13} color="#B48218" />
+                </View>
+                <ThemedText style={styles.modalHeaderTitle}>RePrint Repair Receipt</ThemedText>
+              </View>
+              <TouchableOpacity
+                onPress={() => setIsReprintModalVisible(false)}
+                activeOpacity={0.7}
+                style={styles.closeModalBtn}
+              >
+                <Ionicons name="close" size={18} color="#3B2D17" />
+              </TouchableOpacity>
+            </View>
+
+            <View style={{ padding: 16 }}>
+              <ThemedText style={{ fontSize: 13, color: '#4A3B2C', marginBottom: 8, fontWeight: '600' }}>
+                Enter Repair Docket Number:
+              </ThemedText>
+              <TextInput
+                style={[styles.formInput, { height: 40, marginBottom: 16 }]}
+                value={reprintRepairNo}
+                onChangeText={setReprintRepairNo}
+                placeholder="e.g. RP-HQ00000001"
+                placeholderTextColor="#9E8D77"
+                autoFocus
+              />
+              <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 10 }}>
+                <TouchableOpacity
+                  style={[styles.actionBtn, styles.clearBtn, { paddingHorizontal: 16, height: 36 }]}
+                  onPress={() => setIsReprintModalVisible(false)}
+                >
+                  <ThemedText style={styles.clearBtnText}>Cancel</ThemedText>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.actionBtn, styles.saveBtn, { paddingHorizontal: 16, height: 36 }]}
+                  onPress={handleReprint}
+                >
+                  <Ionicons name="print-outline" size={15} color="#9E6D08" />
+                  <ThemedText style={styles.saveBtnText}>Print</ThemedText>
+                </TouchableOpacity>
+              </View>
+            </View>
           </View>
         </View>
       </Modal>

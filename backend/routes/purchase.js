@@ -75,150 +75,334 @@ router.post("/", async (req, res) => {
 
     const sysUser = userId || "SYSTEM";
     const curDate = new Date();
+    const purchaseBillNo = header.PurchaseBillNo.trim();
 
     await transaction.begin();
 
-    const request = new sql.Request(transaction);
+    // Clean up any existing records for this PurchaseBillNo AND for the items being saved
+    const invCodesToDelete = details
+      .map(d => (d.InventoryCode || d.ItemCode || '').trim())
+      .filter(c => c.length > 0);
 
-    // Delete existing lines in tblPurchase and tblInventory for this PurchaseBillNo to replace them
-    await request
-      .input("PurchaseBillNo", sql.VarChar, header.PurchaseBillNo)
-      .query(`
-        DELETE FROM tblPurchase WHERE PurchaseBillNo = @PurchaseBillNo;
-        DELETE FROM tblInventory WHERE PurchaseBillNo = @PurchaseBillNo;
+    const deleteReq = new sql.Request(transaction);
+    deleteReq.input("PurchaseBillNo", sql.VarChar, purchaseBillNo);
+
+    if (invCodesToDelete.length > 0) {
+      invCodesToDelete.forEach((code, idx) => {
+        deleteReq.input(`c_${idx}`, sql.VarChar, code);
+      });
+      const codeParamList = invCodesToDelete.map((_, idx) => `@c_${idx}`).join(', ');
+      await deleteReq.query(`
+        DELETE FROM tblInventoryAddlDescription 
+        WHERE InventoryCode IN (SELECT InventoryCode FROM tblPurchase WHERE PurchaseBillNo = @PurchaseBillNo)
+           OR InventoryCode IN (${codeParamList});
+
+        DELETE FROM tblInventoryStock 
+        WHERE InventoryCode IN (SELECT InventoryCode FROM tblPurchase WHERE PurchaseBillNo = @PurchaseBillNo)
+           OR InventoryCode IN (${codeParamList});
+
+        DELETE FROM tblInventory 
+        WHERE PurchaseBillNo = @PurchaseBillNo
+           OR InventoryCode IN (${codeParamList});
+
+        DELETE FROM tblPurchase 
+        WHERE PurchaseBillNo = @PurchaseBillNo
+           OR InventoryCode IN (${codeParamList});
       `);
+    } else {
+      await deleteReq.query(`
+        DELETE FROM tblInventoryAddlDescription WHERE InventoryCode IN (SELECT InventoryCode FROM tblPurchase WHERE PurchaseBillNo = @PurchaseBillNo);
+        DELETE FROM tblInventoryStock WHERE InventoryCode IN (SELECT InventoryCode FROM tblPurchase WHERE PurchaseBillNo = @PurchaseBillNo);
+        DELETE FROM tblInventory WHERE PurchaseBillNo = @PurchaseBillNo;
+        DELETE FROM tblPurchase WHERE PurchaseBillNo = @PurchaseBillNo;
+      `);
+    }
 
-    // Insert into tblPurchase and tblInventory for each detail line
+    // Fetch existing columns for tblPurchase, tblInventory, tblInventoryStock
+    let purchaseCols = [];
+    let inventoryCols = [];
+    let stockCols = [];
+    let addlCols = [];
+    try {
+      const pRes = await new sql.Request(transaction).query(`SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'tblPurchase'`);
+      purchaseCols = pRes.recordset.map(c => c.COLUMN_NAME.toLowerCase());
+      const iRes = await new sql.Request(transaction).query(`SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'tblInventory'`);
+      inventoryCols = iRes.recordset.map(c => c.COLUMN_NAME.toLowerCase());
+      const sRes = await new sql.Request(transaction).query(`SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'tblInventoryStock'`);
+      stockCols = sRes.recordset.map(c => c.COLUMN_NAME.toLowerCase());
+      const aRes = await new sql.Request(transaction).query(`SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'tblInventoryAddlDescription'`);
+      addlCols = aRes.recordset.map(c => c.COLUMN_NAME.toLowerCase());
+    } catch (e) {}
+
+    const hasPCol = (c) => purchaseCols.length === 0 || purchaseCols.includes(c.toLowerCase());
+    const hasICol = (c) => inventoryCols.length === 0 || inventoryCols.includes(c.toLowerCase());
+    const hasSCol = (c) => stockCols.length === 0 || stockCols.includes(c.toLowerCase());
+    const hasACol = (c) => addlCols.length === 0 || addlCols.includes(c.toLowerCase());
+
+    // Insert into tblPurchase, tblInventory, tblInventoryStock, and tblInventoryAddlDescription for each detail line
     for (let i = 0; i < details.length; i++) {
       const d = details[i];
+      let invCode = d.InventoryCode ? d.InventoryCode.trim() : (d.ItemCode ? d.ItemCode.trim() : `${purchaseBillNo}-${i + 1}`);
+      const pcsVal = parseInt(d.PCS, 10) || 1;
+
+      // 1. Dynamic Insert into tblPurchase
       const insertReq = new sql.Request(transaction);
+      const pC = [];
+      const pV = [];
+      const addP = (col, type, val) => {
+        if (hasPCol(col)) {
+          pC.push(col);
+          pV.push(`@p_${col}`);
+          insertReq.input(`p_${col}`, type, val);
+        }
+      };
 
-      // We assume InventoryCode is unique or generated. If empty, generate one? 
-      // For now we assume frontend sends a generated or empty string which will be updated.
-      let invCode = d.InventoryCode || `${header.PurchaseBillNo}-${i}`;
+      addP("LocationCode", sql.VarChar, header.LocationCode || "HQ");
+      addP("JobSheetNo", sql.VarChar, header.JobSheetNo || "");
+      addP("DirectPurchaseNo", sql.VarChar, d.DirectPurchaseNo || "");
+      addP("PurchaseBillNo", sql.VarChar, purchaseBillNo);
+      addP("SupplierCode", sql.VarChar, header.SupplierCode || "");
+      addP("InventoryCode", sql.VarChar, invCode);
+      addP("Description", sql.VarChar, d.InventoryDescription || d.Description || "");
+      addP("DiamondDescription", sql.VarChar, d.DiamondDescription || "");
+      addP("StoneWeight", sql.Numeric(18, 3), parseFloat(d.StoneWeight) || 0);
+      addP("CostPerGram", sql.Numeric(18, 2), parseFloat(d.CostPerGram) || 0);
+      addP("Size", sql.Numeric(18, 2), parseFloat(d.Size) || 0);
+      addP("Weight", sql.Numeric(18, 3), parseFloat(d.Weight) || 0);
+      addP("MC", sql.Numeric(18, 2), parseFloat(d.PMCCost || d.PMC || d.MC) || 0);
+      addP("PCS", sql.Numeric(18, 0), pcsVal);
+      addP("GoldLoss", sql.Numeric(18, 3), parseFloat(d.GoldLoss) || 0);
+      addP("TotalCost", sql.Numeric(18, 2), parseFloat(d.TotalCost) || 0);
+      addP("CatalogueCode", sql.VarChar, d.CatalogueCode || "");
+      addP("CategoryCode", sql.VarChar, d.CategoryCode || "");
+      addP("ClassCode", sql.VarChar, d.ClassCode || "");
+      addP("TrayId", sql.VarChar, d.TrayId || "");
+      addP("PurchaseType", sql.VarChar, d.PurchaseType || "JP");
+      addP("Remarks", sql.VarChar, header.Remarks || "");
+      addP("JournalNo", sql.VarChar, d.JournalNo || "");
+      addP("CreateUser", sql.VarChar, sysUser);
+      addP("CreateDate", sql.SmallDateTime, curDate);
+      addP("ModifyUser", sql.VarChar, sysUser);
+      addP("ModifyDate", sql.SmallDateTime, curDate);
 
-      await insertReq
-        .input("LocationCode", sql.VarChar, header.LocationCode || "")
-        .input("JobSheetNo", sql.VarChar, header.JobSheetNo || "")
-        .input("DirectPurchaseNo", sql.VarChar, d.DirectPurchaseNo || "")
-        .input("PurchaseBillNo", sql.VarChar, header.PurchaseBillNo)
-        .input("SupplierCode", sql.VarChar, header.SupplierCode || "")
-        .input("InventoryCode", sql.VarChar, invCode)
-        .input("Description", sql.VarChar, d.Description || "")
-        .input("DiamondDescription", sql.VarChar, d.DiamondDescription || "")
-        .input("StoneWeight", sql.Numeric(18, 3), parseFloat(d.StoneWeight) || 0)
-        .input("CostPerGram", sql.Numeric(18, 2), parseFloat(d.CostPerGram) || 0)
-        .input("Size", sql.Numeric(18, 2), parseFloat(d.Size) || 0)
-        .input("Weight", sql.Numeric(18, 3), parseFloat(d.Weight) || 0)
-        .input("MC", sql.Numeric(18, 2), parseFloat(d.MC) || 0)
-        .input("PCS", sql.Numeric(18, 0), parseFloat(d.PCS) || 1)
-        .input("GoldLoss", sql.Numeric(18, 3), parseFloat(d.GoldLoss) || 0)
-        .input("TotalCost", sql.Numeric(18, 2), parseFloat(d.TotalCost) || 0)
-        .input("CatalogueCode", sql.VarChar, d.CatalogueCode || "")
-        .input("CategoryCode", sql.VarChar, d.CategoryCode || "")
-        .input("ClassCode", sql.VarChar, d.ClassCode || "")
-        .input("TrayId", sql.VarChar, d.TrayId || "")
-        .input("PurchaseType", sql.VarChar, d.PurchaseType || "")
-        .input("Remarks", sql.VarChar, header.Remarks || "")
-        .input("JournalNo", sql.VarChar, d.JournalNo || "")
-        .input("CreateUser", sql.VarChar, sysUser)
-        .input("CreateDate", sql.SmallDateTime, curDate)
-        .input("ModifyUser", sql.VarChar, sysUser)
-        .input("ModifyDate", sql.SmallDateTime, curDate)
-        .query(`
-          INSERT INTO tblPurchase (
-            LocationCode, JobSheetNo, DirectPurchaseNo, PurchaseBillNo, SupplierCode,
-            InventoryCode, Description, DiamondDescription, StoneWeight, CostPerGram,
-            Size, Weight, MC, PCS, GoldLoss, TotalCost, CatalogueCode, CategoryCode,
-            ClassCode, TrayId, PurchaseType, Remarks, JournalNo, CreateUser, CreateDate, ModifyUser, ModifyDate
-          ) VALUES (
-            @LocationCode, @JobSheetNo, @DirectPurchaseNo, @PurchaseBillNo, @SupplierCode,
-            @InventoryCode, @Description, @DiamondDescription, @StoneWeight, @CostPerGram,
-            @Size, @Weight, @MC, @PCS, @GoldLoss, @TotalCost, @CatalogueCode, @CategoryCode,
-            @ClassCode, @TrayId, @PurchaseType, @Remarks, @JournalNo, @CreateUser, @CreateDate, @ModifyUser, @ModifyDate
-          )
-        `);
+      await insertReq.query(`
+        INSERT INTO tblPurchase (${pC.join(', ')})
+        VALUES (${pV.join(', ')})
+      `);
 
-      // Also insert into tblInventory
+      // 2. Dynamic Insert into tblInventory
       const invReq = new sql.Request(transaction);
-      await invReq
-        .input("InventoryCode", sql.VarChar, invCode)
-        .input("Description", sql.VarChar, d.Description || "")
-        .input("DiamondDescription", sql.VarChar, d.DiamondDescription || "")
-        .input("Size", sql.Numeric(18, 2), parseFloat(d.Size) || 0)
-        .input("Weight", sql.Numeric(18, 3), parseFloat(d.Weight) || 0)
-        .input("StoneWeight", sql.Numeric(18, 3), parseFloat(d.StoneWeight) || 0)
-        .input("CostPerGram", sql.Numeric(18, 2), parseFloat(d.CostPerGram) || 0)
-        .input("PMC", sql.Numeric(18, 2), parseFloat(d.PMC) || 0)
-        .input("SMC", sql.Numeric(18, 2), parseFloat(d.SMC) || 0)
-        .input("GoldLoss", sql.Numeric(18, 3), parseFloat(d.GoldLoss) || 0)
-        .input("TotalCost", sql.Numeric(18, 2), parseFloat(d.TotalCost) || 0)
-        .input("JobSheetNo", sql.VarChar, header.JobSheetNo || "")
-        .input("PurchaseBillNo", sql.VarChar, header.PurchaseBillNo)
-        .input("PurchaseDate", sql.SmallDateTime, curDate)
-        .input("SupplierCode", sql.VarChar, header.SupplierCode || "")
-        .input("SalesBillNo", sql.VarChar, "")
-        .input("SalesDate", sql.SmallDateTime, null)
-        .input("SalesCostPerGram", sql.Numeric(18, 2), 0)
-        .input("SalesMC", sql.Numeric(18, 2), 0)
-        .input("SalesAmount", sql.Numeric(18, 2), 0)
-        .input("CategoryCode", sql.VarChar, d.CategoryCode || "")
-        .input("ClassCode", sql.VarChar, d.ClassCode || "")
-        .input("CatalogueCode", sql.VarChar, d.CatalogueCode || "")
-        .input("TrayId", sql.VarChar, d.TrayId || "")
-        .input("PMCType", sql.VarChar, d.PMCType || "")
-        .input("SMCType", sql.VarChar, d.SMCType || "")
-        .input("OrderNo", sql.VarChar, d.OrderNo || "")
-        .input("Remarks", sql.VarChar, header.Remarks || "")
-        .input("CreateUser", sql.VarChar, sysUser)
-        .input("CreateDate", sql.SmallDateTime, curDate)
-        .input("ModifyUser", sql.VarChar, sysUser)
-        .input("ModifyDate", sql.SmallDateTime, curDate)
-        .input("LocationCode", sql.VarChar, header.LocationCode || "")
-        .input("SizeCode", sql.Numeric(18, 2), 0)
-        .input("SizeType", sql.VarChar, "")
-        .input("SalesPCS", sql.Bit, 0)
-        .query(`
-          INSERT INTO tblInventory (
-            InventoryCode, Description, DiamondDescription, Size, Weight, StoneWeight,
-            CostPerGram, PMC, SMC, GoldLoss, TotalCost, JobSheetNo, PurchaseBillNo,
-            PurchaseDate, SupplierCode, SalesBillNo, SalesDate, SalesCostPerGram, SalesMC,
-            SalesAmount, CategoryCode, ClassCode, CatalogueCode, TrayId, PMCType, SMCType,
-            OrderNo, Remarks, CreateUser, CreateDate, ModifyUser, ModifyDate, LocationCode,
-            SizeCode, SizeType, SalesPCS
-          ) VALUES (
-            @InventoryCode, @Description, @DiamondDescription, @Size, @Weight, @StoneWeight,
-            @CostPerGram, @PMC, @SMC, @GoldLoss, @TotalCost, @JobSheetNo, @PurchaseBillNo,
-            @PurchaseDate, @SupplierCode, @SalesBillNo, @SalesDate, @SalesCostPerGram, @SalesMC,
-            @SalesAmount, @CategoryCode, @ClassCode, @CatalogueCode, @TrayId, @PMCType, @SMCType,
-            @OrderNo, @Remarks, @CreateUser, @CreateDate, @ModifyUser, @ModifyDate, @LocationCode,
-            @SizeCode, @SizeType, @SalesPCS
-          )
+      const iC = [];
+      const iV = [];
+      const addI = (col, type, val) => {
+        if (hasICol(col)) {
+          iC.push(col);
+          iV.push(`@inv_${col}`);
+          invReq.input(`inv_${col}`, type, val);
+        }
+      };
+
+      addI("InventoryCode", sql.VarChar, invCode);
+      addI("Description", sql.VarChar, d.InventoryDescription || d.Description || "");
+      addI("DiamondDescription", sql.VarChar, d.DiamondDescription || "");
+      addI("Size", sql.Numeric(18, 2), parseFloat(d.Size) || 0);
+      addI("Weight", sql.Numeric(18, 3), parseFloat(d.Weight) || 0);
+      addI("StoneWeight", sql.Numeric(18, 3), parseFloat(d.StoneWeight) || 0);
+      addI("CostPerGram", sql.Numeric(18, 2), parseFloat(d.CostPerGram) || 0);
+      addI("PMC", sql.Numeric(18, 2), parseFloat(d.PMCCost || d.PMC) || 0);
+      addI("SMC", sql.Numeric(18, 2), parseFloat(d.SMCCost || d.SMC) || 0);
+      addI("GoldLoss", sql.Numeric(18, 3), parseFloat(d.GoldLoss) || 0);
+      addI("TotalCost", sql.Numeric(18, 2), parseFloat(d.TotalCost) || 0);
+      addI("JobSheetNo", sql.VarChar, header.JobSheetNo || "");
+      addI("PurchaseBillNo", sql.VarChar, purchaseBillNo);
+      addI("PurchaseDate", sql.SmallDateTime, curDate);
+      addI("SupplierCode", sql.VarChar, header.SupplierCode || "");
+      addI("SalesBillNo", sql.VarChar, "");
+      addI("SalesDate", sql.SmallDateTime, null);
+      addI("SalesCostPerGram", sql.Numeric(18, 2), 0);
+      addI("SalesMC", sql.Numeric(18, 2), 0);
+      addI("SalesAmount", sql.Numeric(18, 2), 0);
+      addI("CategoryCode", sql.VarChar, d.CategoryCode || "");
+      addI("ClassCode", sql.VarChar, d.ClassCode || "");
+      addI("CatalogueCode", sql.VarChar, d.CatalogueCode || "");
+      addI("TrayId", sql.VarChar, d.TrayId || "");
+      addI("PMCType", sql.VarChar, d.PMCType || (d.PurchaseMCType === 'PerPCS' ? 'P' : 'W'));
+      addI("SMCType", sql.VarChar, d.SMCType || (d.SalesMCType === 'PerPCS' ? 'P' : 'W'));
+      addI("OrderNo", sql.VarChar, d.OrderNo || "");
+      addI("Remarks", sql.VarChar, header.Remarks || "");
+      addI("CreateUser", sql.VarChar, sysUser);
+      addI("CreateDate", sql.SmallDateTime, curDate);
+      addI("ModifyUser", sql.VarChar, sysUser);
+      addI("ModifyDate", sql.SmallDateTime, curDate);
+      addI("LocationCode", sql.VarChar, header.LocationCode || "HQ");
+      addI("SizeCode", sql.Numeric(18, 2), parseFloat(d.Size) || 0);
+      addI("SizeType", sql.VarChar, d.SizeType || "");
+      addI("SalesPCS", sql.Bit, d.SalesPCS ? 1 : 0);
+
+      await invReq.query(`
+        INSERT INTO tblInventory (${iC.join(', ')})
+        VALUES (${iV.join(', ')})
+      `);
+
+      // 3. Dynamic Insert into tblInventoryStock
+      const stockReq = new sql.Request(transaction);
+      const sC = [];
+      const sV = [];
+      const addS = (col, type, val) => {
+        if (hasSCol(col)) {
+          sC.push(col);
+          sV.push(`@stk_${col}`);
+          stockReq.input(`stk_${col}`, type, val);
+        }
+      };
+
+      addS("LocationCode", sql.VarChar, header.LocationCode || "HQ");
+      addS("InventoryCode", sql.VarChar, invCode);
+      addS("Description", sql.VarChar, d.InventoryDescription || d.Description || "");
+      addS("DiamondDescription", sql.VarChar, d.DiamondDescription || "");
+      addS("Weight", sql.Numeric(18, 3), parseFloat(d.Weight) || 0);
+      addS("PCS", sql.Numeric(18, 0), pcsVal);
+      addS("TotalCost", sql.Numeric(18, 2), parseFloat(d.TotalCost) || 0);
+      addS("QtyOnHand", sql.Numeric(18, 0), pcsVal);
+      addS("QtySold", sql.Numeric(18, 0), 0);
+      addS("Status", sql.VarChar, 'IN');
+      addS("CreateUser", sql.VarChar, sysUser);
+      if (hasSCol("CreateDate")) {
+        sC.push("CreateDate");
+        sV.push("GETDATE()");
+      }
+      addS("ModifyUser", sql.VarChar, sysUser);
+      if (hasSCol("ModifyDate")) {
+        sC.push("ModifyDate");
+        sV.push("GETDATE()");
+      }
+
+      await stockReq.query(`
+        INSERT INTO tblInventoryStock (${sC.join(', ')})
+        VALUES (${sV.join(', ')})
+      `);
+
+      // 4. Dynamic Insert into tblInventoryAddlDescription if AddlDesc is active
+      if (d.AddlDesc && (d.Desc1 || d.Desc2 || d.Desc3 || d.Desc4 || d.Cost1 || d.Cost2 || d.Cost3 || d.Cost4)) {
+        const addlReq = new sql.Request(transaction);
+        const aC = [];
+        const aV = [];
+        const addA = (col, type, val) => {
+          if (hasACol(col)) {
+            aC.push(col);
+            aV.push(`@add_${col}`);
+            addlReq.input(`add_${col}`, type, val);
+          }
+        };
+
+        addA("InventoryCode", sql.VarChar, invCode);
+        addA("JobSheetNo", sql.VarChar, header.JobSheetNo || "");
+        addA("Description1", sql.VarChar, d.Desc1 || "");
+        addA("Description2", sql.VarChar, d.Desc2 || "");
+        addA("Description3", sql.VarChar, d.Desc3 || "");
+        addA("Description4", sql.VarChar, d.Desc4 || "");
+        addA("Cost1", sql.Numeric(18, 2), parseFloat(d.Cost1) || 0);
+        addA("Cost2", sql.Numeric(18, 2), parseFloat(d.Cost2) || 0);
+        addA("Cost3", sql.Numeric(18, 2), parseFloat(d.Cost3) || 0);
+        addA("Cost4", sql.Numeric(18, 2), parseFloat(d.Cost4) || 0);
+        addA("SellingPrice1", sql.Numeric(18, 2), parseFloat(d.SellingPrice1) || 0);
+        addA("SellingPrice2", sql.Numeric(18, 2), parseFloat(d.SellingPrice2) || 0);
+        addA("SellingPrice3", sql.Numeric(18, 2), parseFloat(d.SellingPrice3) || 0);
+        addA("SellingPrice4", sql.Numeric(18, 2), parseFloat(d.SellingPrice4) || 0);
+        addA("CreateUser", sql.VarChar, sysUser);
+        if (hasACol("CreateDate")) {
+          aC.push("CreateDate");
+          aV.push("GETDATE()");
+        }
+        addA("ModifyUser", sql.VarChar, sysUser);
+        if (hasACol("ModifyDate")) {
+          aC.push("ModifyDate");
+          aV.push("GETDATE()");
+        }
+
+        await addlReq.query(`
+          INSERT INTO tblInventoryAddlDescription (${aC.join(', ')})
+          VALUES (${aV.join(', ')})
         `);
+      }
     }
 
     await transaction.commit();
     return res.status(200).json({ success: true, message: "Purchase saved successfully" });
   } catch (err) {
-    await transaction.rollback();
+    if (transaction) {
+      try { await transaction.rollback(); } catch (_) {}
+    }
     console.error("🔥 POST PURCHASE ERROR:", err);
-    return res.status(500).json({ success: false, message: "Server Error", error: err.message });
+    return res.status(500).json({ 
+      success: false, 
+      message: err.message || "Server Error", 
+      error: err.message 
+    });
   }
 });
 
+// ================= DELETE ENTIRE PURCHASE BILL =================
 router.delete("/:purchaseBillNo", async (req, res) => {
   const pool = req.pool;
   const transaction = new sql.Transaction(pool);
 
   try {
     const { purchaseBillNo } = req.params;
+    const billNo = purchaseBillNo.trim();
+
+    // Validate that no items in this bill are already sold or past EOD
+    const checkReq = await pool.request()
+      .input("PurchaseBillNo", sql.VarChar, billNo)
+      .query(`
+        SELECT 
+          i.InventoryCode,
+          i.SalesBillNo,
+          i.CreateDate,
+          i.PCS,
+          st.QtyOnHand,
+          jh.BillClose,
+          jh.TranType,
+          loc.EODDate
+        FROM tblInventory i
+        LEFT JOIN tblInventoryStock st ON i.InventoryCode = st.InventoryCode AND i.LocationCode = st.LocationCode
+        LEFT JOIN tblJobSheetHeader jh ON i.JobSheetNo = jh.JobSheetNo
+        LEFT JOIN tblLocation loc ON i.LocationCode = loc.LocationCode
+        WHERE i.PurchaseBillNo = @PurchaseBillNo
+      `);
+
+    if (checkReq.recordset.length > 0) {
+      for (const item of checkReq.recordset) {
+        if (item.BillClose === 'Y') {
+          return res.status(400).json({ success: false, message: "This bill is closed. Cannot delete!" });
+        }
+        if (item.TranType === 'DP') {
+          return res.status(400).json({ success: false, message: "This is a direct purchase bill. Cannot delete!" });
+        }
+        if (item.SalesBillNo && item.SalesBillNo.trim() !== '') {
+          return res.status(400).json({ success: false, message: `Item ${item.InventoryCode} is sold. Cannot delete!` });
+        }
+        if (item.QtyOnHand != null && parseFloat(item.QtyOnHand) !== parseFloat(item.PCS)) {
+          return res.status(400).json({ success: false, message: `Item ${item.InventoryCode}: Qty on hand is not the same as no. of pieces purchased. Cannot delete!` });
+        }
+        if (item.EODDate && item.CreateDate) {
+          const eod = new Date(item.EODDate);
+          const crDate = new Date(item.CreateDate);
+          if (eod >= crDate) {
+            return res.status(400).json({ success: false, message: "You cannot delete the Inventory after EOD!" });
+          }
+        }
+      }
+    }
 
     await transaction.begin();
 
     const request = new sql.Request(transaction);
     await request
-      .input("PurchaseBillNo", sql.VarChar, purchaseBillNo)
+      .input("PurchaseBillNo", sql.VarChar, billNo)
       .query(`
+        DELETE FROM tblInventoryAddlDescription WHERE InventoryCode IN (SELECT InventoryCode FROM tblPurchase WHERE PurchaseBillNo = @PurchaseBillNo);
+        DELETE FROM tblInventoryStock WHERE InventoryCode IN (SELECT InventoryCode FROM tblPurchase WHERE PurchaseBillNo = @PurchaseBillNo);
         DELETE FROM tblPurchase WHERE PurchaseBillNo = @PurchaseBillNo;
         DELETE FROM tblInventory WHERE PurchaseBillNo = @PurchaseBillNo;
       `);
@@ -226,13 +410,94 @@ router.delete("/:purchaseBillNo", async (req, res) => {
     await transaction.commit();
     return res.status(200).json({ success: true, message: "Purchase deleted successfully" });
   } catch (err) {
-    await transaction.rollback();
+    if (transaction) {
+      try { await transaction.rollback(); } catch (_) {}
+    }
     console.error("🔥 DELETE PURCHASE ERROR:", err);
     return res.status(500).json({ success: false, message: "Server Error", error: err.message });
   }
 });
 
-// ================= BILL CLOSE =================
+// ================= DELETE SINGLE INVENTORY ITEM FROM PURCHASE (btnDelete in frmPurchase.vb) =================
+router.delete("/:purchaseBillNo/item/:inventoryCode", async (req, res) => {
+  const pool = req.pool;
+  const transaction = new sql.Transaction(pool);
+
+  try {
+    const { purchaseBillNo, inventoryCode } = req.params;
+    const invCode = inventoryCode.trim();
+    const billNo = purchaseBillNo.trim();
+
+    // Check business rules from frmPurchase.vb btnDelete_Click
+    const chkResult = await pool.request()
+      .input("InventoryCode", sql.VarChar, invCode)
+      .query(`
+        SELECT 
+          i.InventoryCode, 
+          i.SalesBillNo, 
+          i.CreateDate, 
+          i.PCS, 
+          i.LocationCode,
+          i.JobSheetNo,
+          st.QtyOnHand,
+          jh.BillClose,
+          jh.TranType,
+          loc.EODDate
+        FROM tblInventory i
+        LEFT JOIN tblInventoryStock st ON i.InventoryCode = st.InventoryCode AND i.LocationCode = st.LocationCode
+        LEFT JOIN tblJobSheetHeader jh ON i.JobSheetNo = jh.JobSheetNo
+        LEFT JOIN tblLocation loc ON i.LocationCode = loc.LocationCode
+        WHERE i.InventoryCode = @InventoryCode
+      `);
+
+    if (chkResult.recordset.length > 0) {
+      const item = chkResult.recordset[0];
+      if (item.BillClose === 'Y') {
+        return res.status(400).json({ success: false, message: "This bill is closed. Cannot delete!" });
+      }
+      if (item.TranType === 'DP') {
+        return res.status(400).json({ success: false, message: "This is a direct purchase bill. Cannot delete!" });
+      }
+      if (item.SalesBillNo && item.SalesBillNo.trim() !== '') {
+        return res.status(400).json({ success: false, message: "Item sold. Cannot delete!" });
+      }
+      if (item.QtyOnHand != null && parseFloat(item.QtyOnHand) !== parseFloat(item.PCS)) {
+        return res.status(400).json({ success: false, message: "Qty on hand is not the same as no. of pieces purchased. Cannot delete!" });
+      }
+      if (item.EODDate && item.CreateDate) {
+        const eod = new Date(item.EODDate);
+        const crDate = new Date(item.CreateDate);
+        if (eod >= crDate) {
+          return res.status(400).json({ success: false, message: "You cannot delete the Inventory after EOD!" });
+        }
+      }
+    }
+
+    await transaction.begin();
+
+    const delReq = new sql.Request(transaction);
+    delReq.input("PurchaseBillNo", sql.VarChar, billNo);
+    delReq.input("InventoryCode", sql.VarChar, invCode);
+
+    await delReq.query(`
+      DELETE FROM tblInventoryAddlDescription WHERE InventoryCode = @InventoryCode;
+      DELETE FROM tblPurchase WHERE PurchaseBillNo = @PurchaseBillNo AND InventoryCode = @InventoryCode;
+      DELETE FROM tblInventory WHERE InventoryCode = @InventoryCode;
+      DELETE FROM tblInventoryStock WHERE InventoryCode = @InventoryCode;
+    `);
+
+    await transaction.commit();
+    return res.status(200).json({ success: true, message: `Item ${invCode} deleted successfully` });
+  } catch (err) {
+    if (transaction) {
+      try { await transaction.rollback(); } catch (_) {}
+    }
+    console.error("🔥 DELETE INVENTORY ITEM ERROR:", err);
+    return res.status(500).json({ success: false, message: "Server Error", error: err.message });
+  }
+});
+
+// ================= BILL CLOSE WITH WEIGHT TOLERANCE (btnBillClose in frmPurchase.vb) =================
 router.post("/billclose", async (req, res) => {
   try {
     const { jobSheetNo } = req.body;
@@ -240,8 +505,56 @@ router.post("/billclose", async (req, res) => {
       return res.status(400).json({ success: false, message: "jobSheetNo is required" });
     }
     const pool = req.pool;
-    const result = await pool.request()
-      .input("JobSheetNo", sql.VarChar, jobSheetNo)
+
+    // 1. Fetch JobSheet details and PurWtVarPerc
+    const jsResult = await pool.request()
+      .input("JobSheetNo", sql.VarChar, jobSheetNo.trim())
+      .query(`
+        SELECT 
+          jh.JobSheetNo, 
+          jh.TotalWeight24K, 
+          jh.BillClose, 
+          jh.TranType,
+          c.PurWtVarPerc
+        FROM tblJobSheetHeader jh
+        CROSS JOIN tblCompany c
+        WHERE jh.JobSheetNo = @JobSheetNo
+      `);
+
+    if (jsResult.recordset.length === 0) {
+      return res.status(404).json({ success: false, message: "Job sheet not found!" });
+    }
+
+    const js = jsResult.recordset[0];
+    if (js.BillClose === 'Y') {
+      return res.status(400).json({ success: false, message: "This Job sheet bill is already closed!" });
+    }
+    if (js.TranType === 'DP') {
+      return res.status(400).json({ success: false, message: "This is a direct purchase bill. Use direct purchase screen to close this bill!" });
+    }
+
+    const dTotJobSheetWt = parseFloat(js.TotalWeight24K) || 0;
+    const dPurWtVarPerc = parseFloat(js.PurWtVarPerc) || 5.0; // Default 5% if not set
+
+    // 2. Fetch total purchase weight
+    const purResult = await pool.request()
+      .input("JobSheetNo", sql.VarChar, jobSheetNo.trim())
+      .query(`SELECT SUM(Weight) as TotPurchaseWt FROM tblPurchase WHERE JobSheetNo = @JobSheetNo`);
+
+    const dTotPurchaseWt = parseFloat(purResult.recordset[0]?.TotPurchaseWt) || 0;
+    const dWtDiff = Math.abs(dTotJobSheetWt - dTotPurchaseWt);
+    const maxAllowedDiff = (dPurWtVarPerc * dTotJobSheetWt) / 100;
+
+    if (dTotJobSheetWt > 0 && dWtDiff > maxAllowedDiff) {
+      return res.status(400).json({
+        success: false,
+        message: `Cannot close bill. The Inventory weight differs by more than ${dPurWtVarPerc.toFixed(2)}% of the job sheet weight!`
+      });
+    }
+
+    // 3. Close the bill
+    await pool.request()
+      .input("JobSheetNo", sql.VarChar, jobSheetNo.trim())
       .query(`
         UPDATE tblJobSheetHeader
         SET BillClose = 'Y', ModifyDate = GETDATE()

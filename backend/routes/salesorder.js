@@ -1,6 +1,10 @@
+/**
+ * Developer: durairaj
+ */
+
 const express = require("express");
 const router = express.Router();
-const { sql } = require("../db");
+const { sql, poolPromise } = require("../db");
 
 // Helper to safely parse dates for SQL
 const parseDateForSQL = (dateStr) => {
@@ -32,15 +36,24 @@ const parseDateForSQL = (dateStr) => {
   return isNaN(dt.getTime()) ? null : dt;
 };
 
-
 // GET Next Sales Order No
 router.get("/nextNo", async (req, res) => {
   try {
-    const pool = req.pool;
-    const result = await pool.request().query("SELECT NextSalesOrderNo FROM tblCompany");
+    const pool = req.pool || (await poolPromise);
     let nextNo = 1;
-    if (result.recordset.length > 0 && result.recordset[0].NextSalesOrderNo) {
-      nextNo = parseInt(result.recordset[0].NextSalesOrderNo, 10);
+    let loc = "HQ";
+    try {
+      const result = await pool.request().query("SELECT LocationCode, NextSalesOrderNo FROM tblCompany");
+      if (result.recordset.length > 0) {
+        if (result.recordset[0].NextSalesOrderNo) {
+          nextNo = parseInt(result.recordset[0].NextSalesOrderNo, 10) || 1;
+        }
+        if (result.recordset[0].LocationCode) {
+          loc = result.recordset[0].LocationCode.trim();
+        }
+      }
+    } catch (compErr) {
+      console.warn("Could not query NextSalesOrderNo from tblCompany:", compErr.message);
     }
     const formattedNo = `SO${String(nextNo).padStart(6, '0')}`;
     res.json({ success: true, nextNo: formattedNo });
@@ -50,12 +63,10 @@ router.get("/nextNo", async (req, res) => {
   }
 });
 
-
-
 // GET list of all Sales Orders for lookup/search
 router.get("/list", async (req, res) => {
   try {
-    const pool = req.pool;
+    const pool = req.pool || (await poolPromise);
     const result = await pool.request().query(`
       SELECT DISTINCT 
         h.SalesOrderNo, 
@@ -74,10 +85,10 @@ router.get("/list", async (req, res) => {
   }
 });
 
-// GET Fetch Reorder items matching screen queries
+// GET Fetch Reorder items matching screen queries in frmSalesOrder.vb
 router.get("/fetch-reorder", async (req, res) => {
   try {
-    const pool = req.pool;
+    const pool = req.pool || (await poolPromise);
     const { LocationCode, CategoryCode, CatalogueCode } = req.query;
 
     if (!LocationCode) {
@@ -104,7 +115,7 @@ router.get("/fetch-reorder", async (req, res) => {
         AND a.locationcode = @LocationCode
     `;
 
-    const request = pool.request().input("LocationCode", sql.VarChar, LocationCode);
+    const request = pool.request().input("LocationCode", sql.VarChar, LocationCode.trim());
 
     if (CategoryCode && CategoryCode.trim() !== "") {
       query += " AND b.CategoryCode = @CategoryCode";
@@ -137,10 +148,10 @@ router.get("/fetch-reorder", async (req, res) => {
 router.get("/:salesOrderNo", async (req, res) => {
   try {
     const { salesOrderNo } = req.params;
-    const pool = req.pool;
+    const pool = req.pool || (await poolPromise);
 
     const headerRes = await pool.request()
-      .input("SalesOrderNo", sql.VarChar, salesOrderNo)
+      .input("SalesOrderNo", sql.VarChar, salesOrderNo.trim())
       .query(`
         SELECT h.*, s.SupplierName
         FROM tblSalesOrderHeader h
@@ -153,7 +164,7 @@ router.get("/:salesOrderNo", async (req, res) => {
     }
 
     const detailRes = await pool.request()
-      .input("SalesOrderNo", sql.VarChar, salesOrderNo)
+      .input("SalesOrderNo", sql.VarChar, salesOrderNo.trim())
       .query(`
         SELECT * FROM tblSalesOrderDetail WHERE SalesOrderNo = @SalesOrderNo
       `);
@@ -171,7 +182,7 @@ router.get("/:salesOrderNo", async (req, res) => {
 
 // POST Create or Update Sales Order
 router.post("/", async (req, res) => {
-  const pool = req.pool;
+  const pool = req.pool || (await poolPromise);
   const transaction = new sql.Transaction(pool);
 
   try {
@@ -187,9 +198,20 @@ router.post("/", async (req, res) => {
 
     await transaction.begin();
 
+    // Inspect columns of tblSalesOrderHeader dynamically
+    let headerCols = [];
+    try {
+      const hRes = await new sql.Request(transaction).query(`
+        SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'tblSalesOrderHeader'
+      `);
+      headerCols = hRes.recordset.map(c => c.COLUMN_NAME.toLowerCase());
+    } catch (e) {}
+
+    const hasHeaderCol = (name) => headerCols.length === 0 || headerCols.includes(name.toLowerCase());
+
     const checkRequest = new sql.Request(transaction);
     const checkRes = await checkRequest
-      .input("SalesOrderNoCheck", sql.VarChar, header.SalesOrderNo)
+      .input("SalesOrderNoCheck", sql.VarChar, header.SalesOrderNo.trim())
       .query("SELECT 1 FROM tblSalesOrderHeader WHERE SalesOrderNo = @SalesOrderNoCheck");
 
     // Calculate TotalWeight and SalesOrderQty from details or header
@@ -208,7 +230,7 @@ router.post("/", async (req, res) => {
     }
 
     const headerRequest = new sql.Request(transaction)
-      .input("SalesOrderNo", sql.VarChar, header.SalesOrderNo)
+      .input("SalesOrderNo", sql.VarChar, header.SalesOrderNo.trim())
       .input("SalesOrderDate", sql.SmallDateTime, parsedSODate)
       .input("DueDate", sql.SmallDateTime, parsedDueDate)
       .input("LocationCode", sql.VarChar, header.LocationCode || "")
@@ -221,47 +243,81 @@ router.post("/", async (req, res) => {
       .input("Date", sql.SmallDateTime, curDate);
 
     if (checkRes.recordset.length > 0) {
-      // Update header
+      // Build dynamic update clauses
+      const updateFields = [
+        "SalesOrderDate = @SalesOrderDate",
+        "DueDate = @DueDate",
+        "LocationCode = @LocationCode",
+        "SupplierCode = @SupplierCode",
+        "CategoryCode = @CategoryCode",
+        "CatalogueCode = @CatalogueCode",
+        "TotalWeight = @TotalWeight",
+        "SalesOrderQty = @SalesOrderQty"
+      ];
+      if (hasHeaderCol("ModifyUser")) updateFields.push("ModifyUser = @User");
+      if (hasHeaderCol("ModifyDate")) updateFields.push("ModifyDate = @Date");
+
       await headerRequest.query(`
         UPDATE tblSalesOrderHeader SET
-          SalesOrderDate = @SalesOrderDate,
-          DueDate = @DueDate,
-          LocationCode = @LocationCode,
-          SupplierCode = @SupplierCode,
-          CategoryCode = @CategoryCode,
-          CatalogueCode = @CatalogueCode,
-          TotalWeight = @TotalWeight,
-          SalesOrderQty = @SalesOrderQty,
-          ModifyUser = @User,
-          ModifyDate = @Date
+          ${updateFields.join(", ")}
         WHERE SalesOrderNo = @SalesOrderNo
       `);
 
       // Delete existing details to overwrite
       await new sql.Request(transaction)
-        .input("SalesOrderNo", sql.VarChar, header.SalesOrderNo)
+        .input("SalesOrderNo", sql.VarChar, header.SalesOrderNo.trim())
         .query("DELETE FROM tblSalesOrderDetail WHERE SalesOrderNo = @SalesOrderNo");
     } else {
-      // Insert header
+      // Build dynamic insert clauses
+      const insCols = ["SalesOrderNo", "SalesOrderDate", "DueDate", "LocationCode", "SupplierCode", "CategoryCode", "CatalogueCode", "TotalWeight", "SalesOrderQty"];
+      const insVals = ["@SalesOrderNo", "@SalesOrderDate", "@DueDate", "@LocationCode", "@SupplierCode", "@CategoryCode", "@CatalogueCode", "@TotalWeight", "@SalesOrderQty"];
+
+      if (hasHeaderCol("CreateUser")) {
+        insCols.push("CreateUser");
+        insVals.push("@User");
+      }
+      if (hasHeaderCol("CreateDate")) {
+        insCols.push("CreateDate");
+        insVals.push("@Date");
+      }
+      if (hasHeaderCol("ModifyUser")) {
+        insCols.push("ModifyUser");
+        insVals.push("@User");
+      }
+      if (hasHeaderCol("ModifyDate")) {
+        insCols.push("ModifyDate");
+        insVals.push("@Date");
+      }
+
       await headerRequest.query(`
-        INSERT INTO tblSalesOrderHeader (
-          SalesOrderNo, SalesOrderDate, DueDate, LocationCode, SupplierCode, CategoryCode, CatalogueCode, TotalWeight, SalesOrderQty, CreateUser, CreateDate, ModifyUser, ModifyDate
-        ) VALUES (
-          @SalesOrderNo, @SalesOrderDate, @DueDate, @LocationCode, @SupplierCode, @CategoryCode, @CatalogueCode, @TotalWeight, @SalesOrderQty, @User, @Date, @User, @Date
-        )
+        INSERT INTO tblSalesOrderHeader (${insCols.join(", ")})
+        VALUES (${insVals.join(", ")})
       `);
 
-      // Auto-increment the Sales Order No in tblCompany
-      await new sql.Request(transaction).query(`
-        UPDATE tblCompany SET NextSalesOrderNo = ISNULL(NextSalesOrderNo, 0) + 1
-      `);
+      // Auto-increment NextSalesOrderNo in tblCompany
+      try {
+        await new sql.Request(transaction).query(`
+          UPDATE tblCompany SET NextSalesOrderNo = ISNULL(NextSalesOrderNo, 0) + 1
+        `);
+      } catch (incErr) {}
     }
+
+    // Inspect columns of tblSalesOrderDetail dynamically
+    let detailCols = [];
+    try {
+      const dRes = await new sql.Request(transaction).query(`
+        SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'tblSalesOrderDetail'
+      `);
+      detailCols = dRes.recordset.map(c => c.COLUMN_NAME.toLowerCase());
+    } catch (e) {}
+
+    const hasDetailCol = (name) => detailCols.length === 0 || detailCols.includes(name.toLowerCase());
 
     // Insert details
     if (details && details.length > 0) {
       for (const item of details) {
-        await new sql.Request(transaction)
-          .input("SalesOrderNo", sql.VarChar, header.SalesOrderNo)
+        const dReq = new sql.Request(transaction)
+          .input("SalesOrderNo", sql.VarChar, header.SalesOrderNo.trim())
           .input("SalesOrderDate", sql.SmallDateTime, parsedSODate)
           .input("DueDate", sql.SmallDateTime, parsedDueDate)
           .input("LocationCode", sql.VarChar, header.LocationCode || "")
@@ -274,18 +330,38 @@ router.post("/", async (req, res) => {
           .input("SizeType", sql.VarChar, item.SizeType || "")
           .input("ReOrderLevel", sql.Decimal(18, 2), parseFloat(item.ReOrderLevel) || 0)
           .input("SalesOrderQty", sql.Decimal(18, 2), parseFloat(item.SalesOrderQty) || 0)
-          .input("Remarks", sql.VarChar, header.Remarks || "")
           .input("User", sql.VarChar, sysUser)
-          .input("Date", sql.SmallDateTime, curDate)
-          .query(`
-            INSERT INTO tblSalesOrderDetail (
-              SalesOrderNo, SalesOrderDate, DueDate, LocationCode, SupplierCode, CategoryCode, CatalogueCode, 
-              Weight, ToWeight, SizeCode, SizeType, ReOrderLevel, SalesOrderQty, Remarks, CreateUser, CreateDate, ModifyUser, ModifyDate
-            ) VALUES (
-              @SalesOrderNo, @SalesOrderDate, @DueDate, @LocationCode, @SupplierCode, @CategoryCode, @CatalogueCode, 
-              @Weight, @ToWeight, @SizeCode, @SizeType, @ReOrderLevel, @SalesOrderQty, @Remarks, @User, @Date, @User, @Date
-            )
-          `);
+          .input("Date", sql.SmallDateTime, curDate);
+
+        const dInsCols = ["SalesOrderNo", "SalesOrderDate", "DueDate", "LocationCode", "SupplierCode", "CategoryCode", "CatalogueCode", "Weight", "ToWeight", "SizeCode", "SizeType", "ReOrderLevel", "SalesOrderQty"];
+        const dInsVals = ["@SalesOrderNo", "@SalesOrderDate", "@DueDate", "@LocationCode", "@SupplierCode", "@CategoryCode", "@CatalogueCode", "@Weight", "@ToWeight", "@SizeCode", "@SizeType", "@ReOrderLevel", "@SalesOrderQty"];
+
+        if (hasDetailCol("Remarks")) {
+          dInsCols.push("Remarks");
+          dInsVals.push("@Remarks");
+          dReq.input("Remarks", sql.VarChar, header.Remarks || "");
+        }
+        if (hasDetailCol("CreateUser")) {
+          dInsCols.push("CreateUser");
+          dInsVals.push("@User");
+        }
+        if (hasDetailCol("CreateDate")) {
+          dInsCols.push("CreateDate");
+          dInsVals.push("@Date");
+        }
+        if (hasDetailCol("ModifyUser")) {
+          dInsCols.push("ModifyUser");
+          dInsVals.push("@User");
+        }
+        if (hasDetailCol("ModifyDate")) {
+          dInsCols.push("ModifyDate");
+          dInsVals.push("@Date");
+        }
+
+        await dReq.query(`
+          INSERT INTO tblSalesOrderDetail (${dInsCols.join(", ")})
+          VALUES (${dInsVals.join(", ")})
+        `);
       }
     }
 
@@ -311,13 +387,13 @@ router.post("/", async (req, res) => {
 
 // DELETE Sales Order
 router.delete("/:salesOrderNo", async (req, res) => {
-  const pool = req.pool;
+  const pool = req.pool || (await poolPromise);
   const { salesOrderNo } = req.params;
 
   try {
     // Check if Jobsheet uses this SalesOrderNo
     const checkJS = await pool.request()
-      .input("SalesOrderNo", sql.VarChar, salesOrderNo)
+      .input("SalesOrderNo", sql.VarChar, salesOrderNo.trim())
       .query("SELECT 1 FROM tblJobSheetHeader WHERE SalesOrderNo = @SalesOrderNo");
 
     if (checkJS.recordset.length > 0) {
@@ -331,11 +407,11 @@ router.delete("/:salesOrderNo", async (req, res) => {
     await transaction.begin();
 
     await new sql.Request(transaction)
-      .input("SalesOrderNo", sql.VarChar, salesOrderNo)
+      .input("SalesOrderNo", sql.VarChar, salesOrderNo.trim())
       .query("DELETE FROM tblSalesOrderDetail WHERE SalesOrderNo = @SalesOrderNo");
 
     await new sql.Request(transaction)
-      .input("SalesOrderNo", sql.VarChar, salesOrderNo)
+      .input("SalesOrderNo", sql.VarChar, salesOrderNo.trim())
       .query("DELETE FROM tblSalesOrderHeader WHERE SalesOrderNo = @SalesOrderNo");
 
     await transaction.commit();

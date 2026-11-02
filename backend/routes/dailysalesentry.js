@@ -1,10 +1,28 @@
 const express = require("express");
 const router = express.Router();
-const { sql } = require("../db");
+const { sql, poolPromise } = require("../db");
 
-// Helper to format date YYYY-MM-DD
+// Helper to acquire database connection pool reliably
+const getPool = async (req) => {
+  if (req && req.pool) return req.pool;
+  if (poolPromise) return await poolPromise;
+  throw new Error("Database pool is not available.");
+};
+
+// Helper to format date YYYY-MM-DD from various formats (YYYY-MM-DD or DD/MM/YYYY)
 const formatDate = (d) => {
   if (!d) return null;
+  if (typeof d === "string") {
+    d = d.trim();
+    // Support DD/MM/YYYY
+    if (/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(d)) {
+      const parts = d.split("/");
+      const day = parts[0].padStart(2, "0");
+      const month = parts[1].padStart(2, "0");
+      const year = parts[2];
+      return `${year}-${month}-${day}`;
+    }
+  }
   const dateObj = new Date(d);
   if (isNaN(dateObj.getTime())) return null;
   return dateObj.toISOString().split("T")[0];
@@ -23,7 +41,7 @@ router.get("/", async (req, res) => {
       return res.status(400).json({ success: false, message: "Invalid date format" });
     }
 
-    const pool = req.pool;
+    const pool = await getPool(req);
     const result = await pool.request()
       .input("InvoiceDate", sql.SmallDateTime, formattedDate)
       .query("SELECT * FROM tblDailySales WHERE InvoiceDate = @InvoiceDate");
@@ -42,7 +60,7 @@ router.get("/", async (req, res) => {
 // POST Save/Upsert daily sales record
 router.post("/save", async (req, res) => {
   try {
-    const pool = req.pool;
+    const pool = await getPool(req);
     const {
       InvoiceDate, Cash, Nets, Visa, Master, Amex, Diners, Chq, TransfertoAcc, Installment,
       NonGST24K, TradeInGold, AdvancePayment, PettyCash, AdvanceUtil, TotalGSTSales, GST, TotalSales,
@@ -168,7 +186,7 @@ router.delete("/:date", async (req, res) => {
       return res.status(400).json({ success: false, message: "Invalid date format" });
     }
 
-    const pool = req.pool;
+    const pool = await getPool(req);
     const result = await pool.request()
       .input("InvoiceDate", sql.SmallDateTime, formattedDate)
       .query("DELETE FROM tblDailySales WHERE InvoiceDate = @InvoiceDate");

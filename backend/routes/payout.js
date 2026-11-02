@@ -1,16 +1,24 @@
+/** Developer: durairaj */
 const express = require("express");
 const router = express.Router();
-const sql = require("mssql");
+const { sql, poolPromise } = require("../db");
+
+// Helper to acquire database connection pool reliably
+const getPool = async (req) => {
+  if (req && req.pool) return req.pool;
+  if (poolPromise) return await poolPromise;
+  throw new Error("Database pool is not available.");
+};
 
 // GET /api/payout/nextCode
 router.get("/nextCode", async (req, res) => {
   try {
-    const pool = req.pool;
+    const pool = await getPool(req);
     const result = await pool.request().query("SELECT TOP 1 LocationCode, NextPayOutNo FROM tblCompany");
-    
+
     let payoutNo = 1;
     let loc = "HQ";
-    if (result.recordset.length > 0) {
+    if (result.recordset && result.recordset.length > 0) {
       payoutNo = parseInt(result.recordset[0].NextPayOutNo) || 1;
       loc = (result.recordset[0].LocationCode || "HQ").trim();
     }
@@ -24,7 +32,7 @@ router.get("/nextCode", async (req, res) => {
 
 // POST /api/payout/save
 router.post("/save", async (req, res) => {
-  const pool = req.pool;
+  const pool = await getPool(req);
   const transaction = new sql.Transaction(pool);
 
   try {
@@ -38,10 +46,10 @@ router.post("/save", async (req, res) => {
     const sysUser = (userId || "sys").substring(0, 10);
 
     if (!Code) {
-      return res.status(400).json({ success: false, message: "Payout Code is required." });
+      return res.status(400).json({ success: false, message: "PayOutCode should not be blank." });
     }
     if (!PayOutDescription) {
-      return res.status(400).json({ success: false, message: "Payout Description is required." });
+      return res.status(400).json({ success: false, message: "PayOut Description should not be blank." });
     }
     if (payAmount <= 0) {
       return res.status(400).json({ success: false, message: "Amount must be greater than zero." });
@@ -53,10 +61,10 @@ router.post("/save", async (req, res) => {
     const compResult = await new sql.Request(transaction).query(`
       SELECT TOP 1 LocationCode, NextPayOutNo FROM tblCompany
     `);
-    const comp = compResult.recordset[0] || {};
+    const comp = compResult.recordset && compResult.recordset.length > 0 ? compResult.recordset[0] : {};
     const loc = (comp.LocationCode || "HQ").trim();
     const nextSeq = parseInt(comp.NextPayOutNo) || 1;
-    
+
     const payOutNo = `PO-${loc}${String(nextSeq).padStart(8, "0")}`;
 
     // 2. Insert Payout details
@@ -78,7 +86,7 @@ router.post("/save", async (req, res) => {
         )
       `);
 
-    // 3. Insert Paymode details
+    // 3. Insert Paymode details matching clsPayMode.PayModeDetailSave
     await new sql.Request(transaction)
       .input("InvoiceNo", sql.Char, payOutNo.substring(0, 20))
       .input("PayMode", sql.VarChar, "CASH")
@@ -97,7 +105,7 @@ router.post("/save", async (req, res) => {
 
     // 4. Increment NextPayOutNo sequence
     await new sql.Request(transaction).query(`
-      UPDATE tblCompany SET NextPayOutNo = NextPayOutNo + 1
+      UPDATE tblCompany SET NextPayOutNo = ISNULL(NextPayOutNo, 0) + 1
     `);
 
     await transaction.commit();
@@ -105,9 +113,14 @@ router.post("/save", async (req, res) => {
 
   } catch (err) {
     console.error("Save Payout Transaction Error:", err);
-    await transaction.rollback();
+    try {
+      await transaction.rollback();
+    } catch (rErr) {
+      console.error("Rollback failed:", rErr);
+    }
     res.status(500).json({ success: false, message: "Database transaction failed", error: err.message });
   }
 });
 
 module.exports = router;
+

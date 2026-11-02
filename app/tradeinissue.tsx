@@ -225,7 +225,7 @@ export default function TradeInIssueScreen() {
       return;
     }
     if (parseFloat(totalIssuedWt) <= 0) {
-      showToast('Gold Issued Actual Weight should not be 0!', 'error');
+      showToast('Gold Issued Actual Weight Should Not Be 0 !!!', 'error');
       return;
     }
     if (gridData.length === 0) {
@@ -260,10 +260,10 @@ export default function TradeInIssueScreen() {
       const data = await res.json();
 
       if (data.success) {
-        showToast('Trade-In Gold Issued Successfully', 'success');
+        showToast('Tradein Gold Issued Sucessfully', 'success');
         handleClear();
       } else {
-        showToast(data.message || 'Failed to issue gold', 'error');
+        showToast(data.message || 'Error in save', 'error');
       }
     } catch (err: any) {
       showToast('Network error while issuing trade-in gold', 'error');

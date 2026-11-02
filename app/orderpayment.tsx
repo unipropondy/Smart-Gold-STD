@@ -32,6 +32,7 @@ export default function OrderPaymentScreen() {
   // Form State
   const [orderNo, setOrderNo] = useState('');
   const [customerCode, setCustomerCode] = useState('');
+  const [customerType, setCustomerType] = useState('');
   const [flexiId, setFlexiId] = useState('');
   const [customerName, setCustomerName] = useState('');
   const [address, setAddress] = useState('');
@@ -39,6 +40,11 @@ export default function OrderPaymentScreen() {
 
   const [finalPayment, setFinalPayment] = useState(false);
   const [printReceipt, setPrintReceipt] = useState(false);
+  const [matchedInventoryCode, setMatchedInventoryCode] = useState<string | null>(null);
+
+  // RePrint Modal State
+  const [isReprintModalVisible, setIsReprintModalVisible] = useState(false);
+  const [reprintBillNo, setReprintBillNo] = useState('');
 
   // Payment State
   const [amountPaid, setAmountPaid] = useState('0.00');
@@ -83,15 +89,18 @@ export default function OrderPaymentScreen() {
         setAdvancePaid(balance.advancePaid.toFixed(2));
         setBalanceAmount(balance.balanceAmount > 0 ? balance.balanceAmount.toFixed(2) : '0.00');
         setHistoryList(history || []);
+        setMatchedInventoryCode(order.matchedInventoryCode || null);
 
         if (order.CustomerCode && order.CustomerCode.trim()) {
           const code = order.CustomerCode.trim();
           setCustomerCode(code);
-          fetchCustomer(code);
+          setCustomerName(order.CustomerName || '');
+          setCustomerType(order.CustomerType || '');
+          setAddress(`${order.Address1 || ''} ${order.Address2 || ''} ${order.Address3 || ''}`.trim());
         }
         showToast('Order balance & history loaded', 'success');
       } else {
-        showToast('Order not found', 'error');
+        showToast(json.message || 'Order not found', 'error');
       }
     } catch (err) {
       console.error(err);
@@ -108,14 +117,17 @@ export default function OrderPaymentScreen() {
       if (json.success && json.data) {
         setCustomerCode(json.data.CustomerCode ? String(json.data.CustomerCode).trim() : code);
         setCustomerName(json.data.CustomerName ? String(json.data.CustomerName).trim() : '');
-        setAddress(`${json.data.Address1 || ''} ${json.data.Address2 || ''}`.trim());
+        setCustomerType(json.data.CustomerType ? String(json.data.CustomerType).trim() : '');
+        setAddress(`${json.data.Address1 || ''} ${json.data.Address2 || ''} ${json.data.Address3 || ''}`.trim());
       } else {
         setCustomerName('');
+        setCustomerType('');
         setAddress('');
       }
     } catch (err) {
       console.error(err);
       setCustomerName('');
+      setCustomerType('');
       setAddress('');
     }
   };
@@ -201,6 +213,7 @@ export default function OrderPaymentScreen() {
   const handleClear = () => {
     setOrderNo('');
     setCustomerCode('');
+    setCustomerType('');
     setFlexiId('');
     setCustomerName('');
     setAddress('');
@@ -212,6 +225,7 @@ export default function OrderPaymentScreen() {
     setHistoryList([]);
     setFinalPayment(false);
     setPrintReceipt(false);
+    setMatchedInventoryCode(null);
   };
 
   const handleCancelPayment = async (paymentNo: string) => {
@@ -242,13 +256,28 @@ export default function OrderPaymentScreen() {
 
   const handleSave = async () => {
     const currentState = latestState.current;
-    if (!currentState.orderNo) {
-      showToast('Please select an Order.', 'error');
+    if (!currentState.orderNo || !currentState.orderNo.trim()) {
+      showToast('Please enter OrderNo.', 'error');
       return;
     }
     const tot = parseFloat(currentState.amountPaid) || 0;
-    if (tot <= 0) {
-      showToast('Pay amount must be greater than zero.', 'error');
+    if (tot === 0) {
+      showToast('Please enter pay amount.', 'error');
+      return;
+    }
+    if (isNaN(tot)) {
+      showToast('Please enter valid Pay Amount.', 'error');
+      return;
+    }
+    if (tot < 0) {
+      showToast('Pay amount should not be greater than zero.', 'error');
+      return;
+    }
+
+    // VB business rule: If paying balance in full or checking Final Payment, ensure Inventory Matched
+    const numBal = parseFloat(balanceAmount) || 0;
+    if ((tot >= numBal || finalPayment) && !matchedInventoryCode) {
+      showToast('Inventory Not Matched', 'error');
       return;
     }
 
@@ -256,13 +285,16 @@ export default function OrderPaymentScreen() {
     try {
       const noRes = await fetch(`${API_URL}/next-no`);
       const noJson = await noRes.json();
-      const orderPaymentNo = noJson.success ? noJson.paymentNo : `OP-${Date.now()}`;
+      const orderPaymentNo = noJson.success ? noJson.paymentNo : `OP${Date.now()}`;
 
       const payload = {
         orderNo: currentState.orderNo,
         orderPaymentNo,
         amountPaid: currentState.amountPaid,
         remarks: remarks || 'ORDER PAYMENT',
+        isFinalPayment: finalPayment,
+        flexiId: flexiId || undefined,
+        createUser: 'ADMIN'
       };
 
       router.push({
@@ -270,6 +302,7 @@ export default function OrderPaymentScreen() {
         params: {
           totalNet: currentState.amountPaid,
           customerCode: customerCode,
+          customerType: customerType || 'NORMAL',
           apiEndpoint: `${API_URL}/pay`,
           payload: JSON.stringify(payload),
           returnPath: '/orderpayment',
@@ -279,6 +312,29 @@ export default function OrderPaymentScreen() {
       setAmountPaid('0.00');
     } catch (err: any) {
       showToast(err.message || 'Error navigating to payment', 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleReprint = async () => {
+    if (!reprintBillNo || !reprintBillNo.trim()) {
+      showToast('Please enter Bill No to reprint', 'error');
+      return;
+    }
+    setLoading(true);
+    try {
+      const res = await fetch(`${API_URL}/reprint/${encodeURIComponent(reprintBillNo.trim())}`);
+      const json = await res.json();
+      if (json.success) {
+        showToast(`Receipt ${reprintBillNo} found. Printing receipt...`, 'success');
+        setIsReprintModalVisible(false);
+        setReprintBillNo('');
+      } else {
+        showToast(json.message || 'Bill not found for reprinting', 'error');
+      }
+    } catch (err) {
+      showToast('Error loading receipt', 'error');
     } finally {
       setLoading(false);
     }
@@ -314,7 +370,7 @@ export default function OrderPaymentScreen() {
 
           <TouchableOpacity
             style={[styles.actionBtn, styles.reprintBtn]}
-            onPress={() => showToast('RePrinting receipt...', 'success')}
+            onPress={() => setIsReprintModalVisible(true)}
             activeOpacity={0.8}
           >
             <Ionicons name="print-outline" size={14} color="#5C4A28" />
@@ -435,7 +491,7 @@ export default function OrderPaymentScreen() {
                 </View>
               </View>
 
-              {/* Row 2: Customer Name, Address, Trade-In */}
+              {/* Row 2: Customer Name, Address, Customer Type & Trade-In */}
               <View style={[styles.threeColumnGrid, { marginTop: 6 }]}>
                 {/* Customer Name */}
                 <View style={styles.inlineFieldRow}>
@@ -447,6 +503,11 @@ export default function OrderPaymentScreen() {
                     placeholder="Auto-populated"
                     placeholderTextColor="#9E8D77"
                   />
+                  {customerType ? (
+                    <View style={styles.custTypeBadge}>
+                      <ThemedText style={styles.custTypeBadgeText}>{customerType}</ThemedText>
+                    </View>
+                  ) : null}
                 </View>
 
                 {/* Address */}
@@ -600,31 +661,48 @@ export default function OrderPaymentScreen() {
                 </ThemedText>
               </View>
             ) : (
-              historyList.map((item, index) => (
-                <View key={index} style={styles.tableRow}>
-                  <ThemedText style={[styles.tableCell, styles.codeCell, { flex: 1.6 }]}>
-                    {item.OrderPaymentNo}
-                  </ThemedText>
-                  <ThemedText style={[styles.tableCell, { flex: 1.4 }]}>
-                    {item.CreateDate ? new Date(item.CreateDate).toLocaleDateString() : ''}
-                  </ThemedText>
-                  <ThemedText style={[styles.tableCell, { flex: 2.2 }]} numberOfLines={1}>
-                    {item.Remarks || '-'}
-                  </ThemedText>
-                  <ThemedText style={[styles.tableCell, styles.amountCell, { flex: 1.4, textAlign: 'right' }]}>
-                    {item.AmountPaid}
-                  </ThemedText>
-                  <View style={{ width: 70, alignItems: 'center' }}>
-                    <TouchableOpacity
-                      style={styles.cancelRowBtn}
-                      onPress={() => handleCancelPayment(item.OrderPaymentNo)}
-                      activeOpacity={0.7}
-                    >
-                      <ThemedText style={styles.cancelRowBtnText}>Cancel</ThemedText>
-                    </TouchableOpacity>
+              <>
+                {historyList.map((item, index) => (
+                  <View key={index} style={styles.tableRow}>
+                    <ThemedText style={[styles.tableCell, styles.codeCell, { flex: 1.6 }]}>
+                      {item.OrderPaymentNo}
+                    </ThemedText>
+                    <ThemedText style={[styles.tableCell, { flex: 1.4 }]}>
+                      {item.CreateDate ? new Date(item.CreateDate).toLocaleDateString() : ''}
+                    </ThemedText>
+                    <ThemedText style={[styles.tableCell, { flex: 2.2 }]} numberOfLines={1}>
+                      {item.Remarks || '-'}
+                    </ThemedText>
+                    <ThemedText style={[styles.tableCell, styles.amountCell, { flex: 1.4, textAlign: 'right' }]}>
+                      {parseFloat(item.AmountPaid || 0).toFixed(2)}
+                    </ThemedText>
+                    <View style={{ width: 70, alignItems: 'center' }}>
+                      <TouchableOpacity
+                        style={styles.cancelRowBtn}
+                        onPress={() => handleCancelPayment(item.OrderPaymentNo)}
+                        activeOpacity={0.7}
+                      >
+                        <ThemedText style={styles.cancelRowBtnText}>Cancel</ThemedText>
+                      </TouchableOpacity>
+                    </View>
                   </View>
+                ))}
+
+                {/* Summary TOTAL: Row matching VB fnSetdgvText TOTAL: */}
+                <View style={[styles.tableRow, styles.totalSummaryRow]}>
+                  <ThemedText style={[styles.tableCell, styles.totalSummaryText, { flex: 1.6 }]}>
+                    TOTAL:
+                  </ThemedText>
+                  <ThemedText style={[styles.tableCell, { flex: 1.4 }]} />
+                  <ThemedText style={[styles.tableCell, { flex: 2.2 }]} />
+                  <ThemedText style={[styles.tableCell, styles.totalSummaryText, { flex: 1.4, textAlign: 'right' }]}>
+                    {historyList
+                      .reduce((acc, curr) => acc + (parseFloat(curr.AmountPaid) || 0), 0)
+                      .toFixed(2)}
+                  </ThemedText>
+                  <View style={{ width: 70 }} />
                 </View>
-              ))
+              </>
             )}
           </View>
 
@@ -912,6 +990,62 @@ export default function OrderPaymentScreen() {
                 </TouchableOpacity>
               )}
             />
+          </View>
+        </View>
+      </Modal>
+      {/* REPRINT BILL MODAL (matching PnlReprint) */}
+      <Modal visible={isReprintModalVisible} transparent animationType="fade">
+        <View style={styles.modalOverlay}>
+          <View style={[styles.lovModalCard, { maxHeight: 250, width: '90%', maxWidth: 450 }]}>
+            <View style={styles.modalHeaderBanner}>
+              <View style={styles.headerTitleContainer}>
+                <View style={styles.headerIconBadgeSmall}>
+                  <Ionicons name="print-outline" size={13} color="#B48218" />
+                </View>
+                <ThemedText style={styles.modalHeaderTitle}>RePrint Order Payment Receipt</ThemedText>
+              </View>
+              <TouchableOpacity
+                onPress={() => setIsReprintModalVisible(false)}
+                activeOpacity={0.7}
+                style={styles.closeModalBtn}
+              >
+                <Ionicons name="close" size={18} color="#3B2D17" />
+              </TouchableOpacity>
+            </View>
+
+            <View style={{ padding: 16 }}>
+              <ThemedText style={[styles.inlineFieldLabel, { marginBottom: 6 }]}>
+                Order Payment Bill No:
+              </ThemedText>
+              <TextInput
+                style={[styles.formInput, { height: 38 }]}
+                value={reprintBillNo}
+                onChangeText={setReprintBillNo}
+                placeholder="e.g. OP1 or OP-HQ00000001"
+                placeholderTextColor="#9E8D77"
+                autoFocus
+              />
+
+              <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 10, marginTop: 18 }}>
+                <TouchableOpacity
+                  style={[styles.actionBtn, styles.clearBtn, { paddingHorizontal: 16, height: 36 }]}
+                  onPress={() => setIsReprintModalVisible(false)}
+                  activeOpacity={0.8}
+                >
+                  <ThemedText style={styles.clearBtnText}>Cancel</ThemedText>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[styles.actionBtn, styles.saveBtn, { paddingHorizontal: 20, height: 36 }]}
+                  onPress={handleReprint}
+                  activeOpacity={0.8}
+                  disabled={loading}
+                >
+                  <Ionicons name="print" size={14} color="#9E6D08" />
+                  <ThemedText style={styles.saveBtnText}>Print</ThemedText>
+                </TouchableOpacity>
+              </View>
+            </View>
           </View>
         </View>
       </Modal>
@@ -1400,5 +1534,28 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontWeight: 'bold',
     fontSize: 12,
+  },
+  totalSummaryRow: {
+    backgroundColor: '#FFF8E7',
+    borderTopWidth: 1.5,
+    borderTopColor: '#C99E32',
+  },
+  totalSummaryText: {
+    color: '#B71C1C',
+    fontWeight: 'bold',
+  },
+  custTypeBadge: {
+    marginLeft: 6,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+    backgroundColor: '#E0E7FF',
+    borderWidth: 1,
+    borderColor: '#C7D2FE',
+  },
+  custTypeBadgeText: {
+    fontSize: 10,
+    fontWeight: 'bold',
+    color: '#3730A3',
   },
 });

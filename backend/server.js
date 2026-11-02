@@ -3,7 +3,7 @@ const express = require('express');
 const cors = require('cors');
 const fs = require('fs');
 const path = require('path');
-const { poolPromise } = require('./db');
+const { getPool } = require('./db');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -11,14 +11,14 @@ const PORT = process.env.PORT || 3000;
 app.use(cors());
 app.use(express.json());
 
-// Database injection middleware
+// Database injection middleware with dynamic healthy pool retrieval
 app.use(async (req, res, next) => {
     try {
-        req.pool = await poolPromise;
+        req.pool = await getPool(process.env.DB_NAME || 'smartgold');
         next();
     } catch (err) {
-        console.error("Database connection error in middleware:", err);
-        res.status(500).json({ success: false, message: "Database connection failed" });
+        console.error("Database connection error in middleware:", err.message);
+        res.status(500).json({ success: false, message: "Database connection failed", error: err.message });
     }
 });
 
@@ -42,6 +42,15 @@ if (fs.existsSync(routesPath)) {
     });
 }
 
+// Prevent server crashes on unhandled connection drops/timeouts
+process.on('uncaughtException', (err) => {
+    console.error('🚨 Uncaught Exception:', err.message || err);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+    console.error('🚨 Unhandled Rejection:', reason);
+});
+
 app.listen(PORT, () => {
-    console.log(`Backend Server running on port ${PORT}`);
+    console.log(`Server running on port ${PORT}`);
 });

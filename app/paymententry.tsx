@@ -1,3 +1,4 @@
+/** Developer: durairaj */
 import { ThemedText } from '@/components/themed-text';
 import { API_BASE_URL } from '@/constants/api';
 import { Ionicons } from '@expo/vector-icons';
@@ -5,7 +6,6 @@ import { Stack, useFocusEffect, useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   FlatList,
   Modal,
   Platform,
@@ -240,17 +240,17 @@ export default function PaymentEntry() {
   // Add new paymode row
   const handleAddNewPaymode = () => {
     if (!selectedInvoice) {
-      Alert.alert('Validation', 'Please select an invoice first.');
+      showToast('Please select an invoice first.', 'error');
       return;
     }
     const modeName = newPaymodeName.trim().toUpperCase();
     if (!modeName) {
-      Alert.alert('Validation', 'Please specify a Paymode.');
+      showToast('Please specify a Paymode.', 'error');
       return;
     }
     const amtNum = parseFloat(newPaymodeAmount);
     if (isNaN(amtNum) || amtNum <= 0) {
-      Alert.alert('Validation', 'Please key in a valid Amount.');
+      showToast('Please key in a valid Amount.', 'error');
       return;
     }
 
@@ -323,18 +323,33 @@ export default function PaymentEntry() {
   const validateBeforeSave = (): boolean => {
     if (!selectedInvoice) {
       showToast('Please select an invoice first.', 'error');
-      if (Platform.OS !== 'web') {
-        Alert.alert('Validation Error', 'Please select an invoice first.');
-      }
       return false;
     }
 
-    // Check Amount tally: Net Amount must equal Paid Amount
-    if (Math.abs(netAmount - paidAmount) > 0.01) {
-      showToast('Amount Not Tally. Please Key in Exact Amount.', 'error');
-      if (Platform.OS !== 'web') {
-        Alert.alert('Validation Error', 'Amount Not Tally. Please Key in Exact Amount.');
+    // Reference validation from frmPaymentEntry.vb fncValiDate():
+    // For each paymode in dgvPaymode:
+    // If Val(Amount) > 0 And Trim(Paymode) <> "TRADEIN" Then
+    //    If Val(lblGST.Text) = 0 Then
+    //       If Val(Amount) <> Val(NewAmount) Then
+    //          MsgBox("Paymode Differs. Please Check", MsgBoxStyle.Information)
+    for (const pm of paymodes) {
+      const origAmt = parseFloat(String(pm.Amount || '0')) || 0;
+      const newAmt = parseFloat(String(pm.NewAmount || '0')) || 0;
+      const modeUpper = (pm.Paymode || '').toUpperCase().trim();
+
+      if (origAmt > 0 && modeUpper !== 'TRADEIN') {
+        if (gstAmount === 0 && Math.abs(origAmt - newAmt) > 0.01) {
+          showToast('Paymode Differs. Please Check', 'error');
+          return false;
+        }
       }
+    }
+
+    // Check Amount tally: Net Amount must equal Paid Amount
+    // If Val(lblTotal.Text) = Val(lblPaid.Text)
+    // Else: MsgBox("Amount Not Tally. Please Key in Excact Amount.")
+    if (Math.abs(netAmount - paidAmount) > 0.01) {
+      showToast('Amount Not Tally. Please Key in Excact Amount.', 'error');
       return false;
     }
 
@@ -374,16 +389,10 @@ export default function PaymentEntry() {
         const errorMsg = data.message || 'Unknown server error';
         console.error('Save failed:', errorMsg);
         showToast(`Failed to save: ${errorMsg}`, 'error');
-        if (Platform.OS !== 'web') {
-          Alert.alert('Save Failed', errorMsg);
-        }
       }
     } catch (error: any) {
       console.error('Error saving payment:', error);
       showToast(`Network error: ${error?.message || 'Check backend connection.'}`, 'error');
-      if (Platform.OS !== 'web') {
-        Alert.alert('Error', `Network error saving payment: ${error?.message || ''}`);
-      }
     } finally {
       setIsLoading(false);
     }

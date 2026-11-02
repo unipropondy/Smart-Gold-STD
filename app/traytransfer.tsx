@@ -106,7 +106,7 @@ export default function TrayTransferScreen() {
       setLoading(true);
       const res = await fetch(`${API_URL}/inventory?code=${encodeURIComponent(code.trim())}`);
       const data = await res.json();
-      if (data.success && data.data) {
+      if (res.ok && data.success && data.data) {
         setItemDescription(data.data.Description || '');
         setOldTray(data.data.TrayId || '');
         setSelectedInventoryCodes([data.data.InventoryCode]);
@@ -117,7 +117,7 @@ export default function TrayTransferScreen() {
         setSelectedInventoryCodes([]);
       }
     } catch (err: any) {
-      showToast('Network error loading inventory code', 'error');
+      showToast('Database error', 'error');
     } finally {
       setLoading(false);
     }
@@ -158,11 +158,15 @@ export default function TrayTransferScreen() {
     }
 
     if (codesToSave.length === 0) {
-      showToast('Please enter or select Inventory Code to transfer.', 'error');
+      showToast('Please enter Inventorycode to Transfer.', 'error');
       return;
     }
     if (!trayId.trim()) {
-      showToast('Please select New Tray to transfer to.', 'error');
+      showToast('Please select New tray to Transfer.', 'error');
+      return;
+    }
+    if (oldTray.trim() && trayId.trim().toLowerCase() === oldTray.trim().toLowerCase()) {
+      showToast('Source and Destination trays cannot be the same.', 'error');
       return;
     }
 
@@ -182,10 +186,10 @@ export default function TrayTransferScreen() {
       });
       const data = await res.json();
       if (data.success) {
-        showToast('Tray Transferred Successfully', 'success');
+        showToast('Tray Transferred successfully.', 'success');
         handleClear();
       } else {
-        showToast(data.message || 'Failed to transfer tray', 'error');
+        showToast(data.message || 'Error in updation.', 'error');
       }
     } catch (err: any) {
       showToast('Network error while saving transfer', 'error');
@@ -360,8 +364,14 @@ export default function TrayTransferScreen() {
                   <TextInput
                     style={[styles.formInput, { flex: 1 }]}
                     value={inventoryCode}
-                    onChangeText={setInventoryCode}
-                    onBlur={() => fetchSingleInventory(inventoryCode)}
+                    onChangeText={(val) => {
+                      setInventoryCode(val);
+                      if (!val.trim()) {
+                        setItemDescription('');
+                        setSelectedInventoryCodes([]);
+                      }
+                    }}
+                    onSubmitEditing={() => fetchSingleInventory(inventoryCode)}
                     placeholder="Scan or enter item code..."
                     placeholderTextColor="#9E8D77"
                   />

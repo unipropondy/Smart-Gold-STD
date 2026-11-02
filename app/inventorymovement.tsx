@@ -59,7 +59,7 @@ export default function InventoryMovementScreen() {
           showToast('Success', `Loaded ${json.data.length} movement records.`);
         } else {
           setData([]);
-          showAlert('Notice', 'No movement records found for this inventory code.');
+          showAlert('Notice', 'No data found in detail.');
         }
       } else {
         const msg = json.message || 'Error fetching movement records';

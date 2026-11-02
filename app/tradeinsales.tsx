@@ -1,13 +1,14 @@
+/** Developer: durairaj */
 import { ThemedText } from '@/components/themed-text';
 import { API_BASE_URL } from '@/constants/api';
 import { Ionicons } from '@expo/vector-icons';
-import { Stack, useRouter } from 'expo-router';
-import React, { useEffect, useState } from 'react';
+import { Stack, useFocusEffect, useRouter } from 'expo-router';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   FlatList,
   Modal,
+  Platform,
   ScrollView,
   StyleSheet,
   TextInput,
@@ -164,7 +165,7 @@ export default function TradeInSalesScreen() {
       }
     } catch (err) {
       console.error(err);
-      Alert.alert("Network Error", "Failed to connect to the backend server.");
+      showToast("Failed to connect to the backend server.", 'error');
     } finally {
       setLoading(false);
     }
@@ -582,6 +583,59 @@ export default function TradeInSalesScreen() {
     );
   };
 
+  // Keyboard Shortcuts matching VB frmTradeInOnly_KeyDown:
+  // F7: Update/Save, F6: Reprint, Escape: Close/Back
+  useFocusEffect(
+    useCallback(() => {
+      if (Platform.OS === 'web') {
+        const handleKeyDown = (e: KeyboardEvent) => {
+          if (e.key === 'F7') {
+            e.preventDefault();
+            handleSaveTransaction();
+          } else if (e.key === 'F6') {
+            e.preventDefault();
+            setIsReprintModalVisible(true);
+          } else if (e.key === 'Escape') {
+            e.preventDefault();
+            if (lookupType !== null) {
+              setLookupType(null);
+            } else if (isCashMemberModalVisible) {
+              setIsCashMemberModalVisible(false);
+            } else if (isReprintModalVisible) {
+              setIsReprintModalVisible(false);
+            } else if (isCustInputModalVisible) {
+              setIsCustInputModalVisible(false);
+            } else if (isAdminPwdVisible) {
+              setIsAdminPwdVisible(false);
+            } else {
+              router.back();
+            }
+          }
+        };
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+      }
+    }, [
+      customerCode,
+      memberCode,
+      companyShortCode,
+      gridItems,
+      totalTradeInAmount,
+      salesAmount,
+      invoiceNo,
+      refNo,
+      costPerGram,
+      remarks,
+      salesmanCode,
+      isEditMode,
+      lookupType,
+      isCashMemberModalVisible,
+      isReprintModalVisible,
+      isCustInputModalVisible,
+      isAdminPwdVisible
+    ])
+  );
+
   return (
     <SafeAreaView style={styles.safeArea} edges={['top']}>
       <Stack.Screen options={{ headerShown: false }} />
@@ -607,7 +661,7 @@ export default function TradeInSalesScreen() {
             activeOpacity={0.7}
           >
             <Ionicons name="print-outline" size={15} color="#5C4A28" />
-            <ThemedText style={styles.headerActionBtnText}>Reprint (F6)</ThemedText>
+            <ThemedText style={styles.headerActionBtnText}>Reprint</ThemedText>
           </TouchableOpacity>
 
           <TouchableOpacity
@@ -617,7 +671,7 @@ export default function TradeInSalesScreen() {
             activeOpacity={0.7}
           >
             <Ionicons name="checkmark-done" size={16} color="#9E6D08" />
-            <ThemedText style={styles.headerSaveBtnText}>Update (F7)</ThemedText>
+            <ThemedText style={styles.headerSaveBtnText}>Update</ThemedText>
           </TouchableOpacity>
         </View>
       </View>

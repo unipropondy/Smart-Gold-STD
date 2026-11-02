@@ -1,17 +1,25 @@
+/** Developer: durairaj */
 const express = require("express");
 const router = express.Router();
-const { sql } = require("../db");
+const { sql, poolPromise } = require("../db");
+
+// Helper to acquire database connection pool reliably
+const getPool = async (req) => {
+  if (req && req.pool) return req.pool;
+  if (poolPromise) return await poolPromise;
+  throw new Error("Database pool is not available.");
+};
 
 // GET Company Info (GST % and Company Short Code)
 router.get("/company-info", async (req, res) => {
   try {
-    const pool = req.pool;
+    const pool = await getPool(req);
     const result = await pool.request().query("SELECT TOP 1 GSTPerc, CompanyShortCode FROM tblCompany");
-    if (result.recordset.length > 0) {
+    if (result.recordset && result.recordset.length > 0) {
       res.json({
         success: true,
         GSTPerc: result.recordset[0].GSTPerc || 0,
-        CompanyShortCode: result.recordset[0].CompanyShortCode || ""
+        CompanyShortCode: (result.recordset[0].CompanyShortCode || "").trim()
       });
     } else {
       res.json({ success: true, GSTPerc: 0, CompanyShortCode: "" });
@@ -25,7 +33,7 @@ router.get("/company-info", async (req, res) => {
 // GET Next Voucher Number based on Type
 router.get("/next-voucher", async (req, res) => {
   try {
-    const pool = req.pool;
+    const pool = await getPool(req);
     const { type } = req.query;
     if (!type) {
       return res.status(400).json({ success: false, message: "Type is required" });
@@ -45,7 +53,7 @@ router.get("/next-voucher", async (req, res) => {
 // GET/Fetch specific Miscellaneous Entry
 router.get("/fetch", async (req, res) => {
   try {
-    const pool = req.pool;
+    const pool = await getPool(req);
     const { type, voucherNo } = req.query;
     if (!type || !voucherNo) {
       return res.status(400).json({ success: false, message: "Type and VoucherNo are required" });
@@ -56,7 +64,7 @@ router.get("/fetch", async (req, res) => {
       .input("VoucherNo", sql.Int, parseInt(voucherNo))
       .query("SELECT * FROM tblMisc WHERE Type = @Type AND VoucherNo = @VoucherNo");
 
-    if (result.recordset.length > 0) {
+    if (result.recordset && result.recordset.length > 0) {
       res.json({ success: true, data: result.recordset[0] });
     } else {
       res.status(200).json({ success: false, message: "Miscellaneous entry not found" });
@@ -69,8 +77,9 @@ router.get("/fetch", async (req, res) => {
 
 // POST - Insert new entry
 router.post("/", async (req, res) => {
+  let transaction;
   try {
-    const pool = req.pool;
+    const pool = await getPool(req);
     const {
       Type,
       VoucherNo,
@@ -95,9 +104,15 @@ router.post("/", async (req, res) => {
       .input("VoucherNo", sql.Int, parseInt(VoucherNo))
       .query("SELECT VoucherNo FROM tblMisc WHERE Type = @Type AND VoucherNo = @VoucherNo");
 
-    if (checkResult.recordset.length > 0) {
+    if (checkResult.recordset && checkResult.recordset.length > 0) {
       return res.status(400).json({ success: false, message: `Voucher No ${VoucherNo} already exists for type ${Type}.` });
     }
+
+    const user = CreateUser || "sys";
+    const formattedDate = dateVal ? new Date(dateVal) : new Date();
+
+    transaction = new sql.Transaction(pool);
+    await transaction.begin();
 
     const insertQuery = `
       INSERT INTO tblMisc (
@@ -117,25 +132,27 @@ router.post("/", async (req, res) => {
       );
     `;
 
-    const user = CreateUser || "sys";
-    const formattedDate = dateVal ? new Date(dateVal) : new Date();
-
-    await pool.request()
+    const request = new sql.Request(transaction);
+    await request
       .input("Type", sql.VarChar, Type)
       .input("VoucherNo", sql.Int, parseInt(VoucherNo))
       .input("Date", sql.DateTime, formattedDate)
-      .input("Person", sql.VarChar, Person ? Person.substring(0, 50) : "")
+      .input("Person", sql.VarChar, Person ? String(Person).substring(0, 50) : "")
       .input("Amount", sql.Decimal(18, 4), parseFloat(Amount || 0))
       .input("GSTPerc", sql.Decimal(18, 4), parseFloat(GSTPerc || 0))
       .input("GST", sql.Decimal(18, 4), parseFloat(GST || 0))
       .input("NetAmount", sql.Decimal(18, 4), parseFloat(NetAmount || 0))
       .input("Weight", sql.Decimal(18, 4), parseFloat(Weight || 0))
-      .input("Remarks", sql.VarChar, Remarks ? Remarks.substring(0, 50) : "")
+      .input("Remarks", sql.VarChar, Remarks ? String(Remarks).substring(0, 50) : "")
       .input("CreateUser", sql.VarChar, user)
       .query(insertQuery);
 
+    await transaction.commit();
     res.json({ success: true, message: "Miscellaneous details saved successfully" });
   } catch (err) {
+    if (transaction) {
+      try { await transaction.rollback(); } catch (rErr) { console.error("Rollback error:", rErr); }
+    }
     console.error("Insert Misc Error:", err);
     res.status(500).json({ success: false, message: "Failed to save miscellaneous details", error: err.message });
   }
@@ -143,8 +160,9 @@ router.post("/", async (req, res) => {
 
 // PUT - Update entry
 router.put("/", async (req, res) => {
+  let transaction;
   try {
-    const pool = req.pool;
+    const pool = await getPool(req);
     const {
       Type,
       VoucherNo,
@@ -162,6 +180,12 @@ router.put("/", async (req, res) => {
     if (!Type || !VoucherNo || Amount === undefined || Amount === null) {
       return res.status(400).json({ success: false, message: "Type, VoucherNo, and Amount are required fields." });
     }
+
+    const user = ModifyUser || "sys";
+    const formattedDate = dateVal ? new Date(dateVal) : new Date();
+
+    transaction = new sql.Transaction(pool);
+    await transaction.begin();
 
     const updateQuery = `
       UPDATE tblMisc SET
@@ -191,29 +215,32 @@ router.put("/", async (req, res) => {
       WHERE Type = @Type AND VoucherNo = @VoucherNo;
     `;
 
-    const user = ModifyUser || "sys";
-    const formattedDate = dateVal ? new Date(dateVal) : new Date();
-
-    const result = await pool.request()
+    const request = new sql.Request(transaction);
+    const result = await request
       .input("Type", sql.VarChar, Type)
       .input("VoucherNo", sql.Int, parseInt(VoucherNo))
       .input("Date", sql.DateTime, formattedDate)
-      .input("Person", sql.VarChar, Person ? Person.substring(0, 50) : "")
+      .input("Person", sql.VarChar, Person ? String(Person).substring(0, 50) : "")
       .input("Amount", sql.Decimal(18, 4), parseFloat(Amount || 0))
       .input("GSTPerc", sql.Decimal(18, 4), parseFloat(GSTPerc || 0))
       .input("GST", sql.Decimal(18, 4), parseFloat(GST || 0))
       .input("NetAmount", sql.Decimal(18, 4), parseFloat(NetAmount || 0))
       .input("Weight", sql.Decimal(18, 4), parseFloat(Weight || 0))
-      .input("Remarks", sql.VarChar, Remarks ? Remarks.substring(0, 50) : "")
+      .input("Remarks", sql.VarChar, Remarks ? String(Remarks).substring(0, 50) : "")
       .input("ModifyUser", sql.VarChar, user)
       .query(updateQuery);
 
-    if (result.rowsAffected[0] === 0) {
+    if (result.rowsAffected && result.rowsAffected[0] === 0) {
+      await transaction.rollback();
       return res.status(200).json({ success: false, message: "Miscellaneous entry not found for update" });
     }
 
+    await transaction.commit();
     res.json({ success: true, message: "Miscellaneous details updated successfully" });
   } catch (err) {
+    if (transaction) {
+      try { await transaction.rollback(); } catch (rErr) { console.error("Rollback error:", rErr); }
+    }
     console.error("Update Misc Error:", err);
     res.status(500).json({ success: false, message: "Failed to update miscellaneous details", error: err.message });
   }
@@ -221,34 +248,46 @@ router.put("/", async (req, res) => {
 
 // DELETE - Delete entry
 router.delete("/", async (req, res) => {
+  let transaction;
   try {
-    const pool = req.pool;
+    const pool = await getPool(req);
     const { type, voucherNo } = req.query;
 
     if (!type || !voucherNo) {
       return res.status(400).json({ success: false, message: "Type and VoucherNo are required" });
     }
 
+    transaction = new sql.Transaction(pool);
+    await transaction.begin();
+
     const deleteQuery = `
       DELETE FROM tblMisc WHERE Type = @Type AND VoucherNo = @VoucherNo;
       DELETE FROM tblMiscHistory WHERE Type = @Type AND VoucherNo = @VoucherNo;
     `;
 
-    const result = await pool.request()
+    const request = new sql.Request(transaction);
+    const result = await request
       .input("Type", sql.VarChar, type)
       .input("VoucherNo", sql.Int, parseInt(voucherNo))
       .query(deleteQuery);
 
-    const totalAffected = result.rowsAffected.reduce((a, b) => a + b, 0);
+    const totalAffected = result.rowsAffected ? result.rowsAffected.reduce((a, b) => a + b, 0) : 0;
     if (totalAffected === 0) {
+      await transaction.rollback();
       return res.status(200).json({ success: false, message: "Miscellaneous entry not found to delete" });
     }
 
+    await transaction.commit();
     res.json({ success: true, message: "Miscellaneous details deleted successfully" });
   } catch (err) {
+    if (transaction) {
+      try { await transaction.rollback(); } catch (rErr) { console.error("Rollback error:", rErr); }
+    }
     console.error("Delete Misc Error:", err);
     res.status(500).json({ success: false, message: "Failed to delete miscellaneous details", error: err.message });
   }
 });
+
+module.exports = router;
 
 module.exports = router;

@@ -1,8 +1,9 @@
+/** Developer: durairaj */
 import { ThemedText } from '@/components/themed-text';
 import { API_BASE_URL } from '@/constants/api';
 import { Ionicons } from '@expo/vector-icons';
-import { Stack, useRouter } from 'expo-router';
-import React, { useMemo, useState } from 'react';
+import { Stack, useFocusEffect, useRouter } from 'expo-router';
+import React, { useCallback, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
@@ -68,6 +69,10 @@ export default function SalesReturnScreen() {
   const [salesmanPassword, setSalesmanPassword] = useState('');
   const [verifyingPassword, setVerifyingPassword] = useState(false);
 
+  // Reprint Modal State (PnlReturnprint in VB)
+  const [reprintModalVisible, setReprintModalVisible] = useState(false);
+  const [reprintReturnNo, setReprintReturnNo] = useState('');
+
   // Toast State
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
 
@@ -108,6 +113,49 @@ export default function SalesReturnScreen() {
     };
   }, [returnItems, taxType, gstRate]);
 
+  // Keyboard Shortcuts matching VB frmSalesReturn_KeyDown:
+  // F7: Save, F6: Clear, Escape: Close, F9: Reprint Dialog
+  useFocusEffect(
+    useCallback(() => {
+      if (Platform.OS === 'web') {
+        const handleKeyDown = (e: KeyboardEvent) => {
+          if (e.key === 'F7') {
+            e.preventDefault();
+            handleSave();
+          } else if (e.key === 'F6') {
+            e.preventDefault();
+            clearForm();
+          } else if (e.key === 'F9') {
+            e.preventDefault();
+            setReprintModalVisible(true);
+          } else if (e.key === 'Escape') {
+            e.preventDefault();
+            if (lovVisible) {
+              setLovVisible(false);
+            } else if (reprintModalVisible) {
+              setReprintModalVisible(false);
+            } else if (!passwordModalVisible) {
+              router.back();
+            }
+          }
+        };
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+      }
+    }, [
+      billNo,
+      salesMan,
+      customerCode,
+      memberCode,
+      customerName,
+      returnItems,
+      totals,
+      lovVisible,
+      reprintModalVisible,
+      passwordModalVisible
+    ])
+  );
+
   const clearForm = () => {
     setBillNo('');
     setSalesMan('');
@@ -143,7 +191,7 @@ export default function SalesReturnScreen() {
     try {
       const res = await fetch(`${API_BASE_URL}/salesreturn/salesheader/${encodeURIComponent(targetBill)}`);
       const data = await res.json();
-      if (data.success) {
+      if (data.success && data.header) {
         const { header, customer } = data;
         if (header.InvoiceDate) {
           const invoiceDate = new Date(header.InvoiceDate);
@@ -156,11 +204,7 @@ export default function SalesReturnScreen() {
         }
 
         if (header.TradeInAmt && parseFloat(header.TradeInAmt) > 0) {
-          if (Platform.OS === 'web') {
-            window.alert("This Sales has TRADEIN Items");
-          } else {
-            showToast('Error', "This Sales has TRADEIN Items");
-          }
+          showToast('Error', "This Sales has TRADEIN Items");
         }
 
         setSalesMan(header.SalesManCode || '');
@@ -215,7 +259,7 @@ export default function SalesReturnScreen() {
         // Fetch Details
         const resDetail = await fetch(`${API_BASE_URL}/salesreturn/salesdetail/${encodeURIComponent(targetBill)}`);
         const dataDetail = await resDetail.json();
-        if (dataDetail.success) {
+        if (dataDetail.success && Array.isArray(dataDetail.data)) {
           const validItems = dataDetail.data.filter((d: any) => {
             const returnAmt = parseFloat(d.TotalValue || '0') - parseFloat(d.NetDiscount || '0');
             const invCode = String(d.InventoryCode || d.Inventorycode || '').toUpperCase();
@@ -299,7 +343,7 @@ export default function SalesReturnScreen() {
           setBillNo(trimmedInvoice);
           fetchBillInfo(trimmedInvoice);
         } else {
-          showToast('Error', "Please select the sold Inventory!");
+          showToast('Info', 'Selected inventory loaded. Please enter original Bill No if applicable.');
         }
       } else {
         showToast('Info', 'Inventory not found');
@@ -418,7 +462,7 @@ export default function SalesReturnScreen() {
           setLovData(data.data);
         }
       } else if (type === 'inventory') {
-        const res = await fetch(`${API_BASE_URL}/inventorysearch`);
+        const res = await fetch(`${API_BASE_URL}/salesreturn/inventory-lov`);
         const data = await res.json();
         if (data.success) {
           setLovData(data.data);
@@ -610,6 +654,15 @@ export default function SalesReturnScreen() {
         </View>
 
         <View style={styles.headerRight}>
+          <TouchableOpacity
+            style={[styles.actionBtn, styles.clearBtn]}
+            onPress={() => setReprintModalVisible(true)}
+            activeOpacity={0.8}
+          >
+            <Ionicons name="print-outline" size={14} color="#5C4A28" />
+            <ThemedText style={styles.clearBtnText}>Reprint</ThemedText>
+          </TouchableOpacity>
+
           <TouchableOpacity
             style={[styles.actionBtn, styles.clearBtn]}
             onPress={clearForm}
@@ -1109,6 +1162,72 @@ export default function SalesReturnScreen() {
                     )}
                   />
                 )}
+              </View>
+            </View>
+          </TouchableWithoutFeedback>
+        </TouchableOpacity>
+      </Modal>
+
+      {/* REPRINT MODAL (PnlReturnprint in VB) */}
+      <Modal visible={reprintModalVisible} transparent animationType="fade">
+        <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setReprintModalVisible(false)}>
+          <TouchableWithoutFeedback>
+            <View style={[styles.passwordModalContent, { maxWidth: 320, width: '100%' }]}>
+              <View style={styles.passwordModalHeader}>
+                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                  <View style={styles.headerIconBadgeSmall}>
+                    <Ionicons name="print-outline" size={14} color="#B48218" />
+                  </View>
+                  <ThemedText style={styles.passwordModalTitle}>Reprint Sales Return</ThemedText>
+                </View>
+                <TouchableOpacity onPress={() => setReprintModalVisible(false)} style={{ padding: 4 }}>
+                  <Ionicons name="close" size={18} color="#3B2D17" />
+                </TouchableOpacity>
+              </View>
+
+              <View style={{ padding: 16 }}>
+                <ThemedText style={{ fontSize: 11, color: '#554428', marginBottom: 6, fontWeight: 'bold' }}>
+                  Return Number
+                </ThemedText>
+                <TextInput
+                  style={[styles.formInput, { height: 34, marginBottom: 14 }]}
+                  value={reprintReturnNo}
+                  onChangeText={setReprintReturnNo}
+                  placeholder="e.g. 00000001"
+                  placeholderTextColor="#9E8D77"
+                  autoFocus
+                />
+                <View style={{ flexDirection: 'row', gap: 10 }}>
+                  <TouchableOpacity
+                    style={[styles.actionBtn, styles.clearBtn, { flex: 1, justifyContent: 'center' }]}
+                    onPress={() => setReprintModalVisible(false)}
+                  >
+                    <ThemedText style={styles.clearBtnText}>Cancel</ThemedText>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.actionBtn, styles.saveBtn, { flex: 1, justifyContent: 'center' }]}
+                    onPress={async () => {
+                      if (!reprintReturnNo.trim()) {
+                        showToast('Error', 'Please enter a Return No');
+                        return;
+                      }
+                      try {
+                        const res = await fetch(`${API_BASE_URL}/salesreturn/fetch-return/${encodeURIComponent(reprintReturnNo.trim())}`);
+                        const json = await res.json();
+                        if (json.success && json.data) {
+                          showToast('Success', `Reprinting Return ${reprintReturnNo.trim()}...`);
+                          setReprintModalVisible(false);
+                        } else {
+                          showToast('Error', json.message || 'Return Number Not Found');
+                        }
+                      } catch (err) {
+                        showToast('Error', 'Failed to retrieve return details');
+                      }
+                    }}
+                  >
+                    <ThemedText style={styles.saveBtnText}>Print</ThemedText>
+                  </TouchableOpacity>
+                </View>
               </View>
             </View>
           </TouchableWithoutFeedback>

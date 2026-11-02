@@ -1,17 +1,22 @@
+/**
+ * Developer: durairaj
+ */
+
 const express = require("express");
 const router = express.Router();
-const { sql } = require("../db");
+const { sql, poolPromise } = require("../db");
 
 // GET all TaelPercent
 router.get("/", async (req, res) => {
   try {
-    const result = await req.pool.request().query(`
+    const pool = req.pool || (await poolPromise);
+    const result = await pool.request().query(`
       SELECT 
         TaelPercent,
         TaelPercent1,
         TaelPercent2,
         TaelPercent3
-      FROM TblTaelPercent
+      FROM tblTaelPercent
     `);
     res.json({ success: true, data: result.recordset });
   } catch (error) {

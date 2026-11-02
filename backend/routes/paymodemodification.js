@@ -1,6 +1,14 @@
+/** Developer: durairaj */
 const express = require("express");
 const router = express.Router();
-const { sql } = require("../db");
+const { sql, poolPromise } = require("../db");
+
+// Helper to acquire database connection pool reliably
+const getPool = async (req) => {
+  if (req && req.pool) return req.pool;
+  if (poolPromise) return await poolPromise;
+  throw new Error("Database pool is not available.");
+};
 
 // Helper to ensure change log table exists
 async function ensureChangeLogTableExists(pool) {
@@ -28,7 +36,7 @@ async function ensureChangeLogTableExists(pool) {
 // GET all recent invoices for overview list (subLoadinvoices)
 router.get("/invoices", async (req, res) => {
   try {
-    const pool = req.pool;
+    const pool = await getPool(req);
     const result = await pool.request().query(`
       SELECT TOP 100
         h.InvoiceNo,
@@ -55,11 +63,11 @@ router.get("/invoices", async (req, res) => {
       ORDER BY h.InvoiceDate DESC
     `);
 
-    res.json({ success: true, data: result.recordset });
+    res.json({ success: true, data: result.recordset || [] });
   } catch (err) {
     try {
-      // Fallback in case XML PATH or Paymode column differences exist
-      const fallbackResult = await req.pool.request().query(`
+      const pool = await getPool(req);
+      const fallbackResult = await pool.request().query(`
         SELECT TOP 100
           h.InvoiceNo,
           CONVERT(varchar, h.InvoiceDate, 103) as InvoiceDate,
@@ -77,7 +85,7 @@ router.get("/invoices", async (req, res) => {
         FROM tblSalesHeader h
         ORDER BY h.InvoiceDate DESC
       `);
-      res.json({ success: true, data: fallbackResult.recordset });
+      res.json({ success: true, data: fallbackResult.recordset || [] });
     } catch (fErr) {
       console.error("Fetch Invoices Error:", err);
       res.status(500).json({ success: false, message: "Error fetching invoices", error: err.message });
@@ -89,13 +97,13 @@ router.get("/invoices", async (req, res) => {
 router.get("/invoice/:invoiceNo", async (req, res) => {
   try {
     const { invoiceNo } = req.params;
-    const pool = req.pool;
+    const pool = await getPool(req);
 
     // Fetch Header Details
     let headerRes;
     try {
       headerRes = await pool.request()
-        .input("InvoiceNo", sql.VarChar, invoiceNo.trim())
+        .input("InvoiceNo", sql.VarChar, (invoiceNo || "").trim())
         .query(`
           SELECT TOP 1
             h.InvoiceNo, 
@@ -120,13 +128,13 @@ router.get("/invoice/:invoiceNo", async (req, res) => {
               ).value('.', 'NVARCHAR(MAX)'), 1, 3, '')
             ) as InvoicePaymode
           FROM tblSalesHeader h
-          WHERE h.InvoiceNo = @InvoiceNo OR h.InvoiceNo LIKE '%' + @InvoiceNo + '%'
+          WHERE h.InvoiceNo = @InvoiceNo OR h.InvoiceNo LIKE @InvoiceNo + '%'
           ORDER BY h.InvoiceDate DESC
         `);
     } catch (hErr) {
       // Fallback without XML PATH if needed
       headerRes = await pool.request()
-        .input("InvoiceNo", sql.VarChar, invoiceNo.trim())
+        .input("InvoiceNo", sql.VarChar, (invoiceNo || "").trim())
         .query(`
           SELECT TOP 1
             h.InvoiceNo, 
@@ -144,7 +152,7 @@ router.get("/invoice/:invoiceNo", async (req, res) => {
             h.InvoiceDate,
             '' as InvoicePaymode
           FROM tblSalesHeader h
-          WHERE h.InvoiceNo = @InvoiceNo OR h.InvoiceNo LIKE '%' + @InvoiceNo + '%'
+          WHERE h.InvoiceNo = @InvoiceNo OR h.InvoiceNo LIKE @InvoiceNo + '%'
           ORDER BY h.InvoiceDate DESC
         `);
     }
@@ -255,7 +263,7 @@ router.get("/invoice/:invoiceNo", async (req, res) => {
 // GET all active paymodes for LOV
 router.get("/paymodes", async (req, res) => {
   try {
-    const pool = req.pool;
+    const pool = await getPool(req);
     let result;
     try {
       result = await pool.request().query("SELECT PayMode FROM tblPaymode WHERE Active = 1 ORDER BY Position ASC");
@@ -292,7 +300,7 @@ router.get("/paymodes", async (req, res) => {
 // POST verify salesman password (subGetPassword)
 router.post("/verify-salesman", async (req, res) => {
   try {
-    const pool = req.pool;
+    const pool = await getPool(req);
     const { password } = req.body;
 
     if (!password) {
@@ -321,8 +329,8 @@ router.post("/verify-salesman", async (req, res) => {
 
 // POST Save modifications (fncPaymodeDetailSave + fncSalesPaymodeChangeLogSave)
 router.post("/save", async (req, res) => {
-  const pool = req.pool;
-  const transaction = new sql.Transaction(pool);
+  let pool;
+  let transaction;
 
   try {
     const { 
@@ -339,6 +347,9 @@ router.post("/save", async (req, res) => {
     if (!invoiceNo) {
       return res.status(400).json({ success: false, message: "InvoiceNo is required" });
     }
+
+    pool = await getPool(req);
+    transaction = new sql.Transaction(pool);
 
     const sysUser = (userId || "sys").substring(0, 10);
     const curDate = new Date();
@@ -437,23 +448,49 @@ router.post("/save", async (req, res) => {
     }
 
     // 4. Update PaidAmt & BalanceAmt on tblSalesHeader to keep it completely synchronized
-    await new sql.Request(transaction)
-      .input("InvoiceNo", sql.VarChar, invoiceNo.trim())
-      .input("PaidAmt", sql.Numeric(18, 4), totalSaved)
-      .query(`
+    // Safe column check for BalanceAmt
+    let hasBalanceAmt = false;
+    try {
+      const colCheck = await new sql.Request(transaction).query(`
+        SELECT COLUMN_NAME 
+        FROM INFORMATION_SCHEMA.COLUMNS 
+        WHERE TABLE_NAME = 'tblSalesHeader' AND COLUMN_NAME = 'BalanceAmt'
+      `);
+      if (colCheck.recordset && colCheck.recordset.length > 0) {
+        hasBalanceAmt = true;
+      }
+    } catch (cErr) {
+      console.warn("Could not check tblSalesHeader columns:", cErr.message);
+    }
+
+    const updateHeaderReq = new sql.Request(transaction);
+    updateHeaderReq.input("InvoiceNo", sql.VarChar, invoiceNo.trim());
+    updateHeaderReq.input("PaidAmt", sql.Numeric(18, 4), totalSaved);
+
+    if (hasBalanceAmt) {
+      await updateHeaderReq.query(`
         UPDATE tblSalesHeader 
         SET PaidAmt = @PaidAmt,
-            BalanceAmt = NetTotal - @PaidAmt
+            BalanceAmt = ISNULL(NetTotal, 0) - @PaidAmt
         WHERE InvoiceNo = @InvoiceNo
       `);
+    } else {
+      await updateHeaderReq.query(`
+        UPDATE tblSalesHeader 
+        SET PaidAmt = @PaidAmt 
+        WHERE InvoiceNo = @InvoiceNo
+      `);
+    }
 
     await transaction.commit();
     res.json({ success: true, message: `Paymode details updated successfully` });
   } catch (err) {
     console.error("Save Paymode Modification Error:", err);
-    try {
-      await transaction.rollback();
-    } catch (rberr) {}
+    if (transaction) {
+      try {
+        await transaction.rollback();
+      } catch (rberr) {}
+    }
     res.status(500).json({ success: false, message: "Database Save failed", error: err.message });
   }
 });

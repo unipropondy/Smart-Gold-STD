@@ -113,18 +113,19 @@ export default function PurchaseReturnScreen() {
   const fetchSuppliers = async () => {
     setLoading(true);
     try {
-      const res = await fetch(`${API_URL}/supplier`);
+      const res = await fetch(`${API_URL}/purchasereturn/lov/supplier`);
       const json = await res.json();
       if (json.success) {
-        openLov('Select Supplier', json.data, ['SupplierCode', 'SupplierName'], item => {
+        openLov('Select Supplier', json.data, ['SupplierCode', 'SupplierName', 'Address1', 'Address2'], item => {
           setSupplierCode(item.SupplierCode);
           setSupplierName(item.SupplierName);
         });
       } else {
-        showToast('Failed to fetch suppliers', 'error');
+        const detail = json.error ? ` (${json.error})` : '';
+        showToast(`Failed to fetch suppliers${detail}`, 'error');
       }
-    } catch (e) {
-      showToast('Error connecting to server', 'error');
+    } catch (e: any) {
+      showToast(`Error connecting to server: ${e?.message || e}`, 'error');
     } finally {
       setLoading(false);
     }
@@ -331,11 +332,12 @@ export default function PurchaseReturnScreen() {
       const json = await res.json();
       if (json.success) {
         setRefNo(json.returnNo);
-        showToast(`Saved. Reference No: ${json.returnNo}`, 'success');
+        showToast(json.message || `Please take Note Reference No : ${json.returnNo}`, 'success');
         setDetails([]);
         setSelectedIndex(null);
       } else {
-        showToast(json.message || 'Failed to save purchase return', 'error');
+        const errorDetail = json.error ? `\nDetails: ${json.error}` : '';
+        showToast(`${json.message || 'Failed to save purchase return'}${errorDetail}`, 'error');
       }
     } catch (e) {
       showToast('Server connection failed', 'error');
@@ -591,26 +593,32 @@ export default function PurchaseReturnScreen() {
 
         {/* BOTTOM SECTION: Add / Edit Item Form (JobSheet-style Gold Card) */}
         <View style={styles.goldCard}>
-          <View style={styles.cardHeaderBanner}>
-            <View style={styles.headerIconBadge}>
-              <Ionicons name="add-circle" size={15} color="#B48218" />
-            </View>
-            <ThemedText style={styles.cardHeaderTitle}>Add Item To Return List</ThemedText>
-          </View>
-
           <View style={styles.cardBody}>
             {/* Row 1: Code, Desc, Weight, Gold Loss, MC, Cost/Gram, PCS, Value */}
             <View style={styles.row}>
               {/* Inventory Code */}
-              <View style={{ width: 150, marginRight: 8 }}>
+              <View style={{ width: 160, marginRight: 8 }}>
                 <ThemedText style={styles.inputSubLabel}>Inventory Code</ThemedText>
-                <View style={{ flexDirection: 'row' }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                   <TextInput
-                    style={[styles.input, { flex: 1, borderTopRightRadius: 0, borderBottomRightRadius: 0, borderRightWidth: 0 }]}
+                    style={[
+                      styles.input,
+                      {
+                        flex: 1,
+                        borderTopRightRadius: 0,
+                        borderBottomRightRadius: 0,
+                        borderRightWidth: 0,
+                        minWidth: 0,
+                      },
+                    ]}
                     value={inventoryCode}
                     onChangeText={setInventoryCode}
                   />
-                  <TouchableOpacity style={styles.lookupBtn} onPress={fetchInventoryItems}>
+                  <TouchableOpacity
+                    style={styles.lookupBtn}
+                    onPress={fetchInventoryItems}
+                    activeOpacity={0.7}
+                  >
                     <ThemedText style={styles.lookupBtnText}>...</ThemedText>
                   </TouchableOpacity>
                 </View>
@@ -675,23 +683,21 @@ export default function PurchaseReturnScreen() {
 
             {/* Bottom Action Buttons */}
             <View style={styles.actionButtonRow}>
+              <TouchableOpacity
+                style={[styles.deleteMiniBtn, selectedIndex === null && { opacity: 0.5 }]}
+                onPress={handleDeleteRow}
+                disabled={selectedIndex === null}
+              >
+                <ThemedText style={styles.deleteMiniBtnText}>Delete</ThemedText>
+              </TouchableOpacity>
+
               <TouchableOpacity style={styles.clearMiniBtn} onPress={clearItemFields}>
                 <ThemedText style={styles.clearMiniBtnText}>Clear</ThemedText>
               </TouchableOpacity>
 
-              <View style={{ flexDirection: 'row', gap: 8 }}>
-                <TouchableOpacity
-                  style={[styles.deleteMiniBtn, selectedIndex === null && { opacity: 0.5 }]}
-                  onPress={handleDeleteRow}
-                  disabled={selectedIndex === null}
-                >
-                  <ThemedText style={styles.deleteMiniBtnText}>Delete</ThemedText>
-                </TouchableOpacity>
-
-                <TouchableOpacity style={styles.addMiniBtn} onPress={handleAddRow}>
-                  <ThemedText style={styles.addMiniBtnText}>Add</ThemedText>
-                </TouchableOpacity>
-              </View>
+              <TouchableOpacity style={styles.addMiniBtn} onPress={handleAddRow}>
+                <ThemedText style={styles.addMiniBtnText}>Add</ThemedText>
+              </TouchableOpacity>
             </View>
           </View>
         </View>
@@ -967,7 +973,8 @@ const styles = StyleSheet.create({
     height: 28,
     backgroundColor: '#FFFFFF',
     color: '#2C2519',
-  },
+    ...(Platform.OS === 'web' ? { outlineStyle: 'none', boxSizing: 'border-box' } : {}),
+  } as any,
   readonlyInput: {
     backgroundColor: '#F8F5EE',
     borderColor: '#EADBCA',
@@ -976,6 +983,7 @@ const styles = StyleSheet.create({
   lookupBtn: {
     width: 32,
     height: 28,
+    flexShrink: 0,
     borderWidth: 1,
     borderColor: '#E2D7C5',
     borderLeftWidth: 1,
@@ -988,7 +996,9 @@ const styles = StyleSheet.create({
   lookupBtnText: {
     color: '#6E5528',
     fontWeight: 'bold',
-    fontSize: 12,
+    fontSize: 14,
+    lineHeight: 14,
+    textAlign: 'center',
   },
   radioContainer: {
     flexDirection: 'row',
@@ -1073,8 +1083,9 @@ const styles = StyleSheet.create({
   // Action Buttons for Item Add Form
   actionButtonRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
+    justifyContent: 'flex-end',
     alignItems: 'center',
+    gap: 8,
     marginTop: 10,
     paddingTop: 8,
     borderTopWidth: 1,
