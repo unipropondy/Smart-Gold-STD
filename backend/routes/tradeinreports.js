@@ -1,5 +1,6 @@
 const express = require("express");
 const router = express.Router();
+const { validateBackendDates } = require("../utils/validateReportDates");
 
 router.post("/report", async (req, res) => {
   try {
@@ -11,6 +12,11 @@ router.post("/report", async (req, res) => {
       DateTo,       // YYYY-MM-DD
       IsPdfDownload // boolean flag if direct pdf trigger is requested
     } = req.body;
+
+    const dateVal = validateBackendDates(DateFrom, DateTo);
+    if (!dateVal.isValid) {
+      return res.status(400).send(`<html><body style="font-family:sans-serif;padding:30px;color:#c00;"><h3>Invalid Date Range</h3><p>${dateVal.message}</p></body></html>`);
+    }
 
     const pool = req.pool;
 
@@ -261,9 +267,9 @@ router.post("/report", async (req, res) => {
           <table>
             <thead>
               <tr>
-                <th style="width: 35%;">Trade-In Item Code</th>
-                <th class="right" style="width: 30%;">Weight (g)</th>
-                <th class="right" style="width: 35%;">Stone Weight (g)</th>
+                <th style="width: 35%;">TRADE-IN ITEM CODE</th>
+                <th class="right" style="width: 30%;">TOTAL WT. (G)</th>
+                <th class="right" style="width: 35%;">STONE WT. (G)</th>
               </tr>
             </thead>
             <tbody>
@@ -319,12 +325,12 @@ router.post("/report", async (req, res) => {
           <table>
             <thead>
               <tr>
-                <th style="width: 15%;">Supplier</th>
-                <th style="width: 12%;">Class</th>
-                <th style="width: 15%;">Inventory Code</th>
-                <th style="width: 26%;">Description</th>
-                <th class="right" style="width: 16%;">Weight (g)</th>
-                <th class="right" style="width: 16%;">Total Cost</th>
+                <th style="width: 15%;">SUPPLIER</th>
+                <th style="width: 12%;">CLASS</th>
+                <th style="width: 15%;">INV. CODE</th>
+                <th style="width: 26%;">DESC.</th>
+                <th class="right" style="width: 16%;">TOTAL WT. (G)</th>
+                <th class="right" style="width: 16%;">TOTAL COST</th>
               </tr>
             </thead>
             <tbody>
@@ -377,10 +383,10 @@ router.post("/report", async (req, res) => {
             <table>
               <thead>
                 <tr>
-                  <th style="width: 25%;">Trade Issue No</th>
-                  <th style="width: 25%;">Issue Date</th>
-                  <th class="right" style="width: 25%;">Total Weight (g)</th>
-                  <th class="right" style="width: 25%;">Total Price</th>
+                  <th style="width: 25%;">TRADE ISSUE NO.</th>
+                  <th style="width: 25%;">ISSUE DATE</th>
+                  <th class="right" style="width: 25%;">TOTAL WT. (G)</th>
+                  <th class="right" style="width: 25%;">TOTAL PRICE</th>
                 </tr>
               </thead>
               <tbody>
@@ -475,8 +481,7 @@ router.post("/report", async (req, res) => {
             border-collapse: collapse; 
             margin-top: 6px;
           }
-          th { 
-            border-top: 2px solid #000; 
+          th { white-space: nowrap !important; text-transform: uppercase !important; border-top: 2px solid #000; 
             border-bottom: 2px solid #000; 
             padding: 6px 4px; 
             text-align: left; 
@@ -542,6 +547,178 @@ router.post("/report", async (req, res) => {
     console.error("Generate TradeIn Report Error:", err);
     res.status(500).send("Server error generating Trade-In report.");
   }
+});
+
+// POST /api/tradeinreports/generate
+router.post("/generate", async (req, res) => {
+  try {
+    const { ReportOption, ReportType = 'Summary', filters = {} } = req.body;
+    const { fromDate, toDate } = filters;
+
+    const dateVal = validateBackendDates(fromDate, toDate);
+    if (!dateVal.isValid) {
+      return res.status(400).json({ success: false, message: dateVal.message });
+    }
+
+    const pool = req.pool;
+
+    const toDbDate = (dStr, isEnd = false) => {
+      if (!dStr) return '';
+      if (typeof dStr === 'string' && dStr.includes('/')) {
+        const parts = dStr.split('/');
+        if (parts.length === 3) {
+          return `${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}${isEnd ? ' 23:59:59' : ' 00:00:00'}`;
+        }
+      }
+      return `${dStr}${isEnd ? ' 23:59:59' : ' 00:00:00'}`;
+    };
+
+    const safeDateFrom = toDbDate(fromDate, false);
+    const safeDateTo = toDbDate(toDate, true);
+
+    let query = "";
+    let reportTitle = "";
+
+    if (ReportOption === "Trade In Merge") {
+      let dateFilter = "";
+      if (safeDateFrom && safeDateTo) {
+        dateFilter = `WHERE h.CreateDate >= '${safeDateFrom}' AND h.CreateDate <= '${safeDateTo}'`;
+      } else if (safeDateFrom) {
+        dateFilter = `WHERE h.CreateDate >= '${safeDateFrom}'`;
+      }
+
+      reportTitle = `Trade Merge Inventory Report (${ReportType}) From ${fromDate || ''} To ${toDate || ''}`;
+      query = `
+        SELECT 
+          RTRIM(h.TradeInInventoryCode) AS HeaderCode, 
+          RTRIM(d.TradeInInventoryCode) AS DetailCode, 
+          ISNULL(d.TradeInWeight, 0) AS TradeInWeight, 
+          ISNULL(d.TradeInStoneWeight, 0) AS TradeInStoneWeight, 
+          h.CreateDate, 
+          RTRIM(h.Purity) AS Purity
+        FROM tblTradeMergeInventoryHeader h 
+        INNER JOIN tblTradeMergeInventoryDetail d 
+          ON h.TradeInInventoryCode = d.TradeInMergeInventoryCode
+        ${dateFilter}
+        ORDER BY h.TradeInInventoryCode
+      `;
+    } else {
+      reportTitle = `Trade In Issue Report From ${fromDate || ''} To ${toDate || ''}`;
+      let dateFilter = "";
+      if (safeDateFrom && safeDateTo) {
+        dateFilter = `WHERE hdr.TradeIssueDate >= '${safeDateFrom}' AND hdr.TradeIssueDate <= '${safeDateTo}'`;
+      } else if (safeDateFrom) {
+        dateFilter = `WHERE hdr.TradeIssueDate >= '${safeDateFrom}'`;
+      }
+
+      query = `
+        SELECT 
+          RTRIM(s.SupplierName) AS SupplierName, 
+          RTRIM(hdr.TradeIssueNo) AS TradeIssueNo, 
+          hdr.TradeIssueDate, 
+          ISNULL(hdr.TotalPrice, 0) AS TotalPrice, 
+          ISNULL(hdr.TotalWeight, 0) AS TotalWeight
+        FROM tblTradeIssueHistoryHeader hdr
+        INNER JOIN tblSupplier s ON hdr.SupplierCode = s.SupplierCode
+        ${dateFilter}
+        ORDER BY s.SupplierName
+      `;
+    }
+
+    let records = [];
+    try {
+      const dbResult = await pool.request().query(query);
+      records = dbResult.recordset || [];
+    } catch (e) {
+      if (ReportOption !== "Trade In Merge") {
+        const fallbackFilter = (safeDateFrom && safeDateTo)
+          ? `AND h.ModifyDate >= '${safeDateFrom}' AND h.ModifyDate <= '${safeDateTo}'`
+          : '';
+        const fallbackQuery = `
+          SELECT 
+            RTRIM(s.SupplierName) AS SupplierName, 
+            RTRIM(h.TradeIssueNo) AS TradeIssueNo, 
+            h.ModifyDate AS TradeIssueDate, 
+            ISNULL(h.Amount, 0) AS TotalPrice, 
+            ISNULL(h.IssuedWeight, 0) AS TotalWeight,
+            RTRIM(h.InvoiceNo) AS InvoiceNo,
+            RTRIM(h.InventoryCode) AS InventoryCode
+          FROM tblTradeInHeader h
+          LEFT JOIN tblSupplier s ON h.SupplierCode = s.SupplierCode
+          WHERE (h.IssueFlag = 'Y' OR h.TradeIssueNo IS NOT NULL) ${fallbackFilter}
+          ORDER BY s.SupplierName, h.TradeIssueNo
+        `;
+        const fbRes = await pool.request().query(fallbackQuery);
+        records = fbRes.recordset || [];
+      } else {
+        throw e;
+      }
+    }
+
+    let totalWeight = 0;
+    let totalPrice = 0;
+    records.forEach(r => {
+      totalWeight += Number(r.TotalWeight || r.TradeInWeight || 0);
+      totalPrice += Number(r.TotalPrice || 0);
+    });
+
+    const columns = records.length > 0
+      ? Object.keys(records[0]).map(k => ({ key: k, label: k }))
+      : [{ key: "Result", label: "Result" }];
+
+    res.json({
+      success: true,
+      title: reportTitle,
+      data: records,
+      columns,
+      totals: {
+        totalRecords: records.length,
+        totalItems: records.length,
+        totalWeight: Number(totalWeight.toFixed(3)),
+        totalCost: Number(totalPrice.toFixed(2)),
+        totalAmount: Number(totalPrice.toFixed(2))
+      }
+    });
+  } catch (err) {
+    console.error("Trade-In Generate Error:", err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// POST /api/tradeinreports/download-html
+router.post("/download-html", async (req, res) => {
+  try {
+    const { generateReportHtml } = require("../utils/reportHtmlTemplate");
+    const { title, columns, data, totals, companyInfo, fromDate, toDate, showPrintButton } = req.body;
+    const html = await generateReportHtml({
+      title: title || "Trade-In Report",
+      columns,
+      data,
+      totals,
+      companyInfo,
+      fromDate,
+      toDate,
+      pool: req.pool,
+      showPrintButton: showPrintButton ?? false,
+    });
+    res.setHeader("Content-Type", "text/html; charset=utf-8");
+    res.send(html);
+  } catch (err) {
+    console.error("Trade-In Reports Download HTML Error:", err);
+    res.status(500).send("Error generating report HTML: " + err.message);
+  }
+});
+
+// POST /api/tradeinreports/export-excel
+router.post("/export-excel", (req, res) => {
+  const { handleExportExcel } = require("../utils/reportExportHandlers");
+  handleExportExcel({ req, res, defaultTitle: "TradeIn_Report" });
+});
+
+// POST /api/tradeinreports/export-pdf
+router.post("/export-pdf", (req, res) => {
+  const { handleExportPdf } = require("../utils/reportExportHandlers");
+  handleExportPdf({ req, res, defaultTitle: "TradeIn_Report" });
 });
 
 module.exports = router;

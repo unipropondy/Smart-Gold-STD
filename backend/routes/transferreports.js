@@ -221,12 +221,12 @@ router.post("/report", async (req, res) => {
            <table>
              <thead>
                <tr>
-                 <th style="width: 15%">Location</th>
-                 <th style="width: 20%">TransferNo</th>
-                 <th style="width: 20%">From Loc Status To Loc Status</th>
-                 <th class="right" style="width: 15%">Weight</th>
-                 <th class="right" style="width: 15%">PCS</th>
-                 <th class="right" style="width: 15%">TotalCost</th>
+                 <th style="width: 15%">LOCATION</th>
+                 <th style="width: 20%">TRANSFER NO.</th>
+                 <th style="width: 20%">FROM LOC STATUS TO LOC STATUS</th>
+                 <th class="right" style="width: 15%">TOTAL WT.</th>
+                 <th class="right" style="width: 15%">TOTAL QTY.</th>
+                 <th class="right" style="width: 15%">TOTAL COST</th>
                </tr>
              </thead>
              <tbody>
@@ -288,10 +288,10 @@ router.post("/report", async (req, res) => {
            <table>
              <thead>
                <tr>
-                 <th style="width: 20%">Inventory</th>
-                 <th style="width: 50%">Description</th>
-                 <th class="right" style="width: 15%">Weight</th>
-                 <th class="right" style="width: 15%">PCS</th>
+                 <th style="width: 20%">INV. CODE</th>
+                 <th style="width: 50%">DESC.</th>
+                 <th class="right" style="width: 15%">TOTAL WT.</th>
+                 <th class="right" style="width: 15%">TOTAL QTY.</th>
                </tr>
              </thead>
              <tbody>
@@ -371,12 +371,12 @@ router.post("/report", async (req, res) => {
            <table>
              <thead>
                <tr>
-                 <th style="width: 15%">Inventory</th>
-                 <th style="width: 25%">Description</th>
-                 <th style="width: 10%">Size</th>
-                 <th style="width: 10%">Supplier Code</th>
-                 <th class="right" style="width: 10%">Gross<br/>Weight</th>
-                 <th class="right" style="width: 10%">NetWeight</th>
+                 <th style="width: 15%">INV. CODE</th>
+                 <th style="width: 25%">DESC.</th>
+                 <th style="width: 10%">SIZE</th>
+                 <th style="width: 10%">SUPP. CODE</th>
+                 <th class="right" style="width: 10%">GROSS WT.</th>
+                 <th class="right" style="width: 10%">NET WT.</th>
                  <th class="right" style="width: 10%">PCS</th>
                  <th class="right" style="width: 10%">TotalCost</th>
                </tr>
@@ -506,12 +506,12 @@ router.post("/report", async (req, res) => {
              <thead>
                <tr>
                  <th style="width: 15%">TransferNo</th>
-                 <th style="width: 15%">Inventory</th>
-                 <th style="width: 25%">Description</th>
+                 <th style="width: 15%">INV. CODE</th>
+                 <th style="width: 25%">DESC.</th>
                  <th class="right" style="width: 10%">Weight</th>
                  <th class="right" style="width: 10%">PCS</th>
-                 <th class="right" style="width: 10%">QtyOnHand</th>
-                 <th class="right" style="width: 15%">TotalCost</th>
+                 <th class="right" style="width: 10%">QTY ON HAND</th>
+                 <th class="right" style="width: 15%">TOTAL COST</th>
                </tr>
              </thead>
              <tbody>
@@ -595,7 +595,7 @@ router.post("/report", async (req, res) => {
           .header { display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 20px;}
           .title { font-weight: bold; font-size: 14px; margin-top: 20px; margin-bottom: 10px;}
           table { width: 100%; border-collapse: collapse; margin-top: 10px;}
-          th { border-top: 2px solid black; border-bottom: 2px solid black; padding: 5px; text-align: left; font-size: 12px;}
+          th { border-top: 2px solid black; border-bottom: 2px solid black; padding: 5px; text-align: left; font-size: 12px; white-space: nowrap !important; text-transform: uppercase !important;}
           td { padding: 5px; text-align: left; font-size: 12px;}
           .right { text-align: right; }
           .bold { font-weight: bold; }

@@ -20,6 +20,7 @@ export const MENU_STRUCTURE: MenuStructure = {
     { id: 'transfer', title: 'Transfer', icon: 'swap-horizontal-outline', color: '#EC4899', hasSubmenu: true },
     { id: 'reports', title: 'Reports', icon: 'bar-chart-outline', color: '#10B981', hasSubmenu: true },
     { id: 'dailyprocedure', title: 'Daily Procedure', icon: 'calendar-outline', color: '#F97316', hasSubmenu: true },
+    { id: 'utility', title: 'Utility', icon: 'build-outline', color: '#6366F1', hasSubmenu: true },
     { id: 'security', title: 'Security', icon: 'shield-checkmark-outline', color: '#64748B', hasSubmenu: true },
     // { id: 'customer', title: 'Customer', icon: 'people-outline', color: '#8B5CF6', route: '/customers' },
   ],
@@ -87,8 +88,8 @@ export const MENU_STRUCTURE: MenuStructure = {
     { id: 'purchaseentry', title: 'Purchase Entry', icon: 'log-in-outline', color: '#F43F5E', route: '/purchaseentry' },
   ],
   dailyprocedure: [
-    { id: 'settlement', title: 'Settlement', icon: 'cash-outline', color: '#F59E0B', route: '/settlement' },
-    { id: 'dayend', title: 'Day End', icon: 'moon-outline', color: '#8B5CF6', route: '/dayend' },
+    { id: 'eodhistoryreport', title: 'Dayend Report', icon: 'time-outline', color: '#14B8A6', route: '/eod' },
+    { id: 'settlementreport', title: 'Settlement Report', icon: 'receipt-outline', color: '#F97316', route: '/settlementreports' },
   ],
   sales: [
     { id: 'pos', title: 'POS', icon: 'calculator-outline', color: '#10B981', route: '/pos' },
@@ -127,14 +128,29 @@ export const MENU_STRUCTURE: MenuStructure = {
     { id: 'onlinetransfer', title: 'Online Transfer', icon: 'globe-outline', color: '#8B5CF6', route: '/onlinetransfer' },
     { id: 'stocktradeintransfer', title: 'Stock Trade-In Transfer', icon: 'swap-horizontal-outline', color: '#F59E0B', route: '/stocktradeintransfer' },
   ],
-  reports: [
+    utility: [
+    { id: 'utility_stock_take', title: 'Stock Take', icon: 'clipboard-outline', color: '#3B82F6', hasSubmenu: true, route: '/utility/stock-take' },
+    { id: 'changeprinter', title: 'Change Printer', icon: 'print-outline', color: '#10B981', route: '/utility/change-printer' },
+    { id: 'etrsticket', title: 'eTRS Ticket', icon: 'receipt-outline', color: '#F59E0B', route: '/utility/etrs-ticket' },
+    { id: 'etrsticketvoid', title: 'eTRS Ticket Void', icon: 'close-circle-outline', color: '#EF4444', route: '/utility/etrs-ticket-void' },
+    { id: 'utility_purchase_take', title: 'Purchase Take', icon: 'cart-outline', color: '#8B5CF6', hasSubmenu: true, route: '/utility/purchase-take' },
+    { id: 'goldschemetransaction', title: 'Gold Scheme Transaction', icon: 'sparkles-outline', color: '#EC4899', route: '/utility/gold-scheme-transaction' },
+  ],
+  utility_stock_take: [
+    { id: 'stocktake', title: 'Stock Take', icon: 'clipboard-outline', color: '#3B82F6', route: '/utility/stock-take' },
+    { id: 'stocktakereports', title: 'Stock Take Reports', icon: 'bar-chart-outline', color: '#10B981', route: '/utility/stock-take-reports' },
+  ],
+  utility_purchase_take: [
+    { id: 'purchasetake', title: 'Purchase Take', icon: 'cart-outline', color: '#8B5CF6', route: '/utility/purchase-take' },
+    { id: 'purchasetakereports', title: 'Purchase Take Reports', icon: 'bar-chart-outline', color: '#10B981', route: '/utility/purchase-take-reports' },
+  ],
+reports: [
     { id: 'masterreports', title: 'Master Reports', icon: 'document-text-outline', color: '#3B82F6', route: '/masterreports' },
     { id: 'customerreports', title: 'Customer Reports', icon: 'people-outline', color: '#10B981', route: '/customerreports' },
     { id: 'inventoryreports', title: 'Inventory Reports', icon: 'cube-outline', color: '#F59E0B', route: '/inventoryreports' },
     { id: 'purchasereports', title: 'Purchase Reports', icon: 'cart-outline', color: '#8B5CF6', route: '/purchasereports' },
     { id: 'salesreports', title: 'Sales Reports', icon: 'trending-up-outline', color: '#EC4899', route: '/salesreports' },
     { id: 'transactionreports', title: 'Transaction Reports', icon: 'card-outline', color: '#6366F1', route: '/transactionreports' },
-    { id: 'eodhistoryreports', title: 'EOD History Reports', icon: 'time-outline', color: '#14B8A6', route: '/eodhistoryreports' },
     { id: 'managementreports', title: 'Management Reports', icon: 'briefcase-outline', color: '#F43F5E', route: '/managementreports' },
     { id: 'tradeinreports', title: 'Trade-In Reports', icon: 'swap-horizontal-outline', color: '#F59E0B', route: '/tradeinreports' },
   ]

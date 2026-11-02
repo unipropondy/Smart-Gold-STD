@@ -1,41 +1,51 @@
+import { formatColumnHeader } from '@/utils/formatColumnHeader';
 import { API_BASE_URL } from '@/constants/api';
+import { downloadExcelReport, downloadPdfReport, printHtmlReport } from '@/utils/reportExportClient';
+import { ReportDropdown } from '@/components/ReportDropdown';
+import { ReportDatePicker } from '@/components/ReportDatePicker';
+import { validateReportDateRange, getTodayDisp } from '@/utils/dateValidation';
 import { Ionicons } from '@expo/vector-icons';
 import { Stack, useRouter } from 'expo-router';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import {
+  ActivityIndicator,
   Platform,
   ScrollView,
   StyleSheet,
+  Text,
   TouchableOpacity,
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { ThemedText } from '../components/themed-text';
-
 import DateTimePicker from '@react-native-community/datetimepicker';
 
-// Royal Gold Design Palette
+// Royal Gold Design Palette (matching Customer Reports)
 const GOLD_ACCENT = '#B48218';
 const GOLD_DARK = '#9E6D08';
-const GOLD_LIGHT_BG = '#F5E7CA';
 const GOLD_BORDER = '#E8DCB8';
 const CARD_BG = '#FFFFFF';
 const APP_BG = '#FBF9F5';
 const TEXT_DARK = '#3B2D17';
 
-// Web HTML Date Input Inline Style
-const webDateInputStyle: React.CSSProperties = {
-  flex: 1,
-  height: '100%',
-  border: 'none',
-  backgroundColor: 'transparent',
-  outline: 'none',
-  color: TEXT_DARK,
-  paddingLeft: 10,
-  paddingRight: 6,
-  fontSize: 12,
-  cursor: 'pointer',
-};
+interface ReportOption {
+  id: string;
+  label: string;
+  supportsStatus?: boolean;
+}
+
+const REPORT_OPTIONS: ReportOption[] = [
+  { id: 'Order entry', label: 'Order Entry', supportsStatus: true },
+  { id: 'Repair Details', label: 'Repair Details' },
+  { id: 'Order Inventory', label: 'Order Inventory' },
+  { id: 'Order Payment', label: 'Order Payment' },
+  { id: 'Installment Payment Delete', label: 'Installment Payment Delete' },
+  { id: 'Order Payment Delete', label: 'Order Payment Delete' },
+  { id: 'Repair Entry Delete', label: 'Repair Entry Delete' },
+];
+
+const STATUS_OPTIONS = ['ALL', 'PENDING', 'PROCESSING', 'READY', 'DELIVERED'];
+
+type ActionOption = 'Preview' | 'Print' | 'PDF' | 'Excel';
 
 const RadioButton = ({
   label,
@@ -45,119 +55,46 @@ const RadioButton = ({
   label: string;
   selected: boolean;
   onPress: () => void;
-}) => {
-  return (
-    <TouchableOpacity
-      style={[styles.radioBtn, selected && styles.radioBtnSelected]}
-      onPress={onPress}
-      activeOpacity={0.7}
-    >
-      <View style={[styles.radioCircle, selected && styles.radioCircleSelected]}>
-        {selected && <View style={styles.radioDot} />}
-      </View>
-      <ThemedText style={[styles.radioLabel, selected && styles.radioLabelSelected]}>
-        {label}
-      </ThemedText>
-    </TouchableOpacity>
-  );
-};
-
-const CustomDropdown = ({
-  value,
-  options,
-  onSelect,
-  placeholder,
-  style,
-}: {
-  value: string;
-  options: string[];
-  onSelect: (val: string) => void;
-  placeholder: string;
-  style?: any;
-}) => {
-  const [open, setOpen] = useState(false);
-  return (
-    <View style={[{ flex: 1, zIndex: 100 }, style]}>
-      <TouchableOpacity
-        style={styles.dropdownToggle}
-        onPress={() => setOpen(!open)}
-        activeOpacity={0.8}
-      >
-        <ThemedText style={value ? styles.dropdownText : styles.dropdownPlaceholder}>
-          {value || placeholder}
-        </ThemedText>
-        <View style={styles.dropdownIconBox}>
-          <Ionicons name={open ? 'chevron-up' : 'chevron-down'} size={14} color={TEXT_DARK} />
-        </View>
-      </TouchableOpacity>
-      {open && (
-        <View style={styles.dropdownMenu}>
-          <ScrollView nestedScrollEnabled>
-            {options.map((opt, i) => (
-              <TouchableOpacity
-                key={i}
-                style={[
-                  styles.dropdownItem,
-                  i < options.length - 1 && styles.dropdownItemBorder,
-                  value === opt && { backgroundColor: '#FFF4DA' },
-                ]}
-                onPress={() => {
-                  onSelect(opt);
-                  setOpen(false);
-                }}
-              >
-                <ThemedText
-                  style={[
-                    styles.dropdownItemText,
-                    value === opt && { color: GOLD_DARK, fontWeight: 'bold' },
-                  ]}
-                >
-                  {opt}
-                </ThemedText>
-              </TouchableOpacity>
-            ))}
-          </ScrollView>
-        </View>
-      )}
+}) => (
+  <TouchableOpacity
+    style={[styles.radioBtn, selected && styles.radioBtnSelected]}
+    onPress={onPress}
+    activeOpacity={0.7}
+  >
+    <View style={[styles.radioCircle, selected && styles.radioCircleSelected]}>
+      {selected && <View style={styles.radioDot} />}
     </View>
-  );
-};
-
-const API_URL = `${API_BASE_URL}/transactionreports`;
+    <Text style={[styles.radioLabel, selected && styles.radioLabelSelected]}>
+      {label}
+    </Text>
+  </TouchableOpacity>
+);
 
 const formatDateLocal = (d: any) => {
   if (!d || !(d instanceof Date) || isNaN(d.getTime())) return '';
-  const year = d.getFullYear();
-  const month = String(d.getMonth() + 1).padStart(2, '0');
   const day = String(d.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
-};
-
-const parseLocalDate = (dateStr: string) => {
-  if (!dateStr) return new Date();
-  const parts = dateStr.split('-');
-  if (parts.length !== 3) return new Date();
-  const [y, m, d] = parts;
-  return new Date(parseInt(y, 10), parseInt(m, 10) - 1, parseInt(d, 10));
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const year = d.getFullYear();
+  return `${day}/${month}/${year}`;
 };
 
 export default function TransactionReportsScreen() {
   const router = useRouter();
+
+  const [selectedReport, setSelectedReport] = useState<string>('Order entry');
+  const [reportType, setReportType] = useState<'Summary' | 'Detail'>('Summary');
+  const [orderStatus, setOrderStatus] = useState<string>('ALL');
+  const [actionOption, setActionOption] = useState<ActionOption>('Preview');
+  const [fromDate, setFromDate] = useState<string>('01/01/2025');
+  const [toDate, setToDate] = useState<string>(getTodayDisp());
+  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
 
   const [toastMessage, setToastMessage] = useState('');
   const [toastType, setToastType] = useState<'success' | 'error'>('success');
   const [showDatePicker, setShowDatePicker] = useState<{ show: boolean; mode: 'from' | 'to' }>({
     show: false,
     mode: 'from',
-  });
-
-  const [formData, setFormData] = useState({
-    ReportOption: 'Order entry',
-    Status: 'ALL',
-    ReportType: 'Summary',
-    PrintOption: 'Preview',
-    DateFrom: formatDateLocal(new Date()),
-    DateTo: formatDateLocal(new Date()),
   });
 
   const showSuccess = (msg: string) => {
@@ -172,333 +109,300 @@ export default function TransactionReportsScreen() {
     setTimeout(() => setToastMessage(''), 3000);
   };
 
-  const handleChange = (field: string, value: any) => {
-    setFormData((prev) => ({ ...prev, [field]: value }));
-  };
-
   const handleDateChange = (event: any, selectedDate?: Date) => {
     const mode = showDatePicker.mode;
     setShowDatePicker({ show: false, mode });
     if (selectedDate) {
-      if (mode === 'from') {
-        handleChange('DateFrom', formatDateLocal(selectedDate));
-      } else {
-        handleChange('DateTo', formatDateLocal(selectedDate));
-      }
+      if (mode === 'from') setFromDate(formatDateLocal(selectedDate));
+      else setToDate(formatDateLocal(selectedDate));
     }
   };
 
-  // Keyboard shortcut listener for F7 and Escape
-  useEffect(() => {
-    if (Platform.OS === 'web') {
-      const handleKeyDown = (e: KeyboardEvent) => {
-        if (e.key === 'F7') {
-          e.preventDefault();
-          handleGetReport(false);
-        } else if (e.key === 'Escape') {
-          e.preventDefault();
-          router.back();
-        }
-      };
-      window.addEventListener('keydown', handleKeyDown);
-      return () => window.removeEventListener('keydown', handleKeyDown);
-    }
-  }, [formData]);
+  const selectedReportObj = useMemo(
+    () => REPORT_OPTIONS.find((r) => r.id === selectedReport),
+    [selectedReport]
+  );
 
-  const handleGetReport = async (isDownloadPdf = false) => {
-    if (!formData.DateFrom) {
-      showError('Enter valid data for From DATE!');
-      return;
-    }
-    if (!formData.DateTo) {
-      showError('Enter valid data for To DATE!');
+  const handleGetReport = async () => {
+    if (!selectedReport) {
+      showError('Please select a report.');
       return;
     }
 
-    let win: Window | null = null;
-    if (Platform.OS === 'web') {
-      win = window.open('', '_blank');
+    const valRes = validateReportDateRange(fromDate, toDate);
+    if (!valRes.isValid) {
+      showError(valRes.errorMessage || 'Invalid date range.');
+      return;
     }
+
+    setIsLoading(true);
 
     try {
-      const payload = {
-        ReportOption: formData.ReportOption,
-        Status: formData.Status,
-        ReportType: formData.ReportType,
-        PrintOption: isDownloadPdf ? 'Print' : formData.PrintOption,
-        DateFrom: formData.DateFrom,
-        DateTo: formData.DateTo,
-        IsPdfDownload: isDownloadPdf,
-      };
-
-      const response = await fetch(`${API_URL}/report`, {
+      const response = await fetch(`${API_BASE_URL}/transactionreports/generate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
+        body: JSON.stringify({
+          ReportOption: selectedReport,
+          ReportType: reportType,
+          Status: orderStatus,
+          filters: {
+            fromDate,
+            toDate,
+          },
+        }),
       });
 
-      const html = await response.text();
+      const resJson = await response.json();
 
-      if (Platform.OS === 'web') {
-        if (win) {
-          win.document.open();
-          win.document.write(html);
-          win.document.close();
-        }
-      } else {
-        showSuccess(
-          isDownloadPdf
-            ? 'PDF generation requested! (Use web to view/save)'
-            : 'Report generated! (Use web to view/print)'
+      if (!resJson.success || !resJson.data || resJson.data.length === 0) {
+        showError(resJson.message || 'No records found for the selected criteria.');
+        setIsLoading(false);
+        return;
+      }
+
+      const reportTitle = resJson.title || selectedReportObj?.label || 'Transaction Report';
+      const rawCols = resJson.columns || Object.keys(resJson.data[0]).map((k) => ({ key: k, label: k }));
+      const columns = rawCols.map((c: any) => ({ ...c, label: formatColumnHeader(c.label || c.key) }));
+      const reportData = resJson.data;
+      const reportTotals = resJson.totals || {};
+
+      if (actionOption === 'Preview') {
+        await printHtmlReport(
+          {
+            endpoint: 'transactionreports',
+            title: reportTitle,
+            columns,
+            data: reportData,
+            totals: reportTotals,
+            fromDate,
+            toDate,
+          },
+          false
         );
+        showSuccess('Report preview opened.');
+      } else if (actionOption === 'Print') {
+        await printHtmlReport(
+          {
+            endpoint: 'transactionreports',
+            title: reportTitle,
+            columns,
+            data: reportData,
+            totals: reportTotals,
+            fromDate,
+            toDate,
+          },
+          true
+        );
+        showSuccess('Print dialog opened.');
+      } else if (actionOption === 'PDF') {
+        const ok = await downloadPdfReport({
+          endpoint: 'transactionreports',
+          title: reportTitle,
+          columns,
+          data: reportData,
+          totals: reportTotals,
+          fromDate,
+          toDate,
+        });
+        if (ok) showSuccess('PDF downloaded successfully!');
+      } else if (actionOption === 'Excel') {
+        const ok = await downloadExcelReport({
+          endpoint: 'transactionreports',
+          title: reportTitle,
+          columns,
+          data: reportData,
+          totals: reportTotals,
+          fromDate,
+          toDate,
+        });
+        if (ok) showSuccess('Excel downloaded successfully!');
       }
-    } catch (err) {
-      if (win) {
-        win.close();
-      }
-      showError('Failed to generate report');
-      console.error(err);
+    } catch (err: any) {
+      console.error('Transaction Reports Get Error:', err);
+      showError(err.message || 'Failed to generate report');
+    } finally {
+      setIsLoading(false);
     }
   };
 
-  const statusOptions = ['ALL', 'PENDING', 'PROCESSING', 'READY', 'DELIVERED'];
-  const isStatusVisible =
-    formData.ReportOption === 'Order entry' || formData.ReportOption === 'Order Inventory';
-
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
+    <SafeAreaView style={styles.safeArea} edges={['top']}>
       <Stack.Screen options={{ headerShown: false }} />
 
-      {/* LUXURY ROYAL GOLD HEADER BAR */}
+      {/* HEADER */}
       <View style={styles.header}>
         <View style={styles.headerLeft}>
           <TouchableOpacity onPress={() => router.back()} style={styles.backButton} activeOpacity={0.7}>
             <Ionicons name="arrow-back" size={20} color={TEXT_DARK} />
           </TouchableOpacity>
-          <ThemedText style={styles.title}>Transaction Reports</ThemedText>
+          <Text style={styles.headerTitle}>Transaction Reports</Text>
         </View>
 
         <TouchableOpacity
-          style={styles.actionButton}
-          onPress={() => handleGetReport(false)}
+          style={[styles.btnGetReport, isLoading && styles.btnDisabled]}
+          onPress={handleGetReport}
+          disabled={isLoading}
           activeOpacity={0.8}
         >
-          <Ionicons name="document-text-outline" size={15} color={GOLD_DARK} style={{ marginRight: 5 }} />
-          <ThemedText style={styles.actionButtonText}>Get Report (F7)</ThemedText>
+          {isLoading ? (
+            <ActivityIndicator size="small" color="#FFFFFF" />
+          ) : (
+            <>
+              <Ionicons name="document-text-outline" size={15} color="#FFFFFF" style={{ marginRight: 6 }} />
+              <Text style={styles.btnGetReportText}>Get Report</Text>
+            </>
+          )}
         </TouchableOpacity>
       </View>
 
-      <ScrollView contentContainerStyle={styles.scrollContent}>
-        <View style={styles.formContainer}>
-          {/* Main Card Panel with Gold Accent */}
-          <View style={styles.mainBox}>
-            <View style={styles.mainBoxContent}>
-              {/* Left Column: Radio Options */}
-              <View style={styles.optionsCol}>
-                <RadioButton
-                  label="Order entry"
-                  selected={formData.ReportOption === 'Order entry'}
-                  onPress={() => handleChange('ReportOption', 'Order entry')}
-                />
-                <RadioButton
-                  label="Repair Details"
-                  selected={formData.ReportOption === 'Repair Details'}
-                  onPress={() => handleChange('ReportOption', 'Repair Details')}
-                />
-                <RadioButton
-                  label="Order Inventory"
-                  selected={formData.ReportOption === 'Order Inventory'}
-                  onPress={() => handleChange('ReportOption', 'Order Inventory')}
-                />
-                <RadioButton
-                  label="Order Payment"
-                  selected={formData.ReportOption === 'Order Payment'}
-                  onPress={() => handleChange('ReportOption', 'Order Payment')}
-                />
-
-                <View style={styles.sectionDivider} />
-
-                <RadioButton
-                  label="Installment Payment Delete"
-                  selected={formData.ReportOption === 'Installment Payment Delete'}
-                  onPress={() => handleChange('ReportOption', 'Installment Payment Delete')}
-                />
-                <RadioButton
-                  label="Order Payment Delete"
-                  selected={formData.ReportOption === 'Order Payment Delete'}
-                  onPress={() => handleChange('ReportOption', 'Order Payment Delete')}
-                />
-                <RadioButton
-                  label="Repair Entry Delete"
-                  selected={formData.ReportOption === 'Repair Entry Delete'}
-                  onPress={() => handleChange('ReportOption', 'Repair Entry Delete')}
-                />
-              </View>
-
-              {/* Right Box: Date & Status Inputs */}
-              <View style={styles.dateBox}>
-                {/* Date From Row */}
-                <View style={styles.dateRow}>
-                  <ThemedText style={styles.dateLabelPrefix}>Date</ThemedText>
-                  <ThemedText style={styles.dateLabel}>From</ThemedText>
-                  {Platform.OS === 'web' ? (
-                    <View style={styles.dateWrapper}>
-                      <input
-                        type="date"
-                        value={formData.DateFrom || ''}
-                        onChange={(e) => handleChange('DateFrom', e.target.value)}
-                        style={webDateInputStyle}
-                      />
-                    </View>
-                  ) : (
-                    <TouchableOpacity
-                      style={styles.mobileDateBtn}
-                      onPress={() => setShowDatePicker({ show: true, mode: 'from' })}
-                    >
-                      <ThemedText style={styles.mobileDateText}>
-                        {formData.DateFrom
-                          ? parseLocalDate(formData.DateFrom).toLocaleDateString('en-GB')
-                          : 'From Date'}
-                      </ThemedText>
-                      <View style={styles.dateIconBox}>
-                        <Ionicons name="calendar-outline" size={14} color={GOLD_DARK} />
-                      </View>
-                    </TouchableOpacity>
-                  )}
-                </View>
-
-                {/* Date To Row */}
-                <View style={styles.dateRow}>
-                  <ThemedText style={styles.dateLabelPrefix}></ThemedText>
-                  <ThemedText style={styles.dateLabel}>To</ThemedText>
-                  {Platform.OS === 'web' ? (
-                    <View style={styles.dateWrapper}>
-                      <input
-                        type="date"
-                        value={formData.DateTo || ''}
-                        onChange={(e) => handleChange('DateTo', e.target.value)}
-                        style={webDateInputStyle}
-                      />
-                    </View>
-                  ) : (
-                    <TouchableOpacity
-                      style={styles.mobileDateBtn}
-                      onPress={() => setShowDatePicker({ show: true, mode: 'to' })}
-                    >
-                      <ThemedText style={styles.mobileDateText}>
-                        {formData.DateTo
-                          ? parseLocalDate(formData.DateTo).toLocaleDateString('en-GB')
-                          : 'To Date'}
-                      </ThemedText>
-                      <View style={styles.dateIconBox}>
-                        <Ionicons name="calendar-outline" size={14} color={GOLD_DARK} />
-                      </View>
-                    </TouchableOpacity>
-                  )}
-                </View>
-
-                {/* Status Row */}
-                {isStatusVisible && (
-                  <View style={[styles.dateRow, { marginTop: 8 }]}>
-                    <ThemedText style={styles.dateLabelPrefix}></ThemedText>
-                    <ThemedText style={styles.dateLabel}>Status</ThemedText>
-                    <CustomDropdown
-                      value={formData.Status}
-                      options={statusOptions}
-                      onSelect={(val) => handleChange('Status', val)}
-                      placeholder="Select Status"
-                    />
-                  </View>
-                )}
-              </View>
-            </View>
-          </View>
-
-          {/* Bottom Control Bars: Summary / Detail and Preview / Print */}
-          <View style={styles.bottomBarRow}>
-            {/* Summary / Detail Group */}
-            <View style={styles.controlBox}>
-              <RadioButton
-                label="Summary"
-                selected={formData.ReportType === 'Summary'}
-                onPress={() => handleChange('ReportType', 'Summary')}
-              />
-              <RadioButton
-                label="Detail"
-                selected={formData.ReportType === 'Detail'}
-                onPress={() => handleChange('ReportType', 'Detail')}
-              />
-            </View>
-
-            {/* Preview / Print Group */}
-            <View style={styles.controlBox}>
-              <RadioButton
-                label="Preview"
-                selected={formData.PrintOption === 'Preview'}
-                onPress={() => handleChange('PrintOption', 'Preview')}
-              />
-              <RadioButton
-                label="Print"
-                selected={formData.PrintOption === 'Print'}
-                onPress={() => handleChange('PrintOption', 'Print')}
-              />
-            </View>
-          </View>
-        </View>
-
-        {/* Date Picker Modal for Mobile / Tablet */}
-        {showDatePicker.show && (
-          <DateTimePicker
-            value={parseLocalDate(
-              showDatePicker.mode === 'from' ? formData.DateFrom : formData.DateTo
-            )}
-            mode="date"
-            display="default"
-            onChange={handleDateChange}
-          />
-        )}
-      </ScrollView>
-
-      {/* Toast Notification */}
+      {/* TOAST MESSAGE */}
       {toastMessage ? (
-        <View
-          style={[
-            styles.toast,
-            toastType === 'success' ? styles.toastSuccess : styles.toastError,
-          ]}
-        >
+        <View style={[styles.toastContainer, toastType === 'error' ? styles.toastError : styles.toastSuccess]}>
           <Ionicons
-            name={toastType === 'success' ? 'checkmark-circle' : 'alert-circle'}
-            size={16}
+            name={toastType === 'error' ? 'alert-circle' : 'checkmark-circle'}
+            size={18}
             color="#FFFFFF"
             style={{ marginRight: 6 }}
           />
-          <ThemedText style={styles.toastText}>{toastMessage}</ThemedText>
+          <Text style={styles.toastText}>{toastMessage}</Text>
         </View>
       ) : null}
+
+      <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
+        <View style={styles.filterCard}>
+          {/* TOP ROW: REPORT DROPDOWN & DATES */}
+          <View style={styles.filterRow}>
+            {/* REPORT DROPDOWN */}
+            <View style={styles.fieldColFlex}>
+              <ReportDropdown
+                label="Transaction Report"
+                options={REPORT_OPTIONS}
+                selectedId={selectedReport}
+                onSelect={(id) => {
+                  setSelectedReport(id);
+                  setIsDropdownOpen(false);
+                }}
+                isOpen={isDropdownOpen}
+                onToggle={() => setIsDropdownOpen(!isDropdownOpen)}
+                maxHeight={260}
+              />
+            </View>
+
+            {/* FROM DATE */}
+            <ReportDatePicker
+              label="From Date"
+              value={fromDate}
+              onChange={setFromDate}
+              onOpenNative={() => setShowDatePicker({ show: true, mode: 'from' })}
+            />
+
+            {/* TO DATE */}
+            <ReportDatePicker
+              label="To Date"
+              value={toDate}
+              onChange={setToDate}
+              onOpenNative={() => setShowDatePicker({ show: true, mode: 'to' })}
+            />
+          </View>
+
+          {/* STATUS FILTER ROW IF APPLICABLE */}
+          {selectedReportObj?.supportsStatus && (
+            <View style={[styles.radioGroupRow, { borderBottomWidth: 1, borderBottomColor: '#F0E6CC', paddingBottom: 10, marginBottom: 12 }]}>
+              <Text style={[styles.fieldLabel, { marginRight: 15, alignSelf: 'center', marginBottom: 0 }]}>Status:</Text>
+              {STATUS_OPTIONS.map((st) => (
+                <RadioButton
+                  key={st}
+                  label={st}
+                  selected={orderStatus === st}
+                  onPress={() => setOrderStatus(st)}
+                />
+              ))}
+            </View>
+          )}
+
+          {/* SUMMARY / DETAIL TOGGLE ROW */}
+          <View style={[styles.radioGroupRow, { borderBottomWidth: 1, borderBottomColor: '#F0E6CC', paddingBottom: 10, marginBottom: 12 }]}>
+            <Text style={[styles.fieldLabel, { marginRight: 15, alignSelf: 'center', marginBottom: 0 }]}>Report Type:</Text>
+            <RadioButton
+              label="Summary"
+              selected={reportType === 'Summary'}
+              onPress={() => setReportType('Summary')}
+            />
+            <RadioButton
+              label="Detail"
+              selected={reportType === 'Detail'}
+              onPress={() => setReportType('Detail')}
+            />
+          </View>
+
+          {/* ACTION BUTTONS (4 RADIO BUTTONS) */}
+          <View style={styles.radioGroupRow}>
+            <RadioButton
+              label="Preview"
+              selected={actionOption === 'Preview'}
+              onPress={() => setActionOption('Preview')}
+            />
+            <RadioButton
+              label="Print"
+              selected={actionOption === 'Print'}
+              onPress={() => setActionOption('Print')}
+            />
+            <RadioButton
+              label="PDF"
+              selected={actionOption === 'PDF'}
+              onPress={() => setActionOption('PDF')}
+            />
+            <RadioButton
+              label="Excel"
+              selected={actionOption === 'Excel'}
+              onPress={() => setActionOption('Excel')}
+            />
+          </View>
+        </View>
+      </ScrollView>
+
+      {/* MOBILE DATE PICKER */}
+      {showDatePicker.show && Platform.OS !== 'web' && (
+        <DateTimePicker
+          value={new Date()}
+          maximumDate={new Date()}
+          mode="date"
+          display="default"
+          onChange={handleDateChange}
+        />
+      )}
     </SafeAreaView>
   );
 }
 
+const webDateInputStyle: React.CSSProperties = {
+  flex: 1,
+  height: '100%',
+  border: 'none',
+  backgroundColor: 'transparent',
+  outline: 'none',
+  color: TEXT_DARK,
+  paddingLeft: 10,
+  paddingRight: 6,
+  fontSize: 13,
+  cursor: 'pointer',
+  fontFamily: 'Cambria, serif',
+};
+
 const styles = StyleSheet.create({
-  container: {
+  safeArea: {
     flex: 1,
     backgroundColor: APP_BG,
   },
   header: {
-    height: 48,
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: 14,
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    backgroundColor: CARD_BG,
     borderBottomWidth: 1,
     borderBottomColor: GOLD_BORDER,
-    backgroundColor: CARD_BG,
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 2,
   },
   headerLeft: {
     flexDirection: 'row',
@@ -506,303 +410,215 @@ const styles = StyleSheet.create({
   },
   backButton: {
     padding: 6,
-    marginRight: 8,
+    marginRight: 10,
     borderRadius: 6,
-    backgroundColor: '#F9F6F0',
-    borderWidth: 1,
-    borderColor: GOLD_BORDER,
+    backgroundColor: '#F5EFE6',
   },
-  title: {
-    fontSize: 15,
-    fontWeight: 'bold',
+  headerTitle: {
+    fontSize: 18,
+    fontWeight: '700',
     color: TEXT_DARK,
-    letterSpacing: 0.3,
+    fontFamily: 'Cambria, serif',
   },
-  actionButton: {
+  btnGetReport: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 5,
+    backgroundColor: GOLD_ACCENT,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
     borderRadius: 6,
-    borderWidth: 1,
-    borderColor: GOLD_ACCENT,
-    backgroundColor: '#F9F2E2',
-    height: 28,
+    shadowColor: GOLD_DARK,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 3,
+    elevation: 3,
   },
-  actionButtonText: {
-    color: GOLD_DARK,
-    fontWeight: 'bold',
-    fontSize: 12,
+  btnDisabled: {
+    opacity: 0.6,
+  },
+  btnGetReportText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '700',
+    fontFamily: 'Cambria, serif',
+  },
+  toastContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+  },
+  toastSuccess: {
+    backgroundColor: '#10B981',
+  },
+  toastError: {
+    backgroundColor: '#EF4444',
+  },
+  toastText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '600',
   },
   scrollContent: {
     padding: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingBottom: 40,
   },
-  formContainer: {
-    width: '100%',
-    maxWidth: 700,
-  },
-
-  // Main Card Panel
-  mainBox: {
+  filterCard: {
     backgroundColor: CARD_BG,
+    borderRadius: 8,
+    padding: 16,
     borderWidth: 1,
     borderColor: GOLD_BORDER,
-    padding: 18,
-    borderRadius: 8,
-    shadowColor: '#000',
+    shadowColor: '#000000',
     shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.04,
+    shadowOpacity: 0.05,
     shadowRadius: 3,
     elevation: 2,
+    position: 'relative',
+    zIndex: 1,
   },
-  mainBoxContent: {
+  filterRow: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
-    justifyContent: 'space-between',
     flexWrap: 'wrap',
-    gap: 16,
+    gap: 12,
+    marginBottom: 16,
+    position: 'relative',
+    zIndex: 100,
   },
-  optionsCol: {
+  fieldColFlex: {
+    flex: 2,
+    minWidth: 220,
+    position: 'relative',
+    zIndex: 100,
+  },
+  dateCol: {
     flex: 1,
-    minWidth: 230,
-    justifyContent: 'center',
-    gap: 3,
+    minWidth: 140,
+    zIndex: 1,
   },
-  sectionDivider: {
-    height: 1,
-    backgroundColor: '#F5EFE6',
-    marginVertical: 6,
+  fieldLabel: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: TEXT_DARK,
+    marginBottom: 6,
+    fontFamily: 'Cambria, serif',
   },
-
-  // Date Container with Soft Luxury Background
-  dateBox: {
-    backgroundColor: '#FAF7F0',
+  dropdownSelector: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    height: 38,
+    paddingHorizontal: 12,
+    backgroundColor: '#FFFFFF',
     borderWidth: 1,
     borderColor: GOLD_BORDER,
-    paddingVertical: 14,
-    paddingHorizontal: 16,
     borderRadius: 6,
-    minWidth: 280,
-    flex: 1,
-    maxWidth: 340,
   },
-  dateRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginVertical: 4,
-  },
-  dateLabelPrefix: {
-    width: 34,
-    fontSize: 11,
-    fontWeight: 'bold',
+  dropdownSelectorText: {
+    fontSize: 13,
     color: TEXT_DARK,
-  },
-  dateLabel: {
-    width: 44,
-    fontSize: 11,
-    fontWeight: 'bold',
-    color: TEXT_DARK,
-  },
-  dateWrapper: {
-    flex: 1,
-    borderWidth: 1,
-    borderColor: '#D4C3A3',
-    borderRadius: 4,
-    height: 36,
-    backgroundColor: '#FFFFFF',
-    flexDirection: 'row',
-    alignItems: 'center',
-    overflow: 'hidden',
-  },
-  dateIconBox: {
-    width: 28,
-    height: '100%',
-    borderLeftWidth: 1,
-    borderLeftColor: GOLD_BORDER,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#FAF5EA',
-  },
-  mobileDateBtn: {
-    flex: 1,
-    borderWidth: 1,
-    borderColor: '#D4C3A3',
-    borderRadius: 4,
-    height: 36,
-    backgroundColor: '#FFFFFF',
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  mobileDateText: {
-    color: TEXT_DARK,
-    fontSize: 12,
-    paddingLeft: 8,
-    flex: 1,
-  },
-
-  // Dropdown
-  dropdownToggle: {
-    borderWidth: 1,
-    borderColor: '#D4C3A3',
-    borderRadius: 4,
-    height: 36,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: '#FFFFFF',
-  },
-  dropdownText: {
-    color: TEXT_DARK,
-    fontSize: 11,
-    fontWeight: 'bold',
-    flex: 1,
-    paddingLeft: 8,
-  },
-  dropdownPlaceholder: {
-    color: '#9E8D77',
-    fontSize: 11,
-    flex: 1,
-    paddingLeft: 8,
-  },
-  dropdownIconBox: {
-    width: 28,
-    height: '100%',
-    borderLeftWidth: 1,
-    borderLeftColor: GOLD_BORDER,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#FAF5EA',
+    fontFamily: 'Cambria, serif',
   },
   dropdownMenu: {
     position: 'absolute',
-    top: 38,
+    top: 62,
     left: 0,
     right: 0,
     backgroundColor: '#FFFFFF',
     borderWidth: 1,
-    borderColor: '#D4C3A3',
+    borderColor: GOLD_BORDER,
     borderRadius: 6,
-    zIndex: 1000,
-    maxHeight: 160,
-    shadowColor: '#000',
+    shadowColor: '#000000',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.15,
-    shadowRadius: 8,
-    elevation: 4,
+    shadowRadius: 6,
+    elevation: 8,
+    zIndex: 100,
   },
   dropdownItem: {
-    paddingVertical: 8,
-    paddingHorizontal: 10,
-  },
-  dropdownItemBorder: {
+    paddingVertical: 10,
+    paddingHorizontal: 12,
     borderBottomWidth: 1,
     borderBottomColor: '#F5EFE6',
   },
-  dropdownItemText: {
-    color: TEXT_DARK,
-    fontSize: 11,
+  dropdownItemSelected: {
+    backgroundColor: '#FDFBF7',
   },
-
-  // Radio Buttons
+  dropdownItemText: {
+    fontSize: 13,
+    color: TEXT_DARK,
+    fontFamily: 'Cambria, serif',
+  },
+  dropdownItemTextSelected: {
+    fontWeight: '700',
+    color: GOLD_ACCENT,
+  },
+  dateInputContainer: {
+    height: 38,
+    borderWidth: 1,
+    borderColor: GOLD_BORDER,
+    borderRadius: 6,
+    backgroundColor: '#FFFFFF',
+    justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  dateNativeBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 10,
+    height: '100%',
+  },
+  dateNativeText: {
+    fontSize: 13,
+    color: TEXT_DARK,
+    fontFamily: 'Cambria, serif',
+  },
+  radioGroupRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 12,
+    paddingTop: 8,
+  },
   radioBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 5,
-    paddingHorizontal: 8,
-    borderRadius: 4,
+    paddingVertical: 6,
+    paddingHorizontal: 14,
+    borderRadius: 6,
     borderWidth: 1,
-    borderColor: '#E2D3B3',
-    backgroundColor: '#FAF7F0',
-    marginBottom: 4,
+    borderColor: GOLD_BORDER,
+    backgroundColor: '#FFFFFF',
   },
   radioBtnSelected: {
-    backgroundColor: '#FFF4DA',
     borderColor: GOLD_ACCENT,
+    backgroundColor: '#FDFBF7',
   },
   radioCircle: {
-    height: 16,
     width: 16,
+    height: 16,
     borderRadius: 8,
     borderWidth: 1.5,
-    borderColor: '#C5B597',
+    borderColor: '#C4B59D',
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 6,
   },
   radioCircleSelected: {
-    borderColor: GOLD_DARK,
+    borderColor: GOLD_ACCENT,
   },
   radioDot: {
-    height: 8,
     width: 8,
+    height: 8,
     borderRadius: 4,
-    backgroundColor: GOLD_DARK,
+    backgroundColor: GOLD_ACCENT,
   },
   radioLabel: {
-    fontSize: 11,
-    fontWeight: '500',
-    color: '#5C4A28',
+    fontSize: 12,
+    color: TEXT_DARK,
+    fontFamily: 'Cambria, serif',
   },
   radioLabelSelected: {
-    color: GOLD_DARK,
-    fontWeight: 'bold',
-  },
-
-  // Bottom Control Bars
-  bottomBarRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    gap: 12,
-    marginTop: 12,
-  },
-  controlBox: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-around',
-    borderWidth: 1,
-    borderColor: GOLD_BORDER,
-    backgroundColor: CARD_BG,
-    paddingVertical: 6,
-    paddingHorizontal: 10,
-    borderRadius: 6,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.04,
-    shadowRadius: 2,
-    elevation: 1,
-  },
-
-  // Toast
-  toast: {
-    position: 'absolute',
-    top: 54,
-    alignSelf: 'center',
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 6,
-    elevation: 4,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.15,
-    shadowRadius: 4,
-    zIndex: 9999,
-  },
-  toastSuccess: {
-    backgroundColor: '#2E7D32',
-  },
-  toastError: {
-    backgroundColor: '#C62828',
-  },
-  toastText: {
-    color: '#FFFFFF',
-    fontSize: 12,
-    fontWeight: '600',
+    fontWeight: '700',
+    color: GOLD_ACCENT,
   },
 });

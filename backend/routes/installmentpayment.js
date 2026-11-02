@@ -11,7 +11,7 @@ const getPool = async (req) => {
 
 // Helper to pad voucher numbers
 function padZero(num, size) {
-  let s = num + "";
+  let s = num + ""; b 
   while (s.length < size) s = "0" + s;
   return s;
 }

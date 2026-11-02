@@ -1,5 +1,6 @@
 const express = require("express");
 const router = express.Router();
+const { validateBackendDates } = require("../utils/validateReportDates");
 
 router.post("/report", async (req, res) => {
   try {
@@ -12,6 +13,11 @@ router.post("/report", async (req, res) => {
       Status,       // 'ALL' | 'PENDING' | 'PROCESSING' | 'READY' | 'DELIVERED'
       IsPdfDownload
     } = req.body;
+
+    const dateVal = validateBackendDates(DateFrom, DateTo);
+    if (!dateVal.isValid) {
+      return res.status(400).send(`<html><body style="font-family:sans-serif;padding:30px;color:#c00;"><h3>Invalid Date Range</h3><p>${dateVal.message}</p></body></html>`);
+    }
 
     const pool = req.pool;
 
@@ -409,14 +415,14 @@ router.post("/report", async (req, res) => {
           <table>
             <thead>
               <tr>
-                <th style="width: 14%;">Order No</th>
-                <th style="width: 12%;">Order Date</th>
-                <th style="width: 12%;">Delivery Date</th>
-                <th style="width: 12%;">Customer</th>
-                <th style="width: 16%;">Customer Name</th>
-                <th class="right" style="width: 14%;">Advance Paid</th>
-                <th class="right" style="width: 14%;">Est. Total Cost</th>
-                <th style="width: 6%; text-align: center;">Status</th>
+                <th style="width: 14%;">ORDER NO.</th>
+                <th style="width: 12%;">ORDER DATE</th>
+                <th style="width: 12%;">DELIVERY DATE</th>
+                <th style="width: 12%;">CUSTOMER</th>
+                <th style="width: 16%;">CUST. NAME</th>
+                <th class="right" style="width: 14%;">ADVANCE PAID</th>
+                <th class="right" style="width: 14%;">EST. TOTAL COST</th>
+                <th style="width: 6%; text-align: center;">STATUS</th>
               </tr>
             </thead>
             <tbody>
@@ -491,11 +497,11 @@ router.post("/report", async (req, res) => {
             <table>
               <thead>
                 <tr>
-                  <th style="width: 18%;">Inventory Code</th>
-                  <th style="width: 32%;">Description</th>
-                  <th style="width: 20%;">Stone Description</th>
-                  <th class="right" style="width: 15%;">Weight (g)</th>
-                  <th class="right" style="width: 15%;">Est. Cost</th>
+                  <th style="width: 18%;">INV. CODE</th>
+                  <th style="width: 32%;">DESC.</th>
+                  <th style="width: 20%;">STONE DESC.</th>
+                  <th class="right" style="width: 15%;">TOTAL WT. (G)</th>
+                  <th class="right" style="width: 15%;">EST. COST</th>
                 </tr>
               </thead>
               <tbody>
@@ -546,13 +552,13 @@ router.post("/report", async (req, res) => {
           <table>
             <thead>
               <tr>
-                <th style="width: 15%;">Repair No</th>
-                <th style="width: 12%;">Repair Date</th>
-                <th style="width: 12%;">Delivery Date</th>
-                <th style="width: 12%;">Customer</th>
-                <th style="width: 17%;">Customer Name</th>
-                <th class="right" style="width: 16%;">Advance Paid</th>
-                <th class="right" style="width: 16%;">Total Cost Est.</th>
+                <th style="width: 15%;">REPAIR NO.</th>
+                <th style="width: 12%;">REPAIR DATE</th>
+                <th style="width: 12%;">DELIVERY DATE</th>
+                <th style="width: 12%;">CUSTOMER</th>
+                <th style="width: 17%;">CUST. NAME</th>
+                <th class="right" style="width: 16%;">ADVANCE PAID</th>
+                <th class="right" style="width: 16%;">TOTAL COST EST.</th>
               </tr>
             </thead>
             <tbody>
@@ -595,12 +601,12 @@ router.post("/report", async (req, res) => {
           <table>
             <thead>
               <tr>
-                <th style="width: 14%;">Repair No</th>
-                <th style="width: 12%;">Date</th>
+                <th style="width: 14%;">REPAIR NO.</th>
+                <th style="width: 12%;">DATE</th>
                 <th style="width: 16%;">Customer</th>
-                <th style="width: 26%;">Description</th>
-                <th class="right" style="width: 14%;">Weight (g)</th>
-                <th class="right" style="width: 18%;">Estimated Cost</th>
+                <th style="width: 26%;">DESC.</th>
+                <th class="right" style="width: 14%;">TOTAL WT. (G)</th>
+                <th class="right" style="width: 18%;">ESTIMATED COST</th>
               </tr>
             </thead>
             <tbody>
@@ -642,13 +648,13 @@ router.post("/report", async (req, res) => {
         <table>
           <thead>
             <tr>
-              <th style="width: 14%;">Order No</th>
-              <th style="width: 12%;">Date</th>
+              <th style="width: 14%;">ORDER NO.</th>
+              <th style="width: 12%;">DATE</th>
               <th style="width: 14%;">Customer</th>
               <th style="width: 16%;">Inventory Code</th>
-              <th style="width: 20%;">Description</th>
-              <th class="right" style="width: 12%;">Weight (g)</th>
-              <th class="right" style="width: 12%;">Cost</th>
+              <th style="width: 20%;">DESC.</th>
+              <th class="right" style="width: 12%;">TOTAL WT. (G)</th>
+              <th class="right" style="width: 12%;">COST</th>
             </tr>
           </thead>
           <tbody>
@@ -691,12 +697,12 @@ router.post("/report", async (req, res) => {
         <table>
           <thead>
             <tr>
-              <th style="width: 18%;">Payment No</th>
-              <th style="width: 16%;">Order No</th>
+              <th style="width: 18%;">PAYMENT NO.</th>
+              <th style="width: 16%;">ORDER NO.</th>
               <th style="width: 14%;">Date</th>
               <th style="width: 14%;">Customer</th>
               <th style="width: 20%;">Customer Name</th>
-              <th class="right" style="width: 18%;">Amount Paid</th>
+              <th class="right" style="width: 18%;">AMOUNT PAID</th>
             </tr>
           </thead>
           <tbody>
@@ -735,11 +741,11 @@ router.post("/report", async (req, res) => {
         <table>
           <thead>
             <tr>
-              <th style="width: 20%;">Installment No</th>
-              <th style="width: 22%;">Agreement No</th>
+              <th style="width: 20%;">INSTALLMENT NO.</th>
+              <th style="width: 22%;">AGREEMENT NO.</th>
               <th style="width: 16%;">Date</th>
-              <th style="width: 24%;">Customer Name</th>
-              <th class="right" style="width: 18%;">Amount Paid</th>
+              <th style="width: 24%;">CUST. NAME</th>
+              <th class="right" style="width: 18%;">AMOUNT PAID</th>
             </tr>
           </thead>
           <tbody>
@@ -777,12 +783,12 @@ router.post("/report", async (req, res) => {
         <table>
           <thead>
             <tr>
-              <th style="width: 18%;">Payment No</th>
-              <th style="width: 16%;">Order No</th>
+              <th style="width: 18%;">PAYMENT NO.</th>
+              <th style="width: 16%;">ORDER NO.</th>
               <th style="width: 14%;">Date</th>
               <th style="width: 14%;">Customer</th>
               <th style="width: 20%;">Customer Name</th>
-              <th class="right" style="width: 18%;">Amount Paid</th>
+              <th class="right" style="width: 18%;">AMOUNT PAID</th>
             </tr>
           </thead>
           <tbody>
@@ -824,10 +830,10 @@ router.post("/report", async (req, res) => {
             <tr>
               <th style="width: 16%;">Repair No</th>
               <th style="width: 14%;">Repair Date</th>
-              <th style="width: 14%;">Customer Code</th>
+              <th style="width: 14%;">CUST. CODE</th>
               <th style="width: 20%;">Customer Name</th>
               <th class="right" style="width: 18%;">Advance Paid</th>
-              <th class="right" style="width: 18%;">Estimated Cost</th>
+              <th class="right" style="width: 18%;">ESTIMATED COST</th>
             </tr>
           </thead>
           <tbody>
@@ -903,8 +909,7 @@ router.post("/report", async (req, res) => {
             border-collapse: collapse; 
             margin-top: 6px;
           }
-          th { 
-            border-top: 2px solid #000; 
+          th { white-space: nowrap !important; text-transform: uppercase !important; border-top: 2px solid #000; 
             border-bottom: 2px solid #000; 
             padding: 6px 4px; 
             text-align: left; 
@@ -970,6 +975,206 @@ router.post("/report", async (req, res) => {
     console.error("Generate Transaction Report Error:", err);
     res.status(500).send("Server error generating Transaction report.");
   }
+});
+
+// POST /api/transactionreports/generate
+router.post("/generate", async (req, res) => {
+  try {
+    const { ReportOption, ReportType = 'Summary', Status = 'ALL', filters = {} } = req.body;
+    const { fromDate, toDate } = filters;
+
+    const dateVal = validateBackendDates(fromDate, toDate);
+    if (!dateVal.isValid) {
+      return res.status(400).json({ success: false, message: dateVal.message });
+    }
+
+    const pool = req.pool;
+
+    const toDbDate = (dStr, isEnd = false) => {
+      if (!dStr) return '';
+      if (typeof dStr === 'string' && dStr.includes('/')) {
+        const parts = dStr.split('/');
+        if (parts.length === 3) {
+          return `${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}${isEnd ? ' 23:59:59' : ' 00:00:00'}`;
+        }
+      }
+      return `${dStr}${isEnd ? ' 23:59:59' : ' 00:00:00'}`;
+    };
+
+    const safeDateFrom = toDbDate(fromDate, false);
+    const safeDateTo = toDbDate(toDate, true);
+
+    let query = "";
+    let reportTitle = "";
+
+    if (ReportOption === "Order entry") {
+      reportTitle = `Order Entry Report (${ReportType}) From ${fromDate || ''} To ${toDate || ''}`;
+      let dateFilter = "";
+      if (safeDateFrom && safeDateTo) {
+        dateFilter = `WHERE h.OrderDate >= '${safeDateFrom}' AND h.OrderDate <= '${safeDateTo}'`;
+      } else if (safeDateFrom) {
+        dateFilter = `WHERE h.OrderDate >= '${safeDateFrom}'`;
+      }
+      if (Status && Status !== "ALL") {
+        dateFilter += dateFilter ? ` AND h.Status = '${Status}'` : `WHERE h.Status = '${Status}'`;
+      }
+
+      query = `
+        SELECT 
+          RTRIM(h.OrderNo) AS OrderNo, 
+          h.OrderDate, 
+          h.DeliveryDate, 
+          RTRIM(h.CustomerCode) AS CustomerCode, 
+          RTRIM(c.CustomerName) AS CustomerName, 
+          ISNULL(h.AdvancePaid, 0) AS AdvancePaid, 
+          ISNULL(h.TotalCostEstimated, 0) AS TotalCost, 
+          RTRIM(h.Status) AS Status
+        FROM tblInventoryOrderHeader h
+        LEFT JOIN tblCustomer c ON h.CustomerCode = c.CustomerCode
+        ${dateFilter}
+        ORDER BY h.OrderNo
+      `;
+    } else if (ReportOption === "Repair Details") {
+      reportTitle = `Repair Details Report (${ReportType}) From ${fromDate || ''} To ${toDate || ''}`;
+      let dateFilter = "";
+      if (safeDateFrom && safeDateTo) {
+        dateFilter = `WHERE h.RepairDate >= '${safeDateFrom}' AND h.RepairDate <= '${safeDateTo}'`;
+      } else if (safeDateFrom) {
+        dateFilter = `WHERE h.RepairDate >= '${safeDateFrom}'`;
+      }
+
+      query = `
+        SELECT 
+          RTRIM(h.RepairNo) AS RepairNo, 
+          h.RepairDate, 
+          h.DeliveryDate, 
+          RTRIM(h.CustomerCode) AS CustomerCode, 
+          RTRIM(c.CustomerName) AS CustomerName, 
+          ISNULL(h.TotalCost, 0) AS TotalCost, 
+          RTRIM(h.Status) AS Status
+        FROM tblInventoryRepairHeader h
+        LEFT JOIN tblCustomer c ON h.CustomerCode = c.CustomerCode
+        ${dateFilter}
+        ORDER BY h.RepairNo
+      `;
+    } else if (ReportOption === "Order Inventory") {
+      reportTitle = `Order Inventory Report From ${fromDate || ''} To ${toDate || ''}`;
+      let dateFilter = "";
+      if (safeDateFrom && safeDateTo) {
+        dateFilter = `WHERE h.CreateDate >= '${safeDateFrom}' AND h.CreateDate <= '${safeDateTo}'`;
+      } else if (safeDateFrom) {
+        dateFilter = `WHERE h.CreateDate >= '${safeDateFrom}'`;
+      }
+
+      query = `
+        SELECT 
+          RTRIM(h.OrderInventoryNo) AS OrderInventoryNo, 
+          h.CreateDate, 
+          RTRIM(h.OrderNo) AS OrderNo, 
+          RTRIM(h.InventoryCode) AS InventoryCode, 
+          ISNULL(h.TotalCost, 0) AS TotalCost
+        FROM tblOrderInventory h
+        ${dateFilter}
+        ORDER BY h.OrderInventoryNo
+      `;
+    } else if (ReportOption === "Order Payment") {
+      reportTitle = `Order Payment Report From ${fromDate || ''} To ${toDate || ''}`;
+      let dateFilter = "";
+      if (safeDateFrom && safeDateTo) {
+        dateFilter = `WHERE h.PaymentDate >= '${safeDateFrom}' AND h.PaymentDate <= '${safeDateTo}'`;
+      } else if (safeDateFrom) {
+        dateFilter = `WHERE h.PaymentDate >= '${safeDateFrom}'`;
+      }
+
+      query = `
+        SELECT 
+          RTRIM(h.OrderPaymentNo) AS OrderPaymentNo, 
+          h.PaymentDate, 
+          RTRIM(h.OrderNo) AS OrderNo, 
+          ISNULL(h.AmountPaid, 0) AS AmountPaid, 
+          RTRIM(h.PayMode) AS PayMode
+        FROM tblOrderPayment h
+        ${dateFilter}
+        ORDER BY h.OrderPaymentNo
+      `;
+    } else {
+      // Generic fallback for deleted logs or other options
+      reportTitle = `Transaction Report : ${ReportOption}`;
+      query = `
+        SELECT 
+          RTRIM(h.OrderNo) AS OrderNo, 
+          h.OrderDate, 
+          ISNULL(h.TotalCostEstimated, 0) AS TotalCost,
+          RTRIM(h.Status) AS Status
+        FROM tblInventoryOrderHeader h
+        ORDER BY h.OrderNo
+      `;
+    }
+
+    const dbResult = await pool.request().query(query);
+    const records = dbResult.recordset || [];
+
+    let totalCost = 0;
+    records.forEach(r => {
+      totalCost += Number(r.EstimatedTotalCost || r.TotalCost || r.AdvancePaid || r.AmountPaid || 0);
+    });
+
+    const columns = records.length > 0
+      ? Object.keys(records[0]).map(k => ({ key: k, label: k }))
+      : [{ key: "Result", label: "Result" }];
+
+    res.json({
+      success: true,
+      title: reportTitle,
+      data: records,
+      columns,
+      totals: {
+        totalRecords: records.length,
+        totalItems: records.length,
+        totalCost: Number(totalCost.toFixed(2)),
+        totalAmount: Number(totalCost.toFixed(2))
+      }
+    });
+  } catch (err) {
+    console.error("Transaction Generate Error:", err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// POST /api/transactionreports/download-html
+router.post("/download-html", async (req, res) => {
+  try {
+    const { generateReportHtml } = require("../utils/reportHtmlTemplate");
+    const { title, columns, data, totals, companyInfo, fromDate, toDate, showPrintButton } = req.body;
+    const html = await generateReportHtml({
+      title: title || "Transaction Report",
+      columns,
+      data,
+      totals,
+      companyInfo,
+      fromDate,
+      toDate,
+      pool: req.pool,
+      showPrintButton: showPrintButton ?? false,
+    });
+    res.setHeader("Content-Type", "text/html; charset=utf-8");
+    res.send(html);
+  } catch (err) {
+    console.error("Transaction Reports Download HTML Error:", err);
+    res.status(500).send("Error generating report HTML: " + err.message);
+  }
+});
+
+// POST /api/transactionreports/export-excel
+router.post("/export-excel", (req, res) => {
+  const { handleExportExcel } = require("../utils/reportExportHandlers");
+  handleExportExcel({ req, res, defaultTitle: "Transaction_Report" });
+});
+
+// POST /api/transactionreports/export-pdf
+router.post("/export-pdf", (req, res) => {
+  const { handleExportPdf } = require("../utils/reportExportHandlers");
+  handleExportPdf({ req, res, defaultTitle: "Transaction_Report" });
 });
 
 module.exports = router;
