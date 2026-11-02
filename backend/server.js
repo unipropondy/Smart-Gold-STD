@@ -23,6 +23,15 @@ app.use(async (req, res, next) => {
     }
 });
 
+// Root & Health Check routes
+app.get('/', (req, res) => {
+    res.json({ status: 'ok', service: 'smartgold-api', timestamp: new Date().toISOString() });
+});
+
+app.get('/api', (req, res) => {
+    res.json({ status: 'ok', message: 'SmartGold POS API Service Running' });
+});
+
 // Auto-load all routes
 const routesPath = path.join(__dirname, 'routes');
 if (fs.existsSync(routesPath)) {
