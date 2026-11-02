@@ -3,7 +3,7 @@ import { downloadExcelReport, downloadPdfReport, printHtmlReport } from '@/utils
 import { formatColumnHeader } from '@/utils/formatColumnHeader';
 import { ReportDropdown } from '@/components/ReportDropdown';
 import { ReportDatePicker } from '@/components/ReportDatePicker';
-import { validateReportDateRange, getTodayIso, toDispDate } from '@/utils/dateValidation';
+import { validateReportDateRange, getTodayDisp } from '@/utils/dateValidation';
 import { Ionicons } from '@expo/vector-icons';
 import { Stack, useRouter } from 'expo-router';
 import React, { useEffect, useState, useMemo } from 'react';
@@ -13,15 +13,13 @@ import {
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   TouchableOpacity,
   View,
-  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import DateTimePicker from '@react-native-community/datetimepicker';
 
-// Royal Gold Design Palette (matching Smart Gold Report Theme)
+// Royal Gold Design Palette (matching Master Reports Screen)
 const GOLD_ACCENT = '#B48218';
 const GOLD_DARK = '#9E6D08';
 const GOLD_BORDER = '#E8DCB8';
@@ -45,35 +43,33 @@ const RadioButton = ({
   label: string;
   selected: boolean;
   onPress: () => void;
-}) => {
-  return (
-    <TouchableOpacity
-      style={[styles.radioBtn, selected && styles.radioBtnSelected]}
-      onPress={onPress}
-      activeOpacity={0.7}
-    >
-      <View style={[styles.radioCircle, selected && styles.radioCircleSelected]}>
-        {selected && <View style={styles.radioDot} />}
-      </View>
-      <Text style={[styles.radioLabel, selected && styles.radioLabelSelected]}>
-        {label}
-      </Text>
-    </TouchableOpacity>
-  );
-};
+}) => (
+  <TouchableOpacity
+    style={[styles.radioBtn, selected && styles.radioBtnSelected]}
+    onPress={onPress}
+    activeOpacity={0.7}
+  >
+    <View style={[styles.radioCircle, selected && styles.radioCircleSelected]}>
+      {selected && <View style={styles.radioDot} />}
+    </View>
+    <Text style={[styles.radioLabel, selected && styles.radioLabelSelected]}>
+      {label}
+    </Text>
+  </TouchableOpacity>
+);
 
 export default function StockTakeReportsScreen() {
   const router = useRouter();
 
-  // Mode: All (All items), Scanned (Trayid <> 'X'), Unscanned (Trayid = 'X')
+  // Mode: All, Scanned, UnScanned
   const [mode, setMode] = useState<StockTakeMode>('all');
   const [trayId, setTrayId] = useState<string>('');
   const [trayList, setTrayList] = useState<TrayItem[]>([]);
   const [isTrayDropdownOpen, setIsTrayDropdownOpen] = useState<boolean>(false);
 
-  // Date filters
-  const [fromDate, setFromDate] = useState<string>(getTodayIso());
-  const [toDate, setToDate] = useState<string>(getTodayIso());
+  // Date filters (using standard DD/MM/YYYY matching Master Reports)
+  const [fromDate, setFromDate] = useState<string>('01/01/2025');
+  const [toDate, setToDate] = useState<string>(getTodayDisp());
 
   // Native Date Picker State
   const [showDatePicker, setShowDatePicker] = useState<{
@@ -84,18 +80,10 @@ export default function StockTakeReportsScreen() {
   // Action State: Preview, Print, PDF, Excel
   const [actionOption, setActionOption] = useState<ActionOption>('Preview');
 
-  // Loading & Results
+  // Loading & Toast Notifications
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [toastMessage, setToastMessage] = useState<string>('');
   const [toastType, setToastType] = useState<'success' | 'error'>('success');
-
-  // Query Result for on-screen viewing / table summary
-  const [reportResult, setReportResult] = useState<{
-    title: string;
-    columns: any[];
-    data: any[];
-    totals: any;
-  } | null>(null);
 
   // Load available trays from backend
   useEffect(() => {
@@ -133,40 +121,35 @@ export default function StockTakeReportsScreen() {
     setShowDatePicker({ show: false, mode: 'from' });
     if (event.type === 'dismissed' || !selectedDate) return;
 
-    const y = selectedDate.getFullYear();
-    const m = String(selectedDate.getMonth() + 1).padStart(2, '0');
     const d = String(selectedDate.getDate()).padStart(2, '0');
-    const iso = `${y}-${m}-${d}`;
+    const m = String(selectedDate.getMonth() + 1).padStart(2, '0');
+    const y = selectedDate.getFullYear();
+    const formatted = `${d}/${m}/${y}`;
 
     if (showDatePicker.mode === 'from') {
-      setFromDate(iso);
+      setFromDate(formatted);
     } else {
-      setToDate(iso);
+      setToDate(formatted);
     }
   };
 
   const parseLocalDate = (dateStr: string) => {
     if (!dateStr) return new Date();
-    const parts = dateStr.split('-');
-    if (parts.length === 3) {
-      return new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
+    if (dateStr.includes('/')) {
+      const parts = dateStr.split('/');
+      if (parts.length === 3) {
+        return new Date(parseInt(parts[2], 10), parseInt(parts[1], 10) - 1, parseInt(parts[0], 10));
+      }
+    } else if (dateStr.includes('-')) {
+      const parts = dateStr.split('-');
+      if (parts.length === 3) {
+        return new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
+      }
     }
     return new Date();
   };
 
-  // Reset / Clear Filters
-  const handleClear = () => {
-    setMode('all');
-    setTrayId('');
-    setFromDate(getTodayIso());
-    setToDate(getTodayIso());
-    setActionOption('Preview');
-    setReportResult(null);
-    setToastMessage('');
-    setIsTrayDropdownOpen(false);
-  };
-
-  // Execute Stock Take Report (Find / Get Report)
+  // Execute Stock Take Report (Matches Master Reports Generate & Preview Flow)
   const handleGetReport = async (overrideAction?: ActionOption) => {
     const currentAction = overrideAction || actionOption;
 
@@ -177,23 +160,14 @@ export default function StockTakeReportsScreen() {
 
     const valRes = validateReportDateRange(fromDate, toDate);
     if (!valRes.isValid) {
-      showError(valRes.errorMessage || 'Enter valid data for Date!');
+      showError(valRes.errorMessage || 'Invalid date range.');
       return;
     }
 
     setIsLoading(true);
 
-    let win: Window | null = null;
-    if (
-      Platform.OS === 'web' &&
-      typeof window !== 'undefined' &&
-      (currentAction === 'Preview' || currentAction === 'Print')
-    ) {
-      win = window.open('', '_blank');
-    }
-
     try {
-      const res = await fetch(`${API_BASE_URL}/stocktake/report`, {
+      const response = await fetch(`${API_BASE_URL}/stocktake/report`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -204,180 +178,137 @@ export default function StockTakeReportsScreen() {
         }),
       });
 
-      const json = await res.json();
+      const resJson = await response.json();
 
-      if (!json.success || !json.data || json.data.length === 0) {
-        if (win) win.close();
-        showError(json.message || 'No records found for the selected criteria.');
-        setReportResult(null);
+      if (!resJson.success || !resJson.data || resJson.data.length === 0) {
+        showError(resJson.message || 'No records found for the selected criteria.');
         setIsLoading(false);
         return;
       }
 
-      const repTitle = json.title || 'Stock Take Report';
-      const rawCols = json.columns || Object.keys(json.data[0]).map((k) => ({ key: k, label: k }));
+      const reportTitle = 'STOCK TAKE REPORT';
+      const rawCols = resJson.columns || Object.keys(resJson.data[0]).map((k) => ({ key: k, label: k }));
       const columns = rawCols.map((c: any) => ({
         ...c,
         label: formatColumnHeader(c.label || c.key),
       }));
-      const cleanName = repTitle.replace(/[^a-zA-Z0-9_-]/g, '_');
+      const reportData = resJson.data;
+      const reportTotals = resJson.totals || {};
 
-      // Update state for on-screen summary table
-      setReportResult({
-        title: repTitle,
-        columns,
-        data: json.data,
-        totals: json.totals || {},
-      });
+      const displayTray = trayId.trim() ? trayId.trim() : 'ALL TRAYS';
+      const subtitleText = `TRAY ID : ${displayTray}`;
 
-      // 1. PDF DOWNLOAD ACTION
-      if (currentAction === 'PDF') {
-        const pdfRes = await fetch(`${API_BASE_URL}/stocktake/export-pdf`, {
+      if (currentAction === 'Preview') {
+        let win: Window | null = null;
+        if (Platform.OS === 'web' && typeof window !== 'undefined') {
+          win = window.open('', '_blank');
+        }
+
+        const htmlRes = await fetch(`${API_BASE_URL}/stocktake/download-html`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            title: repTitle,
+            title: reportTitle,
+            subtitle: subtitleText,
             columns,
-            data: json.data,
-            totals: json.totals || {},
+            data: reportData,
+            totals: reportTotals,
             fromDate,
             toDate,
+            showPrintButton: false,
           }),
         });
 
-        if (!pdfRes.ok) {
-          throw new Error('Failed to generate PDF document');
-        }
+        if (!htmlRes.ok) throw new Error('Failed to generate report HTML');
+        const htmlContent = await htmlRes.text();
 
-        const pdfBlob = await pdfRes.blob();
         if (Platform.OS === 'web' && typeof window !== 'undefined') {
-          const url = URL.createObjectURL(pdfBlob);
-          const link = document.createElement('a');
-          link.href = url;
-          link.setAttribute('download', `${cleanName}.pdf`);
-          document.body.appendChild(link);
-          link.click();
-          document.body.removeChild(link);
-          setTimeout(() => URL.revokeObjectURL(url), 1000);
-          showSuccess('PDF downloaded successfully!');
-        } else {
-          showSuccess('PDF report generated!');
+          if (win) {
+            win.document.open();
+            win.document.write(htmlContent);
+            win.document.close();
+          } else {
+            const blob = new Blob([htmlContent], { type: 'text/html;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            window.open(url, '_blank');
+          }
         }
-        setIsLoading(false);
-        return;
-      }
+        showSuccess('Report preview opened.');
+      } else if (currentAction === 'Print') {
+        let win: Window | null = null;
+        if (Platform.OS === 'web' && typeof window !== 'undefined') {
+          win = window.open('', '_blank');
+        }
 
-      // 2. EXCEL DOWNLOAD ACTION
-      if (currentAction === 'Excel') {
-        const excelRes = await fetch(`${API_BASE_URL}/stocktake/export-excel`, {
+        const htmlRes = await fetch(`${API_BASE_URL}/stocktake/download-html`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            title: repTitle,
+            title: reportTitle,
+            subtitle: subtitleText,
             columns,
-            data: json.data,
-            totals: json.totals || {},
+            data: reportData,
+            totals: reportTotals,
             fromDate,
             toDate,
+            showPrintButton: false,
           }),
         });
 
-        if (!excelRes.ok) {
-          throw new Error('Failed to generate Excel report');
-        }
-
-        const excelBlob = await excelRes.blob();
-        if (Platform.OS === 'web' && typeof window !== 'undefined') {
-          const url = URL.createObjectURL(excelBlob);
-          const link = document.createElement('a');
-          link.href = url;
-          link.setAttribute('download', `${cleanName}.xlsx`);
-          document.body.appendChild(link);
-          link.click();
-          document.body.removeChild(link);
-          setTimeout(() => URL.revokeObjectURL(url), 1000);
-          showSuccess('Excel file downloaded successfully!');
-        } else {
-          showSuccess('Excel report generated!');
-        }
-        setIsLoading(false);
-        return;
-      }
-
-      // 3. PREVIEW & PRINT ACTIONS (HTML)
-      const htmlRes = await fetch(`${API_BASE_URL}/stocktake/download-html`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          title: repTitle,
-          columns,
-          data: json.data,
-          totals: json.totals || {},
-          fromDate,
-          toDate,
-          showPrintButton: false,
-        }),
-      });
-
-      if (!htmlRes.ok) {
-        throw new Error('Failed to generate report HTML template');
-      }
-
-      let htmlContent = await htmlRes.text();
-
-      // Trigger print for Print option
-      if (currentAction === 'Print') {
+        if (!htmlRes.ok) throw new Error('Failed to generate report print template');
+        let htmlContent = await htmlRes.text();
         htmlContent = htmlContent.replace(
           '</body>',
           '<script>window.addEventListener("load", function(){ setTimeout(function(){ window.print(); }, 500); });</script></body>'
         );
-      }
 
-      if (Platform.OS === 'web' && typeof window !== 'undefined') {
-        if (win) {
-          win.document.open();
-          win.document.write(htmlContent);
-          win.document.close();
-        } else {
-          const blob = new Blob([htmlContent], { type: 'text/html;charset=utf-8;' });
-          const url = URL.createObjectURL(blob);
-          const newTab = window.open(url, '_blank');
-          if (!newTab) {
-            const link = document.createElement('a');
-            link.href = url;
-            link.setAttribute('download', `${cleanName}.html`);
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
+        if (Platform.OS === 'web' && typeof window !== 'undefined') {
+          if (win) {
+            win.document.open();
+            win.document.write(htmlContent);
+            win.document.close();
+          } else {
+            const blob = new Blob([htmlContent], { type: 'text/html;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            window.open(url, '_blank');
           }
         }
-        if (currentAction === 'Print') {
-          showSuccess('Print dialog opened.');
-        } else {
-          showSuccess('Report preview opened.');
-        }
-      } else {
-        showSuccess('Report generated! (Use web to view/print)');
+        showSuccess('Print dialog opened.');
+      } else if (currentAction === 'PDF') {
+        const ok = await downloadPdfReport({
+          endpoint: 'stocktake',
+          title: reportTitle,
+          columns,
+          data: reportData,
+          totals: reportTotals,
+          fromDate,
+          toDate,
+        });
+        if (ok) showSuccess('PDF downloaded successfully!');
+      } else if (currentAction === 'Excel') {
+        const ok = await downloadExcelReport({
+          endpoint: 'stocktake',
+          title: reportTitle,
+          columns,
+          data: reportData,
+          totals: reportTotals,
+          fromDate,
+          toDate,
+        });
+        if (ok) showSuccess('Excel downloaded successfully!');
       }
     } catch (err: any) {
-      if (win) win.close();
-      console.error(err);
-      showError('Failed to generate report: ' + (err.message || 'Error'));
+      console.error('Stock Take Report Error:', err);
+      showError(err.message || 'Failed to generate report');
     } finally {
       setIsLoading(false);
     }
   };
 
-  // Keyboard Shortcuts (F7: Get Report, Esc: Close)
+  // Keyboard shortcut listener (Web only)
   useEffect(() => {
     if (Platform.OS === 'web' && typeof window !== 'undefined') {
       const handleKeyDown = (e: KeyboardEvent) => {
-        const target = e.target as HTMLElement;
-        if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')) {
-          if (e.key === 'Escape') target.blur();
-          return;
-        }
-
         if (e.key === 'F7' || e.key === 'F9') {
           e.preventDefault();
           handleGetReport();
@@ -398,548 +329,325 @@ export default function StockTakeReportsScreen() {
   }, [trayList]);
 
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
+    <SafeAreaView style={styles.safeArea} edges={['top']}>
       <Stack.Screen options={{ headerShown: false }} />
 
-      {/* HEADER */}
+      {/* HEADER (MATCHING MASTER REPORTS SCREEN) */}
       <View style={styles.header}>
         <View style={styles.headerLeft}>
           <TouchableOpacity onPress={() => router.back()} style={styles.backButton} activeOpacity={0.7}>
             <Ionicons name="arrow-back" size={20} color={TEXT_DARK} />
           </TouchableOpacity>
-          <Text style={styles.title}>Stock Take Report</Text>
+          <Text style={styles.headerTitle}>Stock Take Report</Text>
         </View>
 
         <TouchableOpacity
-          style={styles.actionButton}
+          style={[styles.btnGetReport, isLoading && styles.btnDisabled]}
           onPress={() => handleGetReport()}
           disabled={isLoading}
           activeOpacity={0.8}
         >
           {isLoading ? (
-            <ActivityIndicator size="small" color={GOLD_DARK} style={{ marginRight: 5 }} />
+            <ActivityIndicator size="small" color="#FFFFFF" />
           ) : (
-            <Ionicons name="document-text-outline" size={15} color={GOLD_DARK} style={{ marginRight: 5 }} />
+            <>
+              <Ionicons name="document-text-outline" size={15} color="#FFFFFF" style={{ marginRight: 6 }} />
+              <Text style={styles.btnGetReportText}>Get Report</Text>
+            </>
           )}
-          <Text style={styles.actionButtonText}>Get Report</Text>
         </TouchableOpacity>
       </View>
 
-      <ScrollView contentContainerStyle={styles.scrollContent}>
-        <View style={styles.cardWrapper}>
-          <View style={styles.goldCard}>
-            {/* Top row: Select Option (Report Mode), Tray ID, Date Range */}
-            <View style={styles.inputRow}>
-              {/* Report Mode (All, Scanned, UnScanned) */}
-              <View style={[styles.reportCol, { flex: 1.4 }]}>
-                <Text style={styles.fieldLabel}>Select Option</Text>
-                <View style={{ flexDirection: 'row', gap: 8, marginTop: 4, flexWrap: 'wrap' }}>
-                  <RadioButton
-                    label="All"
-                    selected={mode === 'all'}
-                    onPress={() => setMode('all')}
-                  />
-                  <RadioButton
-                    label="Scanned"
-                    selected={mode === 'scanned'}
-                    onPress={() => setMode('scanned')}
-                  />
-                  <RadioButton
-                    label="UnScanned"
-                    selected={mode === 'unscanned'}
-                    onPress={() => setMode('unscanned')}
-                  />
-                </View>
-              </View>
-
-              {/* Tray ID Filter */}
-              <View style={[styles.reportCol, { flex: 1 }]}>
-                <ReportDropdown
-                  label="Tray ID (Optional)"
-                  options={trayOptions}
-                  selectedId={trayId}
-                  onSelect={(id) => {
-                    setTrayId(id);
-                    setIsTrayDropdownOpen(false);
-                  }}
-                  isOpen={isTrayDropdownOpen}
-                  onToggle={() => setIsTrayDropdownOpen(!isTrayDropdownOpen)}
-                  maxHeight={260}
-                />
-              </View>
-
-              {/* From Date */}
-              <ReportDatePicker
-                label="From Date"
-                value={fromDate}
-                onChange={setFromDate}
-                isIsoOutput={true}
-                onOpenNative={() => setShowDatePicker({ show: true, mode: 'from' })}
-              />
-
-              {/* To Date */}
-              <ReportDatePicker
-                label="To Date"
-                value={toDate}
-                onChange={setToDate}
-                isIsoOutput={true}
-                onOpenNative={() => setShowDatePicker({ show: true, mode: 'to' })}
-              />
-            </View>
-
-            {/* Divider */}
-            <View style={styles.divider} />
-
-            {/* Actions: Preview, Print, PDF, Excel */}
-            <View style={styles.buttonRow}>
-              <RadioButton
-                label="Preview"
-                selected={actionOption === 'Preview'}
-                onPress={() => setActionOption('Preview')}
-              />
-              <RadioButton
-                label="Print"
-                selected={actionOption === 'Print'}
-                onPress={() => setActionOption('Print')}
-              />
-              <RadioButton
-                label="PDF"
-                selected={actionOption === 'PDF'}
-                onPress={() => setActionOption('PDF')}
-              />
-              <RadioButton
-                label="Excel"
-                selected={actionOption === 'Excel'}
-                onPress={() => setActionOption('Excel')}
-              />
-            </View>
-          </View>
-        </View>
-
-        {/* SUMMARY CARDS IF RESULTS ARE RETURNED */}
-        {reportResult && reportResult.totals && (
-          <View style={styles.summaryContainer}>
-            <View style={styles.summaryCard}>
-              <Text style={styles.summaryCardLabel}>TOTAL RECORDS</Text>
-              <Text style={styles.summaryCardVal}>{reportResult.totals.totalRecords || 0}</Text>
-            </View>
-            <View style={styles.summaryCard}>
-              <Text style={styles.summaryCardLabel}>TOTAL QTY (PCS)</Text>
-              <Text style={styles.summaryCardVal}>{reportResult.totals.totalPcs || 0}</Text>
-            </View>
-            <View style={styles.summaryCard}>
-              <Text style={styles.summaryCardLabel}>TOTAL WT. (G)</Text>
-              <Text style={styles.summaryCardVal}>{Number(reportResult.totals.totalWeight || 0).toFixed(3)}</Text>
-            </View>
-            <View style={styles.summaryCard}>
-              <Text style={styles.summaryCardLabel}>TOTAL VALUATION</Text>
-              <Text style={[styles.summaryCardVal, { color: GOLD_DARK }]}>
-                ${Number(reportResult.totals.totalCost || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-              </Text>
-            </View>
-          </View>
-        )}
-
-        {/* ON-SCREEN TABLE PREVIEW */}
-        {reportResult && reportResult.data && reportResult.data.length > 0 && (
-          <View style={styles.tableCard}>
-            <View style={styles.tableCardHeader}>
-              <Text style={styles.tableCardTitle}>{reportResult.title}</Text>
-              <Text style={styles.tableCardSubtitle}>{reportResult.data.length} Records Found</Text>
-            </View>
-
-            <ScrollView horizontal showsHorizontalScrollIndicator={true}>
-              <View>
-                {/* TABLE HEADER */}
-                <View style={styles.tableHeaderRow}>
-                  <View style={[styles.tableHeaderCell, { width: 50 }]}>
-                    <Text style={styles.tableHeaderText}>#</Text>
-                  </View>
-                  {reportResult.columns.map((col: any) => (
-                    <View
-                      key={col.key}
-                      style={[
-                        styles.tableHeaderCell,
-                        { width: col.width || 120 },
-                        col.align === 'right' && { alignItems: 'flex-end' },
-                        col.align === 'center' && { alignItems: 'center' },
-                      ]}
-                    >
-                      <Text style={styles.tableHeaderText}>{col.label}</Text>
-                    </View>
-                  ))}
-                </View>
-
-                {/* TABLE BODY */}
-                {reportResult.data.map((row: any, idx: number) => {
-                  const isEven = idx % 2 === 0;
-                  return (
-                    <View
-                      key={`row_${idx}`}
-                      style={[styles.tableBodyRow, isEven ? styles.tableRowEven : styles.tableRowOdd]}
-                    >
-                      <View style={[styles.tableBodyCell, { width: 50, alignItems: 'center' }]}>
-                        <Text style={styles.tableIndexText}>{idx + 1}</Text>
-                      </View>
-                      {reportResult.columns.map((col: any) => {
-                        let val = row[col.key];
-                        if (col.format === 'currency') {
-                          val = `$ ${Number(val || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-                        } else if (col.format === 'decimal3') {
-                          val = Number(val || 0).toFixed(3);
-                        } else if (col.format === 'date') {
-                          val = val ? new Date(val).toLocaleDateString('en-GB') : '';
-                        }
-
-                        return (
-                          <View
-                            key={col.key}
-                            style={[
-                              styles.tableBodyCell,
-                              { width: col.width || 120 },
-                              col.align === 'right' && { alignItems: 'flex-end' },
-                              col.align === 'center' && { alignItems: 'center' },
-                            ]}
-                          >
-                            <Text
-                              style={[
-                                styles.tableCellText,
-                                col.key === 'Status' && (val === 'Scanned' ? styles.statusScanned : styles.statusUnscanned),
-                              ]}
-                            >
-                              {val !== undefined && val !== null ? String(val) : ''}
-                            </Text>
-                          </View>
-                        );
-                      })}
-                    </View>
-                  );
-                })}
-              </View>
-            </ScrollView>
-          </View>
-        )}
-
-        {showDatePicker.show && (
-          <DateTimePicker
-            value={parseLocalDate(showDatePicker.mode === 'from' ? fromDate : toDate)}
-            maximumDate={new Date()}
-            mode="date"
-            display="default"
-            onChange={handleDateChange}
-          />
-        )}
-      </ScrollView>
-
-      {/* Toast Notification */}
+      {/* TOAST MESSAGE */}
       {toastMessage ? (
-        <View style={[styles.toast, toastType === 'success' ? styles.toastSuccess : styles.toastError]}>
+        <View style={[styles.toastContainer, toastType === 'error' ? styles.toastError : styles.toastSuccess]}>
           <Ionicons
-            name={toastType === 'success' ? 'checkmark-circle' : 'alert-circle'}
-            size={16}
-            color={toastType === 'success' ? '#15803D' : '#DC2626'}
-            style={{ marginRight: 8 }}
+            name={toastType === 'error' ? 'alert-circle' : 'checkmark-circle'}
+            size={18}
+            color="#FFFFFF"
+            style={{ marginRight: 6 }}
           />
-          <Text style={[styles.toastText, toastType === 'success' ? styles.toastTextSuccess : styles.toastTextError]}>
-            {toastMessage}
-          </Text>
+          <Text style={styles.toastText}>{toastMessage}</Text>
         </View>
       ) : null}
+
+      <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
+        <View style={styles.filterCard}>
+          {/* FILTER ROW: SELECT OPTION, TRAY ID, FROM DATE, TO DATE */}
+          <View style={styles.filterRow}>
+            {/* SELECT OPTION (MODE) */}
+            <View style={styles.selectOptionCol}>
+              <Text style={styles.fieldLabel}>Select Option</Text>
+              <View style={styles.radioGroupRow}>
+                <RadioButton
+                  label="All"
+                  selected={mode === 'all'}
+                  onPress={() => setMode('all')}
+                />
+                <RadioButton
+                  label="Scanned"
+                  selected={mode === 'scanned'}
+                  onPress={() => setMode('scanned')}
+                />
+                <RadioButton
+                  label="UnScanned"
+                  selected={mode === 'unscanned'}
+                  onPress={() => setMode('unscanned')}
+                />
+              </View>
+            </View>
+
+            {/* TRAY ID (OPTIONAL) */}
+            <View style={styles.trayCol}>
+              <ReportDropdown
+                label="Tray ID (Optional)"
+                options={trayOptions}
+                selectedId={trayId}
+                onSelect={(id) => {
+                  setTrayId(id);
+                  setIsTrayDropdownOpen(false);
+                }}
+                isOpen={isTrayDropdownOpen}
+                onToggle={() => setIsTrayDropdownOpen(!isTrayDropdownOpen)}
+                maxHeight={260}
+              />
+            </View>
+
+            {/* FROM DATE */}
+            <ReportDatePicker
+              label="From Date"
+              value={fromDate}
+              onChange={setFromDate}
+              onOpenNative={() => setShowDatePicker({ show: true, mode: 'from' })}
+            />
+
+            {/* TO DATE */}
+            <ReportDatePicker
+              label="To Date"
+              value={toDate}
+              onChange={setToDate}
+              onOpenNative={() => setShowDatePicker({ show: true, mode: 'to' })}
+            />
+          </View>
+
+          {/* SUBTLE HORIZONTAL DIVIDER */}
+          <View style={styles.divider} />
+
+          {/* ACTIONS ROW: PREVIEW, PRINT, PDF, EXCEL (MATCHING MASTER REPORTS) */}
+          <View style={styles.radioGroupRow}>
+            <RadioButton
+              label="Preview"
+              selected={actionOption === 'Preview'}
+              onPress={() => setActionOption('Preview')}
+            />
+            <RadioButton
+              label="Print"
+              selected={actionOption === 'Print'}
+              onPress={() => setActionOption('Print')}
+            />
+            <RadioButton
+              label="PDF"
+              selected={actionOption === 'PDF'}
+              onPress={() => setActionOption('PDF')}
+            />
+            <RadioButton
+              label="Excel"
+              selected={actionOption === 'Excel'}
+              onPress={() => setActionOption('Excel')}
+            />
+          </View>
+        </View>
+      </ScrollView>
+
+      {/* MOBILE DATE PICKER */}
+      {showDatePicker.show && Platform.OS !== 'web' && (
+        <DateTimePicker
+          value={parseLocalDate(showDatePicker.mode === 'from' ? fromDate : toDate)}
+          maximumDate={new Date()}
+          mode="date"
+          display="default"
+          onChange={handleDateChange}
+        />
+      )}
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
+  safeArea: {
     flex: 1,
     backgroundColor: APP_BG,
   },
   header: {
-    height: 52,
-    backgroundColor: CARD_BG,
-    borderBottomWidth: 1,
-    borderBottomColor: GOLD_BORDER,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 16,
-    zIndex: 50,
+    paddingVertical: 12,
+    backgroundColor: CARD_BG,
+    borderBottomWidth: 1,
+    borderBottomColor: GOLD_BORDER,
   },
   headerLeft: {
     flexDirection: 'row',
     alignItems: 'center',
   },
   backButton: {
-    marginRight: 12,
     padding: 6,
+    marginRight: 10,
     borderRadius: 6,
+    backgroundColor: '#F5EFE6',
   },
-  title: {
-    fontSize: 16,
+  headerTitle: {
+    fontSize: 18,
     fontWeight: '700',
     color: TEXT_DARK,
-    fontFamily: 'Cambria',
-    letterSpacing: 0.5,
+    fontFamily: 'Cambria, serif',
   },
-  actionButton: {
+  btnGetReport: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#FFF4DA',
-    paddingVertical: 6,
-    paddingHorizontal: 12,
+    backgroundColor: GOLD_ACCENT,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
     borderRadius: 6,
-    borderWidth: 1,
-    borderColor: GOLD_ACCENT,
+    shadowColor: GOLD_DARK,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 3,
+    elevation: 3,
   },
-  actionButtonText: {
-    color: GOLD_DARK,
-    fontSize: 12,
+  btnDisabled: {
+    opacity: 0.6,
+  },
+  btnGetReportText: {
+    fontSize: 13,
     fontWeight: '700',
-    fontFamily: 'Cambria',
+    color: '#FFFFFF',
+    fontFamily: 'Cambria, serif',
+  },
+  toastContainer: {
+    position: 'absolute',
+    top: 60,
+    alignSelf: 'center',
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderRadius: 6,
+    zIndex: 9999,
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 4,
+    elevation: 5,
+  },
+  toastSuccess: {
+    backgroundColor: '#2E7D32',
+  },
+  toastError: {
+    backgroundColor: '#C62828',
+  },
+  toastText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '600',
+    fontFamily: 'Cambria, serif',
   },
   scrollContent: {
     padding: 16,
-    paddingBottom: 40,
   },
-  cardWrapper: {
-    marginBottom: 16,
-  },
-  goldCard: {
+  filterCard: {
     backgroundColor: CARD_BG,
     borderRadius: 8,
     borderWidth: 1,
     borderColor: GOLD_BORDER,
     padding: 16,
-    shadowColor: '#3B2D17',
-    shadowOffset: { width: 0, height: 2 },
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.05,
-    shadowRadius: 6,
+    shadowRadius: 3,
     elevation: 2,
+    position: 'relative',
+    zIndex: 1,
   },
-  inputRow: {
+  filterRow: {
     flexDirection: 'row',
-    gap: 12,
     flexWrap: 'wrap',
-    zIndex: 20,
+    gap: 12,
+    marginBottom: 16,
+    position: 'relative',
+    zIndex: 100,
   },
-  reportCol: {
+  selectOptionCol: {
+    flex: 1.8,
+    minWidth: 240,
+    zIndex: 10,
+  },
+  trayCol: {
+    flex: 1.5,
     minWidth: 180,
+    position: 'relative',
+    zIndex: 100,
   },
   fieldLabel: {
-    fontSize: 11.5,
+    fontSize: 12,
     fontWeight: '700',
-    color: '#5C4A28',
-    marginBottom: 4,
-    fontFamily: 'Cambria',
-    textTransform: 'uppercase',
+    color: TEXT_DARK,
+    marginBottom: 6,
+    fontFamily: 'Cambria, serif',
   },
   divider: {
     height: 1,
-    backgroundColor: '#F5EFE6',
-    marginVertical: 14,
+    backgroundColor: '#F0E6CC',
+    marginVertical: 12,
   },
-  buttonRow: {
+  radioGroupRow: {
     flexDirection: 'row',
-    alignItems: 'center',
     flexWrap: 'wrap',
-    gap: 12,
+    gap: 8,
   },
   radioBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingVertical: 6,
-    paddingHorizontal: 14,
+    paddingHorizontal: 12,
     borderRadius: 6,
     borderWidth: 1,
-    borderColor: '#E2D3B3',
-    backgroundColor: '#FAF7F0',
+    borderColor: GOLD_BORDER,
+    backgroundColor: '#FFFFFF',
+    height: 38,
   },
   radioBtnSelected: {
-    backgroundColor: '#FFF4DA',
     borderColor: GOLD_ACCENT,
+    backgroundColor: '#FDFBF7',
   },
   radioCircle: {
-    height: 15,
-    width: 15,
+    width: 16,
+    height: 16,
     borderRadius: 8,
     borderWidth: 1.5,
-    borderColor: '#C5B597',
+    borderColor: '#C4B59D',
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 6,
   },
   radioCircleSelected: {
-    borderColor: GOLD_DARK,
+    borderColor: GOLD_ACCENT,
   },
   radioDot: {
-    height: 7,
-    width: 7,
+    width: 8,
+    height: 8,
     borderRadius: 4,
-    backgroundColor: GOLD_DARK,
+    backgroundColor: GOLD_ACCENT,
   },
   radioLabel: {
     fontSize: 12,
-    fontWeight: '500',
-    color: '#5C4A28',
-    fontFamily: 'Cambria',
+    color: TEXT_DARK,
+    fontFamily: 'Cambria, serif',
   },
   radioLabelSelected: {
-    color: GOLD_DARK,
     fontWeight: '700',
-  },
-  summaryContainer: {
-    flexDirection: 'row',
-    gap: 12,
-    marginBottom: 16,
-    flexWrap: 'wrap',
-  },
-  summaryCard: {
-    flex: 1,
-    minWidth: 140,
-    backgroundColor: CARD_BG,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: GOLD_BORDER,
-    padding: 12,
-    alignItems: 'center',
-  },
-  summaryCardLabel: {
-    fontSize: 10.5,
-    fontWeight: '700',
-    color: '#7C6745',
-    marginBottom: 4,
-    fontFamily: 'Cambria',
-    textTransform: 'uppercase',
-  },
-  summaryCardVal: {
-    fontSize: 16,
-    fontWeight: '800',
-    color: TEXT_DARK,
-    fontFamily: 'Cambria',
-  },
-  tableCard: {
-    backgroundColor: CARD_BG,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: GOLD_BORDER,
-    overflow: 'hidden',
-    shadowColor: '#3B2D17',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 6,
-    elevation: 2,
-  },
-  tableCardHeader: {
-    padding: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: '#F5EFE6',
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  tableCardTitle: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: TEXT_DARK,
-    fontFamily: 'Cambria',
-  },
-  tableCardSubtitle: {
-    fontSize: 11,
-    color: '#7C6745',
-    fontWeight: '600',
-    fontFamily: 'Cambria',
-  },
-  tableHeaderRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#996515',
-    borderBottomWidth: 1,
-    borderBottomColor: '#d4a742',
-    paddingVertical: 8,
-    paddingHorizontal: 8,
-  },
-  tableHeaderCell: {
-    paddingHorizontal: 6,
-    justifyContent: 'center',
-  },
-  tableHeaderText: {
-    fontSize: 10.5,
-    fontWeight: '700',
-    color: '#FFFFFF',
-    fontFamily: 'Cambria',
-    textTransform: 'uppercase',
-  },
-  tableBodyRow: {
-    flexDirection: 'row',
-    borderBottomWidth: 1,
-    borderBottomColor: '#F0D9A0',
-    paddingVertical: 7,
-    paddingHorizontal: 8,
-    alignItems: 'center',
-  },
-  tableRowEven: {
-    backgroundColor: '#FFFBF2',
-  },
-  tableRowOdd: {
-    backgroundColor: '#FFFFFF',
-  },
-  tableBodyCell: {
-    paddingHorizontal: 6,
-    justifyContent: 'center',
-  },
-  tableIndexText: {
-    fontSize: 10.5,
-    color: '#7C6745',
-    fontFamily: 'Cambria',
-  },
-  tableCellText: {
-    fontSize: 11,
-    color: TEXT_DARK,
-    fontFamily: 'Cambria',
-  },
-  statusScanned: {
-    color: '#16A34A',
-    fontWeight: '700',
-  },
-  statusUnscanned: {
-    color: '#DC2626',
-    fontWeight: '700',
-  },
-  toast: {
-    position: 'absolute',
-    bottom: 20,
-    alignSelf: 'center',
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 10,
-    paddingHorizontal: 16,
-    borderRadius: 8,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.15,
-    shadowRadius: 5,
-    elevation: 4,
-    zIndex: 999,
-  },
-  toastSuccess: {
-    backgroundColor: '#F0FDF4',
-    borderWidth: 1,
-    borderColor: '#BBF7D0',
-  },
-  toastError: {
-    backgroundColor: '#FEF2F2',
-    borderWidth: 1,
-    borderColor: '#FECACA',
-  },
-  toastText: {
-    fontSize: 12,
-    fontWeight: '600',
-    fontFamily: 'Cambria',
-  },
-  toastTextSuccess: {
-    color: '#15803D',
-  },
-  toastTextError: {
-    color: '#DC2626',
+    color: GOLD_ACCENT,
   },
 });

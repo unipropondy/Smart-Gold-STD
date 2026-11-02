@@ -1,3 +1,5 @@
+const { validateBackendDates } = require("../utils/validateReportDates");
+const { formatDateDisp, formatColumnHeader } = require("../utils/reportHtmlTemplate");
 const express = require("express");
 const router = express.Router();
 const sql = require("mssql");
@@ -1142,6 +1144,197 @@ router.post("/delete-item", handleDeletePurchaseItem);
 router.post("/update-item", handleUpdatePurchaseItem);
 router.put("/item/:inventoryCode", handleUpdatePurchaseItem);
 
+
+// ==========================================
+// PURCHASE TAKE REPORT API
+// ==========================================
+
+function parseDateParam(dateStr) {
+  if (!dateStr) return null;
+  if (typeof dateStr === "string" && dateStr.includes("/")) {
+    const parts = dateStr.split("/");
+    if (parts.length === 3) {
+      return `${parts[2]}-${parts[1].padStart(2, "0")}-${parts[0].padStart(2, "0")}`;
+    }
+  }
+  return dateStr;
+}
+
+// GET /api/purchasetake/trays - List all available trays for dropdown/search
+router.get("/trays", async (req, res) => {
+  try {
+    const pool = req.pool;
+    const trayRes = await pool.request().query(`
+      SELECT DISTINCT
+        RTRIM(TrayID) AS TrayID,
+        RTRIM(ISNULL(TrayName, TrayID)) AS TrayName
+      FROM tblTrayMaster
+      WHERE TrayID IS NOT NULL AND RTRIM(TrayID) <> ''
+      ORDER BY TrayID ASC
+    `);
+    res.json({
+      success: true,
+      data: trayRes.recordset || [],
+    });
+  } catch (err) {
+    console.error("Purchase Take Get Trays Error:", err);
+    res.status(500).json({ success: false, message: err.message, data: [] });
+  }
+});
+
+// POST /api/purchasetake/report - Fetch Purchase Take Report based on Mode, Date Range, optional JobSheet and Tray ID
+router.post("/report", async (req, res) => {
+  try {
+    const { fromDate, toDate, mode = "all", trayId = "", jobSheetNo = "" } = req.body;
+    const pool = req.pool;
+
+    const dateVal = validateBackendDates(fromDate, toDate);
+    if (!dateVal.isValid) {
+      return res.status(400).json({ success: false, message: dateVal.message });
+    }
+
+    const sFrom = parseDateParam(fromDate);
+    const sTo = parseDateParam(toDate);
+
+    const fromIso = `${sFrom} 00:00:00`;
+    const toIso = `${sTo} 23:59:59`;
+
+    const request = pool.request();
+    request.input("FromDate", sql.DateTime, new Date(fromIso));
+    request.input("ToDate", sql.DateTime, new Date(toIso));
+
+    let whereClause = "WHERE s.ModifyDate >= @FromDate AND s.ModifyDate <= @ToDate";
+    let reportModeTitle = "Purchase Take Report  -All";
+
+    const normalizedMode = String(mode).toLowerCase().trim();
+    if (normalizedMode === "scanned") {
+      whereClause += " AND s.TrayID <> 'X'";
+      reportModeTitle = "Purchase Take Report  -Scanned Items";
+    } else if (normalizedMode === "unscanned") {
+      whereClause += " AND s.TrayID = 'X'";
+      reportModeTitle = "Purchase Take Report  -UnScanned Items";
+    }
+
+    if (trayId && String(trayId).trim()) {
+      const trimmedTray = String(trayId).trim();
+      request.input("TrayID", sql.VarChar, trimmedTray);
+      whereClause += " AND UPPER(RTRIM(s.TrayID)) = UPPER(RTRIM(@TrayID))";
+    }
+
+    if (jobSheetNo && String(jobSheetNo).trim() && String(jobSheetNo).trim().toUpperCase() !== "ALL") {
+      const trimmedJobSheet = String(jobSheetNo).trim();
+      request.input("JobSheetNo", sql.VarChar, trimmedJobSheet);
+      whereClause += " AND UPPER(RTRIM(s.JobSheetNo)) = UPPER(RTRIM(@JobSheetNo))";
+    }
+
+    const fDisp = formatDateDisp(sFrom);
+    const tDisp = formatDateDisp(sTo);
+    const reportTitle = `${reportModeTitle} From ${fDisp} To ${tDisp}`;
+
+    const query = `
+      SELECT
+        RTRIM(s.TrayID) AS TrayID,
+        RTRIM(s.InventoryCode) AS InventoryCode,
+        RTRIM(ISNULL(s.JobSheetNo, '')) AS JobSheetNo,
+        RTRIM(ISNULL(s.Description, '')) AS Description,
+        RTRIM(ISNULL(s.CategoryCode, '')) AS CategoryCode,
+        RTRIM(ISNULL(s.CatalogueCode, '')) AS CatalogueCode,
+        ISNULL(s.PCS, 1) AS PCS,
+        ISNULL(s.Weight, 0) AS Weight,
+        ISNULL(s.CostPerGram, 0) AS CostPerGram,
+        ISNULL(s.TotalCost, 0) AS TotalCost,
+        s.ModifyDate,
+        CASE 
+          WHEN s.TrayID IS NOT NULL AND RTRIM(s.TrayID) <> 'X' AND RTRIM(s.TrayID) <> '' THEN 'Scanned'
+          ELSE 'Unscanned'
+        END AS Status
+      FROM tblPurchasestock s WITH (NOLOCK)
+      ${whereClause}
+      ORDER BY s.TrayID ASC, s.InventoryCode ASC
+    `;
+
+    const result = await request.query(query);
+    const rows = result.recordset || [];
+
+    let totalWeight = 0;
+    let totalPcs = 0;
+    let totalCost = 0;
+
+    rows.forEach((r) => {
+      totalWeight += Number(r.Weight) || 0;
+      totalPcs += Number(r.PCS) || 0;
+      totalCost += Number(r.TotalCost) || 0;
+    });
+
+    const columns = [
+      { key: "TrayID", label: "TRAY ID", width: 100, align: "center" },
+      { key: "InventoryCode", label: "INV. CODE", width: 140 },
+      { key: "JobSheetNo", label: "JOBSHEET NO.", width: 120, align: "center" },
+      { key: "Description", label: "DESC.", width: 200 },
+      { key: "CategoryCode", label: "CATEGORY", width: 100, align: "center" },
+      { key: "PCS", label: "TOTAL QTY.", width: 80, align: "center" },
+      { key: "Weight", label: "TOTAL WT.", width: 110, align: "right", format: "decimal3" },
+      { key: "CostPerGram", label: "PURCH. COST", width: 110, align: "right", format: "currency" },
+      { key: "TotalCost", label: "TOTAL COST", width: 120, align: "right", format: "currency" },
+      { key: "Status", label: "STATUS", width: 100, align: "center" },
+    ];
+
+    res.json({
+      success: true,
+      title: reportTitle,
+      columns,
+      data: rows,
+      totals: {
+        totalRecords: rows.length,
+        totalItems: rows.length,
+        totalPcs,
+        totalWeight: Number(totalWeight.toFixed(3)),
+        totalCost: Number(totalCost.toFixed(2)),
+      },
+    });
+  } catch (err) {
+    console.error("Purchase Take Report Generation Error:", err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// POST /api/purchasetake/download-html
+router.post("/download-html", async (req, res) => {
+  try {
+    const { generateReportHtml } = require("../utils/reportHtmlTemplate");
+    const { title, columns, data, totals, companyInfo, fromDate, toDate, showPrintButton } = req.body;
+    const html = await generateReportHtml({
+      title: title || "Purchase Take Report",
+      columns,
+      data,
+      totals,
+      companyInfo,
+      fromDate,
+      toDate,
+      showPrintButton: showPrintButton ?? false,
+      pool: req.pool,
+    });
+    res.setHeader("Content-Type", "text/html; charset=utf-8");
+    res.send(html);
+  } catch (err) {
+    console.error("Purchase Take Download HTML Error:", err);
+    res.status(500).send("Error generating report HTML: " + err.message);
+  }
+});
+
+// POST /api/purchasetake/export-excel
+router.post("/export-excel", (req, res) => {
+  const { handleExportExcel } = require("../utils/reportExportHandlers");
+  handleExportExcel({ req, res, defaultTitle: "Purchase_Take_Report" });
+});
+
+// POST /api/purchasetake/export-pdf
+router.post("/export-pdf", (req, res) => {
+  const { handleExportPdf } = require("../utils/reportExportHandlers");
+  handleExportPdf({ req, res, defaultTitle: "Purchase_Take_Report" });
+});
+
 module.exports = router;
+
 
 

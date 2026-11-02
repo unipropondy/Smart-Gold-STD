@@ -31,10 +31,6 @@ async function fetchTrayItems(pool, trayId) {
     WHERE UPPER(RTRIM(TrayID)) = UPPER(RTRIM(@trayId))
   `;
 
-  if (trayId.trim().toUpperCase() === "X") {
-    query += ` AND Scanned = 1`;
-  }
-
   query += ` ORDER BY ModifyDate DESC, InventoryCode ASC`;
   const res = await req.query(query);
 
@@ -92,9 +88,6 @@ async function fetchTrayTotals(pool, trayId = '') {
       FROM tblStock
       WHERE UPPER(RTRIM(TrayID)) = UPPER(RTRIM(@trayId))
     `;
-    if (trimmedTray.toUpperCase() === 'X') {
-      scannedQuery += ` AND Scanned = 1`;
-    }
     const scannedRes = await scannedReq.query(scannedQuery);
     const scRow = scannedRes.recordset[0] || {};
     scannedWeightNum = Number(scRow.ScannedWeight) || 0;
@@ -296,7 +289,7 @@ router.post("/proceed", async (req, res) => {
       const activeCheck = await checkReq.query(`
         SELECT COUNT(*) AS ScannedCount
         FROM tblStock
-        WHERE (Scanned = 1 OR (TrayID IS NOT NULL AND RTRIM(TrayID) <> '' AND RTRIM(TrayID) <> 'X'))
+        WHERE (TrayID IS NOT NULL AND RTRIM(TrayID) <> '' AND RTRIM(TrayID) <> 'X')
           AND (@categoryCode = '' OR RTRIM(CategoryCode) = RTRIM(@categoryCode))
       `);
       const scannedCount = activeCheck.recordset[0] ? Number(activeCheck.recordset[0].ScannedCount) || 0 : 0;
@@ -1196,14 +1189,13 @@ router.post("/report", async (req, res) => {
     });
 
     const columns = [
-      { key: "TrayID", label: "TRAY ID", width: 100, align: "center" },
-      { key: "InventoryCode", label: "INV. CODE", width: 140 },
-      { key: "Description", label: "DESC.", width: 220 },
-      { key: "CategoryCode", label: "CATEGORY", width: 110, align: "center" },
-      { key: "PCS", label: "TOTAL QTY.", width: 80, align: "center" },
-      { key: "Weight", label: "TOTAL WT.", width: 110, align: "right", format: "decimal3" },
-      { key: "TotalCost", label: "TOTAL COST", width: 120, align: "right", format: "currency" },
-      { key: "Status", label: "STATUS", width: 110, align: "center" },
+      { key: "TrayID", label: "TRAY ID", width: 110, align: "center" },
+      { key: "InventoryCode", label: "INVENTORY CODE", width: 160, align: "left" },
+      { key: "Description", label: "DESCRIPTION", width: 240, align: "left" },
+      { key: "Weight", label: "WEIGHT", width: 120, align: "right", format: "decimal3" },
+      { key: "CostPerGram", label: "COST", width: 120, align: "right", format: "currency" },
+      { key: "PCS", label: "PCS", width: 80, align: "center" },
+      { key: "TotalCost", label: "TOTAL COST", width: 140, align: "right", format: "currency" },
     ];
 
     res.json({
@@ -1229,9 +1221,10 @@ router.post("/report", async (req, res) => {
 router.post("/download-html", async (req, res) => {
   try {
     const { generateReportHtml } = require("../utils/reportHtmlTemplate");
-    const { title, columns, data, totals, companyInfo, fromDate, toDate, showPrintButton } = req.body;
+    const { title, subtitle, columns, data, totals, companyInfo, fromDate, toDate, showPrintButton } = req.body;
     const html = await generateReportHtml({
       title: title || "Stock Take Report",
+      subtitle: subtitle || "",
       columns,
       data,
       totals,

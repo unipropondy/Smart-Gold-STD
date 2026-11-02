@@ -249,7 +249,7 @@ export default function StockTakeScreen() {
         setIsSetupModalOpen(false);
         setStatusMessage({ type: 'success', text: 'Stock Take initialized! Ready for scanning.' });
       } else {
-        setStatusMessage({ type: 'error', text: result.message || 'Failed to proceed Stock Take.' });
+        setStatusMessage({ type: 'error', text: result.error ? `${result.message}: ${result.error}` : (result.message || 'Failed to proceed Stock Take.') });
       }
     } catch (err) {
       setStatusMessage({ type: 'error', text: 'Error connecting to server for Proceed Stock Take.' });

@@ -405,6 +405,7 @@ async function generateReportHtml({
   pool = null,
   showPrintButton = false,
   showStatCards = false,
+  subtitle = "",
 }) {
   // Query company dynamically from tblCompany if not supplied or incomplete
   let comp = companyInfo || {};
@@ -830,6 +831,7 @@ async function generateReportHtml({
     <!-- REPORT TITLE & PERIOD -->
     <div class="report-title-area">
       <div class="report-main-title">${cleanTitle || "REPORT"}</div>
+      ${subtitle ? `<div style="font-family: Cambria, Georgia, serif; font-size: 11.5px; font-weight: 700; color: #3b2d17; margin-bottom: 3px; letter-spacing: 0.5px; text-transform: uppercase;">${subtitle}</div>` : ""}
       <div class="report-period-line">${datePeriodText}</div>
     </div>
 
