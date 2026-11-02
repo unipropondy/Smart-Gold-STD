@@ -34,36 +34,19 @@ router.get("/today", async (req, res) => {
     const pool = req.pool;
     await ensureTableExists(pool);
 
-    const query = `
-    SELECT *
-FROM tblClassRate
-WHERE CAST(CreateDate AS DATE) = CAST(GETDATE() AS DATE)
-ORDER BY ModifyDate DESC
-    `;
-    const result = await pool.request().query(query);
-    res.json({ success: true, data: result.recordset });
-  } catch (err) {
-    console.error("Fetch Live Class Rates Error:", err);
-    res.status(500).json({ success: false, message: "Server error", error: err.message });
-  }
-});
-// GET today's live rates
-router.get("/today", async (req, res) => {
-  try {
-    const pool = req.pool;
-    await ensureTableExists(pool);
-
+    // Try finding today's rates; if none recorded today, return latest recorded rates
     const query = `
       SELECT *
-      FROM tblClassRate
-      WHERE CAST(CreateDate AS DATE) = CAST(GETDATE() AS DATE)
-      ORDER BY ModifyDate DESC
+FROM tblClassRate
+WHERE CAST(FromDate AS DATE) <= CAST(GETDATE() AS DATE)
+  AND CAST(ToDate AS DATE) >= CAST(GETDATE() AS DATE)
+ORDER BY FromDate DESC, ModifyDate DESC;
     `;
     const result = await pool.request().query(query);
-    res.json({ success: true, data: result.recordset });
+    res.json({ success: true, data: result.recordset || [] });
   } catch (err) {
     console.error("Fetch Live Class Rates Error:", err);
-    res.status(500).json({ success: false, message: "Server error", error: err.message });
+    res.status(500).json({ success: false, message: "Server error", error: err.message, data: [] });
   }
 });
 
