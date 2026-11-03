@@ -45,6 +45,12 @@ export default function StockTradeInTransferScreen() {
   const [locationModalVisible, setLocationModalVisible] = useState(false);
   const [locationSearchQuery, setLocationSearchQuery] = useState('');
 
+  // Past Transfer Search Modal State
+  const [transferModalVisible, setTransferModalVisible] = useState(false);
+  const [transferSearchQuery, setTransferSearchQuery] = useState('');
+  const [pastTransfers, setPastTransfers] = useState<any[]>([]);
+  const [pastTransfersLoading, setPastTransfersLoading] = useState(false);
+
   // Date State
   const [transferDate, setTransferDate] = useState(() => {
     const d = new Date();
@@ -54,9 +60,10 @@ export default function StockTradeInTransferScreen() {
     return `${yyyy}-${mm}-${dd}`;
   });
 
-  // Scanner State
+  // Scanner & Item Entry State
   const [inventoryCode, setInventoryCode] = useState('');
   const [scannedItem, setScannedItem] = useState<any>(null);
+  const [scanQty, setScanQty] = useState('1');
 
   // Grid State
   const [gridData, setGridData] = useState<any[]>([]);
@@ -84,7 +91,7 @@ export default function StockTradeInTransferScreen() {
 
   const showToast = (message: string, type: 'success' | 'error' = 'success') => {
     setToast({ message, type });
-    setTimeout(() => setToast(null), 3000);
+    setTimeout(() => setToast(null), 3500);
   };
 
   const fetchLocations = async () => {
@@ -99,6 +106,29 @@ export default function StockTradeInTransferScreen() {
     }
   };
 
+  const fetchPastTransfers = async () => {
+    try {
+      setPastTransfersLoading(true);
+      const res = await fetch(`${API_URL}/past-list`);
+      const data = await res.json();
+      if (data.success) {
+        setPastTransfers(data.data || data.list || []);
+      } else {
+        showToast(data.message || 'Error fetching past transfers', 'error');
+      }
+    } catch (err) {
+      showToast('Network error loading past transfers', 'error');
+    } finally {
+      setPastTransfersLoading(false);
+    }
+  };
+
+  const openPastTransfersModal = () => {
+    setTransferSearchQuery('');
+    setTransferModalVisible(true);
+    fetchPastTransfers();
+  };
+
   const fetchTransferDetails = async (tNo: string) => {
     if (!tNo.trim()) return;
     try {
@@ -106,18 +136,19 @@ export default function StockTradeInTransferScreen() {
       const res = await fetch(`${API_URL}/fetch?transferNo=${encodeURIComponent(tNo.trim())}`);
       const data = await res.json();
 
-      if (data.success) {
-        setTransferNo(data.header.TransferNo);
-        setToLocation(data.header.ToLocation);
+      if (data.success && data.header) {
+        setTransferNo(data.header.TransferNo || tNo.trim());
+        setToLocation(data.header.ToLocation || '');
         setRemarks(data.header.Remarks || '');
         if (data.header.TransferDate) {
-          setTransferDate(new Date(data.header.TransferDate).toISOString().split('T')[0]);
+          const rawDate = data.header.TransferDate;
+          setTransferDate(new Date(rawDate).toISOString().split('T')[0]);
         }
         setGridData(data.details || []);
         setIsLocked(true);
-        showToast('Transfer details loaded', 'success');
+        showToast(`Transfer details for ${tNo.trim()} loaded`, 'success');
       } else {
-        showToast(data.message || 'Transfer not found', 'error');
+        showToast(data.message || 'Transfer number does not exist', 'error');
         setTransferNo('');
       }
     } catch (err: any) {
@@ -128,10 +159,16 @@ export default function StockTradeInTransferScreen() {
   };
 
   const handleScanInventory = async () => {
-    if (!inventoryCode.trim()) return;
+    const code = inventoryCode.trim();
+    if (!code) return;
 
-    if (gridData.some((item) => item.InventoryCode === inventoryCode.trim())) {
-      showToast('Item already added in transfer list', 'error');
+    if (!toLocation) {
+      showToast('Select the ToLocation Code', 'error');
+      return;
+    }
+
+    if (gridData.some((item) => String(item.InventoryCode).trim().toUpperCase() === code.toUpperCase())) {
+      showToast('Item found in transfer list', 'error');
       setInventoryCode('');
       setScannedItem(null);
       return;
@@ -139,13 +176,31 @@ export default function StockTradeInTransferScreen() {
 
     try {
       setLoading(true);
-      const res = await fetch(`${API_URL}/inventory/${encodeURIComponent(inventoryCode.trim())}`);
+      const res = await fetch(`${API_URL}/inventory/${encodeURIComponent(code)}`);
       const data = await res.json();
 
       if (data.success && data.data) {
-        setScannedItem(data.data);
+        const item = data.data;
+        const salesType = String(item.SalesType || '').trim().toUpperCase();
+
+        if (salesType !== 'P') {
+          // Weight-based item: Auto-add to grid immediately (matching VB lines 27-29)
+          const newGridItem = {
+            ...item,
+            Qty: Number(item.QtyonHand || item.Pcs || 1),
+            Pcs: Number(item.Pcs || item.QtyonHand || 1),
+          };
+          setGridData((prev) => [...prev, newGridItem]);
+          setInventoryCode('');
+          setScannedItem(null);
+          showToast(`Added ${item.InventoryCode} to transfer list`, 'success');
+        } else {
+          // Piece-based item (SalesType === 'P'): prompt for PCS quantity
+          setScannedItem(item);
+          setScanQty(String(item.Pcs || item.QtyonHand || 1));
+        }
       } else {
-        showToast(data.message || 'Item not found in inventory', 'error');
+        showToast(data.message || 'Inventory Not Found ...', 'error');
         setInventoryCode('');
         setScannedItem(null);
       }
@@ -156,41 +211,85 @@ export default function StockTradeInTransferScreen() {
     }
   };
 
-  const handleAdd = () => {
+  const handleAddPieceItem = () => {
     if (!scannedItem) return;
-    setGridData([...gridData, scannedItem]);
+
+    const pcsCount = Number(scanQty) || 1;
+    const newItem = {
+      ...scannedItem,
+      Qty: pcsCount,
+      Pcs: pcsCount,
+      QtyonHand: pcsCount,
+    };
+
+    setGridData((prev) => [...prev, newItem]);
     setInventoryCode('');
     setScannedItem(null);
+    setScanQty('1');
+    showToast(`Added ${scannedItem.InventoryCode} (${pcsCount} PCS)`, 'success');
+  };
+
+  const handleLoadScrapInventory = async () => {
+    if (isLocked) {
+      showToast('Form is locked.', 'error');
+      return;
+    }
+    try {
+      setLoading(true);
+      const res = await fetch(`${API_URL}/scrap-inventory`);
+      const data = await res.json();
+
+      if (data.success && Array.isArray(data.data) && data.data.length > 0) {
+        setGridData(data.data);
+        showToast(`Loaded ${data.data.length} scrap inventory items`, 'success');
+      } else {
+        showToast('No scrap inventory available for this location', 'error');
+      }
+    } catch (err) {
+      showToast('Error loading scrap inventory', 'error');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const calculateTotals = () => {
-    let weight = 0,
-      pmc = 0,
-      pcs = 0,
-      smc = 0,
-      cost = 0;
+    let weight = 0;
+    let pmc = 0;
+    let pcs = 0;
+    let smc = 0;
+    let cost = 0;
+
     gridData.forEach((item) => {
       weight += Number(item.Weight) || 0;
       pmc += Number(item.PMC) || 0;
-      pcs += Number(item.Pcs || item.QtyonHand || item.Qty) || 0;
+      pcs += Number(item.Pcs || item.QtyonHand || item.Qty || 1);
       smc += Number(item.SMC) || 0;
       cost += Number(item.TotalCost) || 0;
     });
+
     setTotals({ Weight: weight, PMC: pmc, PCS: pcs, SMC: smc, TotalCost: cost });
   };
 
   const handleDeleteItem = (indexToDelete?: number) => {
     if (isLocked) return;
     const targetIdx = indexToDelete !== undefined ? indexToDelete : selectedRowIndex;
-    if (targetIdx !== null && targetIdx !== undefined) {
+    if (targetIdx !== null && targetIdx !== undefined && targetIdx >= 0) {
+      const removedItem = gridData[targetIdx];
       const newData = [...gridData];
       newData.splice(targetIdx, 1);
       setGridData(newData);
       setSelectedRowIndex(null);
+      showToast(`Removed ${removedItem?.InventoryCode || 'item'}`, 'success');
     }
   };
 
   const handleClear = () => {
+    const d = new Date();
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    const yyyy = d.getFullYear();
+    setTransferDate(`${yyyy}-${mm}-${dd}`);
+
     setTransferNo('');
     setToLocation('');
     setRemarks('');
@@ -198,20 +297,22 @@ export default function StockTradeInTransferScreen() {
     setIsLocked(false);
     setInventoryCode('');
     setScannedItem(null);
+    setScanQty('1');
     setSelectedRowIndex(null);
+    showToast('Form cleared', 'success');
   };
 
-  const handleTransfer = async () => {
+  const handleTransfer = () => {
     if (isLocked) {
       showToast('This transfer is locked and completed.', 'error');
       return;
     }
     if (!toLocation) {
-      showToast('Please select destination branch', 'error');
+      showToast('Select the ToLocation Code', 'error');
       return;
     }
     if (gridData.length === 0) {
-      showToast('No items added to transfer', 'error');
+      showToast('No Item To Transfer', 'error');
       return;
     }
     setShowPasswordModal(true);
@@ -219,7 +320,7 @@ export default function StockTradeInTransferScreen() {
 
   const verifyPasswordAndTransfer = async () => {
     if (!salesManPassword.trim()) {
-      showToast('Please enter password', 'error');
+      showToast('Please enter salesman password', 'error');
       return;
     }
     try {
@@ -227,7 +328,7 @@ export default function StockTradeInTransferScreen() {
       const res = await fetch(`${API_URL}/verifypassword`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password: salesManPassword }),
+        body: JSON.stringify({ password: salesManPassword.trim() }),
       });
       const data = await res.json();
       if (data.success) {
@@ -235,7 +336,7 @@ export default function StockTradeInTransferScreen() {
         setSalesManPassword('');
         await processTransfer(data.salesman?.SalesManCode || 'admin');
       } else {
-        showToast(data.message || 'Invalid salesman password', 'error');
+        showToast(data.message || 'SalesMan Password is Incorrect!', 'error');
         setSalesManPassword('');
       }
     } catch (err: any) {
@@ -260,7 +361,7 @@ export default function StockTradeInTransferScreen() {
         totalSMC: totals.SMC,
         items: gridData.map((i) => ({
           ...i,
-          Qty: i.Pcs || i.QtyonHand || 1,
+          Qty: Number(i.Pcs || i.QtyonHand || i.Qty || 1),
         })),
         userId: 'admin',
         salesManCode,
@@ -275,14 +376,14 @@ export default function StockTradeInTransferScreen() {
       const data = await res.json();
 
       if (data.success) {
-        showToast(data.message || 'Trade-in stock transferred successfully', 'success');
         setTransferNo(data.transferNo);
         setIsLocked(true);
+        showToast(`Please take note reference no. ${data.transferNo}`, 'success');
       } else {
         showToast(data.message || 'Transfer failed', 'error');
       }
     } catch (err: any) {
-      showToast('Network error executing transfer', 'error');
+      showToast('Network error executing trade-in transfer', 'error');
     } finally {
       setSaving(false);
     }
@@ -294,7 +395,7 @@ export default function StockTradeInTransferScreen() {
     <SafeAreaView style={styles.safeArea} edges={['top']}>
       <Stack.Screen options={{ headerShown: false }} />
 
-      {/* LUXURY ROYAL GOLD HEADER BAR - CLEAN TITLE ONLY */}
+      {/* LUXURY ROYAL GOLD HEADER BAR */}
       <View style={styles.headerBar}>
         <View style={styles.headerLeft}>
           <TouchableOpacity style={styles.backBtn} onPress={() => router.back()} activeOpacity={0.7}>
@@ -312,12 +413,18 @@ export default function StockTradeInTransferScreen() {
             disabled={saving || loading}
           >
             <Ionicons name="refresh-outline" size={14} color="#5C4A28" />
-            <ThemedText style={styles.clearBtnText}>Clear</ThemedText>
+            <ThemedText style={styles.clearBtnText}>Clear (F6)</ThemedText>
           </TouchableOpacity>
 
           <TouchableOpacity
             style={[styles.actionBtn, styles.reprintBtn]}
-            onPress={() => showToast('Printing trade-in docket...', 'success')}
+            onPress={() => {
+              if (transferNo) {
+                showToast(`Printing trade-in transfer note for ${transferNo}...`, 'success');
+              } else {
+                showToast('Save or load a transfer voucher before printing', 'error');
+              }
+            }}
             activeOpacity={0.8}
           >
             <Ionicons name="print-outline" size={14} color="#5C4A28" />
@@ -334,9 +441,9 @@ export default function StockTradeInTransferScreen() {
               <ActivityIndicator size="small" color="#9E6D08" />
             ) : (
               <>
-                <Ionicons name="swap-horizontal-outline" size={15} color="#9E6D08" />
+                <Ionicons name={isLocked ? 'lock-closed-outline' : 'swap-horizontal-outline'} size={15} color="#9E6D08" />
                 <ThemedText style={styles.saveBtnText}>
-                  {isLocked ? 'Locked' : 'Transfer'}
+                  {isLocked ? 'Transferred' : 'Transfer'}
                 </ThemedText>
               </>
             )}
@@ -359,21 +466,32 @@ export default function StockTradeInTransferScreen() {
 
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
         <ScrollView contentContainerStyle={styles.scrollContainer} keyboardShouldPersistTaps="handled">
-          {/* CARD 1: ROUTING FORM (NO TOPIC/SECTION TITLE, DIRECT CLEAN PLACEHOLDERS) */}
+          {/* CARD 1: ROUTING FORM */}
           <View style={styles.goldCard}>
             <View style={styles.cardBody}>
               <View style={styles.fourColumnGrid}>
-                {/* Transfer No */}
+                {/* Transfer No with Lookup button */}
                 <View style={[styles.inlineFieldRow, { flex: 1.1, minWidth: 220 }]}>
-                  <TextInput
-                    style={[styles.formInput, isLocked ? styles.readonlyInput : undefined, { flex: 1 }]}
-                    value={transferNo}
-                    onChangeText={setTransferNo}
-                    onBlur={() => transferNo && !isLocked && fetchTransferDetails(transferNo)}
-                    placeholder="Transfer No (Auto-generated)"
-                    placeholderTextColor="#9E8D77"
-                    editable={!isLocked}
-                  />
+                  <View style={styles.inputWithLookup}>
+                    <TextInput
+                      style={[styles.formInput, styles.inputAttached, isLocked ? styles.readonlyInput : undefined, { flex: 1 }]}
+                      value={transferNo}
+                      onChangeText={setTransferNo}
+                      onBlur={() => transferNo && !isLocked && fetchTransferDetails(transferNo)}
+                      onSubmitEditing={() => transferNo && !isLocked && fetchTransferDetails(transferNo)}
+                      placeholder="Transfer No (Auto-generated)"
+                      placeholderTextColor="#9E8D77"
+                      editable={!isLocked}
+                    />
+                    <TouchableOpacity
+                      style={styles.attachedLookupBtn}
+                      onPress={openPastTransfersModal}
+                      activeOpacity={0.7}
+                      accessibilityLabel="Search Past Transfers"
+                    >
+                      <Ionicons name="search" size={13} color="#7D5E19" />
+                    </TouchableOpacity>
+                  </View>
                 </View>
 
                 {/* Transfer Date */}
@@ -392,9 +510,8 @@ export default function StockTradeInTransferScreen() {
                 <View style={[styles.inlineFieldRow, { flex: 0.8, minWidth: 160 }]}>
                   <TextInput
                     style={[styles.formInput, styles.readonlyInput, { flex: 1 }]}
-                    value={fromLocation}
+                    value={`From: ${fromLocation}`}
                     editable={false}
-                    placeholder="From: HQ"
                     placeholderTextColor="#9E8D77"
                   />
                 </View>
@@ -423,8 +540,9 @@ export default function StockTradeInTransferScreen() {
                       }}
                       activeOpacity={0.7}
                       disabled={isLocked}
+                      accessibilityLabel="Search Target Location"
                     >
-                      <Ionicons name="search" size={13} color="#7D5E19" />
+                      <Ionicons name="business-outline" size={13} color="#7D5E19" />
                     </TouchableOpacity>
                   </View>
                 </View>
@@ -444,36 +562,36 @@ export default function StockTradeInTransferScreen() {
             </View>
           </View>
 
-          {/* CARD 2: CONSOLIDATED METRICS (NO EXTRA SECTION TITLES) */}
+          {/* CARD 2: CONSOLIDATED METRICS */}
           <View style={[styles.goldCard, { marginTop: 10 }]}>
             <View style={styles.cardBody}>
               <View style={styles.fiveColumnGrid}>
                 {/* Total Weight */}
-                <View style={[styles.metricBox, { flex: 1, minWidth: 170 }]}>
+                <View style={[styles.metricBox, { flex: 1, minWidth: 160 }]}>
                   <ThemedText style={styles.metricLabel}>Total Wt (g)</ThemedText>
                   <ThemedText style={styles.metricValue}>{totals.Weight.toFixed(3)}</ThemedText>
                 </View>
 
                 {/* Total PCS */}
-                <View style={[styles.metricBox, { flex: 1, minWidth: 150 }]}>
+                <View style={[styles.metricBox, { flex: 1, minWidth: 140 }]}>
                   <ThemedText style={styles.metricLabel}>Total PCS</ThemedText>
                   <ThemedText style={styles.metricValue}>{totals.PCS}</ThemedText>
                 </View>
 
                 {/* Total PMC */}
-                <View style={[styles.metricBox, { flex: 1, minWidth: 170 }]}>
+                <View style={[styles.metricBox, { flex: 1, minWidth: 160 }]}>
                   <ThemedText style={styles.metricLabel}>Total PMC ($)</ThemedText>
                   <ThemedText style={styles.metricValue}>{totals.PMC.toFixed(2)}</ThemedText>
                 </View>
 
                 {/* Total SMC */}
-                <View style={[styles.metricBox, { flex: 1, minWidth: 170 }]}>
+                <View style={[styles.metricBox, { flex: 1, minWidth: 160 }]}>
                   <ThemedText style={styles.metricLabel}>Total SMC ($)</ThemedText>
                   <ThemedText style={styles.metricValue}>{totals.SMC.toFixed(2)}</ThemedText>
                 </View>
 
                 {/* Total Cost */}
-                <View style={[styles.metricBox, styles.metricBoxHighlight, { flex: 1.1, minWidth: 185 }]}>
+                <View style={[styles.metricBox, styles.metricBoxHighlight, { flex: 1.1, minWidth: 180 }]}>
                   <ThemedText style={styles.metricLabelHighlight}>Total Cost ($)</ThemedText>
                   <ThemedText style={styles.metricValueHighlight}>{totals.TotalCost.toFixed(2)}</ThemedText>
                 </View>
@@ -481,12 +599,12 @@ export default function StockTradeInTransferScreen() {
             </View>
           </View>
 
-          {/* CARD 3: ITEMS DATA GRID & SCANNER (NO SECTION HEADER) */}
+          {/* CARD 3: ITEMS DATA GRID & SCANNER */}
           <View style={[styles.goldCard, { marginTop: 10 }]}>
             {/* Table Header */}
             <View style={styles.tableHeadRow}>
               <ThemedText style={[styles.tableHeadCell, { flex: 1.6 }]}>Inventory Code</ThemedText>
-              <ThemedText style={[styles.tableHeadCell, { flex: 2.4 }]}>Description</ThemedText>
+              <ThemedText style={[styles.tableHeadCell, { flex: 2.2 }]}>Description</ThemedText>
               <ThemedText style={[styles.tableHeadCell, { flex: 1, textAlign: 'center' }]}>Class</ThemedText>
               <ThemedText style={[styles.tableHeadCell, { flex: 1, textAlign: 'center' }]}>Category</ThemedText>
               <ThemedText style={[styles.tableHeadCell, { flex: 1, textAlign: 'right' }]}>Weight (g)</ThemedText>
@@ -514,7 +632,7 @@ export default function StockTradeInTransferScreen() {
                 const isSelected = selectedRowIndex === index;
                 return (
                   <TouchableOpacity
-                    key={index}
+                    key={`${item.InventoryCode}-${index}`}
                     style={[styles.tableRow, isSelected && styles.tableRowSelected]}
                     onPress={() => setSelectedRowIndex(index)}
                     activeOpacity={0.8}
@@ -522,7 +640,7 @@ export default function StockTradeInTransferScreen() {
                     <ThemedText style={[styles.tableCell, styles.codeCell, { flex: 1.6 }]}>
                       {item.InventoryCode}
                     </ThemedText>
-                    <ThemedText style={[styles.tableCell, { flex: 2.4 }]} numberOfLines={1}>
+                    <ThemedText style={[styles.tableCell, { flex: 2.2 }]} numberOfLines={1}>
                       {item.Description}
                     </ThemedText>
                     <ThemedText style={[styles.tableCell, { flex: 1, textAlign: 'center' }]}>
@@ -558,6 +676,7 @@ export default function StockTradeInTransferScreen() {
                           style={styles.deleteRowBtn}
                           onPress={() => handleDeleteItem(index)}
                           activeOpacity={0.7}
+                          accessibilityLabel="Delete item"
                         >
                           <Ionicons name="trash-outline" size={14} color="#C62828" />
                         </TouchableOpacity>
@@ -568,12 +687,12 @@ export default function StockTradeInTransferScreen() {
               })
             )}
 
-            {/* SCANNER SUBFORM ENTRY BAR (CLEAN DIRECT ROW, NO EXTRA TOPICS) */}
+            {/* SCANNER SUBFORM & SCRAP INVENTORY ACTION BAR */}
             {!isLocked && (
               <View style={styles.itemEntryBar}>
                 <View style={styles.itemEntryRow}>
                   {/* Scan Input */}
-                  <View style={[styles.scannerInputBox, { flex: 1.8, minWidth: 200 }]}>
+                  <View style={[styles.scannerInputBox, { flex: 1.8, minWidth: 190 }]}>
                     <TextInput
                       style={styles.formInput}
                       value={inventoryCode}
@@ -586,7 +705,7 @@ export default function StockTradeInTransferScreen() {
                   </View>
 
                   {/* Scanned Description */}
-                  <View style={[styles.scannerInputBox, { flex: 2.2, minWidth: 220 }]}>
+                  <View style={[styles.scannerInputBox, { flex: 2.2, minWidth: 200 }]}>
                     <TextInput
                       style={[styles.formInput, styles.readonlyInput]}
                       value={scannedItem?.Description || ''}
@@ -597,7 +716,7 @@ export default function StockTradeInTransferScreen() {
                   </View>
 
                   {/* Scanned Weight */}
-                  <View style={[styles.scannerInputBox, { flex: 0.9, minWidth: 120 }]}>
+                  <View style={[styles.scannerInputBox, { flex: 0.9, minWidth: 110 }]}>
                     <TextInput
                       style={[styles.formInput, styles.readonlyInput, { textAlign: 'right' }]}
                       value={scannedItem?.Weight ? Number(scannedItem.Weight).toFixed(3) : ''}
@@ -607,8 +726,22 @@ export default function StockTradeInTransferScreen() {
                     />
                   </View>
 
+                  {/* Piece count if SalesType === 'P' */}
+                  {scannedItem && String(scannedItem.SalesType || '').toUpperCase() === 'P' && (
+                    <View style={[styles.scannerInputBox, { flex: 0.8, minWidth: 90 }]}>
+                      <TextInput
+                        style={[styles.formInput, { textAlign: 'right' }]}
+                        value={scanQty}
+                        onChangeText={setScanQty}
+                        keyboardType="numeric"
+                        placeholder="PCS"
+                        placeholderTextColor="#9E8D77"
+                      />
+                    </View>
+                  )}
+
                   {/* Scanned Total Cost */}
-                  <View style={[styles.scannerInputBox, { flex: 1, minWidth: 140 }]}>
+                  <View style={[styles.scannerInputBox, { flex: 1, minWidth: 130 }]}>
                     <TextInput
                       style={[styles.formInput, styles.readonlyInput, styles.highlightTotal, { textAlign: 'right' }]}
                       value={scannedItem?.TotalCost ? Number(scannedItem.TotalCost).toFixed(2) : ''}
@@ -618,14 +751,26 @@ export default function StockTradeInTransferScreen() {
                     />
                   </View>
 
-                  {/* Add Button */}
+                  {/* Add Button for piece item */}
+                  {scannedItem && (
+                    <TouchableOpacity
+                      style={[styles.tableActionBtn, styles.addBtn, { height: 28, paddingHorizontal: 12 }]}
+                      onPress={handleAddPieceItem}
+                      activeOpacity={0.8}
+                    >
+                      <Ionicons name="add-circle-outline" size={14} color="#9E6D08" style={{ marginRight: 4 }} />
+                      <ThemedText style={styles.addBtnText}>Add</ThemedText>
+                    </TouchableOpacity>
+                  )}
+
+                  {/* Load Scrap Inventory Button (matching subAddGridScrapInventory) */}
                   <TouchableOpacity
-                    style={[styles.tableActionBtn, styles.addBtn, { height: 26, paddingHorizontal: 12 }]}
-                    onPress={handleAdd}
+                    style={[styles.tableActionBtn, styles.scrapBtn, { height: 28, paddingHorizontal: 10 }]}
+                    onPress={handleLoadScrapInventory}
                     activeOpacity={0.8}
                   >
-                    <Ionicons name="add-circle-outline" size={14} color="#9E6D08" style={{ marginRight: 4 }} />
-                    <ThemedText style={styles.addBtnText}>Add</ThemedText>
+                    <Ionicons name="layers-outline" size={13} color="#6D4C10" style={{ marginRight: 4 }} />
+                    <ThemedText style={styles.scrapBtnText}>Scrap Stock</ThemedText>
                   </TouchableOpacity>
                 </View>
               </View>
@@ -633,71 +778,6 @@ export default function StockTradeInTransferScreen() {
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
-
-      {/* SALESMAN PASSWORD MODAL */}
-      <Modal
-        visible={showPasswordModal}
-        transparent={true}
-        animationType="fade"
-        onRequestClose={() => setShowPasswordModal(false)}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.passwordModalCard}>
-            <View style={styles.passwordModalHeader}>
-              <View style={styles.headerTitleContainer}>
-                <View style={styles.headerIconBadgeSmall}>
-                  <Ionicons name="lock-closed" size={13} color="#B48218" />
-                </View>
-                <ThemedText style={styles.modalHeaderTitle}>Salesman Authorization</ThemedText>
-              </View>
-              <TouchableOpacity
-                onPress={() => {
-                  setShowPasswordModal(false);
-                  setSalesManPassword('');
-                }}
-                activeOpacity={0.7}
-              >
-                <Ionicons name="close" size={18} color="#3B2D17" />
-              </TouchableOpacity>
-            </View>
-
-            <View style={{ padding: 16 }}>
-              <ThemedText style={styles.passwordInstruction}>
-                Enter salesman credentials to authorize trade-in transfer:
-              </ThemedText>
-              <TextInput
-                style={[styles.formInput, { height: 34, marginBottom: 14 }]}
-                value={salesManPassword}
-                onChangeText={setSalesManPassword}
-                secureTextEntry
-                autoFocus
-                placeholder="Enter password..."
-                placeholderTextColor="#9E8D77"
-                onSubmitEditing={verifyPasswordAndTransfer}
-              />
-              <View style={{ flexDirection: 'row', gap: 10, justifyContent: 'flex-end' }}>
-                <TouchableOpacity
-                  style={[styles.actionBtn, styles.clearBtn]}
-                  onPress={() => {
-                    setShowPasswordModal(false);
-                    setSalesManPassword('');
-                  }}
-                  activeOpacity={0.8}
-                >
-                  <ThemedText style={styles.clearBtnText}>Cancel</ThemedText>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.actionBtn, styles.saveBtn]}
-                  onPress={verifyPasswordAndTransfer}
-                  activeOpacity={0.8}
-                >
-                  <ThemedText style={styles.saveBtnText}>Authorize</ThemedText>
-                </TouchableOpacity>
-              </View>
-            </View>
-          </View>
-        </View>
-      </Modal>
 
       {/* LOCATION LOOKUP MODAL */}
       <Modal
@@ -769,6 +849,168 @@ export default function StockTradeInTransferScreen() {
                 </TouchableOpacity>
               )}
             />
+          </View>
+        </View>
+      </Modal>
+
+      {/* PAST TRANSFERS LOOKUP MODAL */}
+      <Modal
+        visible={transferModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setTransferModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.lovModalCard}>
+            <View style={styles.modalHeaderBanner}>
+              <View style={styles.headerTitleContainer}>
+                <View style={styles.headerIconBadgeSmall}>
+                  <Ionicons name="receipt-outline" size={13} color="#B48218" />
+                </View>
+                <ThemedText style={styles.modalHeaderTitle}>Search Stock Trade-In Transfers</ThemedText>
+              </View>
+              <TouchableOpacity
+                onPress={() => setTransferModalVisible(false)}
+                activeOpacity={0.7}
+                style={styles.closeModalBtn}
+              >
+                <Ionicons name="close" size={18} color="#3B2D17" />
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.modalSearchBox}>
+              <Ionicons name="search-outline" size={16} color="#8D6409" style={{ marginRight: 6 }} />
+              <TextInput
+                style={styles.modalSearchInput}
+                value={transferSearchQuery}
+                onChangeText={setTransferSearchQuery}
+                placeholder="Search by Transfer No or Branch..."
+                placeholderTextColor="#9E8D77"
+                autoFocus
+              />
+              {transferSearchQuery.length > 0 && (
+                <TouchableOpacity onPress={() => setTransferSearchQuery('')}>
+                  <Ionicons name="close-circle" size={16} color="#9E8D77" />
+                </TouchableOpacity>
+              )}
+            </View>
+
+            <View style={styles.lovHeadRow}>
+              <ThemedText style={[styles.lovHeadText, { flex: 1.6 }]}>Transfer No</ThemedText>
+              <ThemedText style={[styles.lovHeadText, { flex: 1.2 }]}>Date</ThemedText>
+              <ThemedText style={[styles.lovHeadText, { flex: 1.1 }]}>To Branch</ThemedText>
+              <ThemedText style={[styles.lovHeadText, { flex: 1, textAlign: 'right' }]}>Weight (g)</ThemedText>
+              <ThemedText style={[styles.lovHeadText, { flex: 0.8, textAlign: 'right' }]}>PCS</ThemedText>
+            </View>
+
+            {pastTransfersLoading ? (
+              <View style={{ padding: 24, alignItems: 'center' }}>
+                <ActivityIndicator size="small" color="#B48218" />
+                <ThemedText style={{ fontSize: 12, color: '#9E8D77', marginTop: 6 }}>
+                  Loading transfer vouchers...
+                </ThemedText>
+              </View>
+            ) : (
+              <FlatList
+                data={pastTransfers.filter(
+                  (t) =>
+                    (t.TransferNo || '').toLowerCase().includes(transferSearchQuery.toLowerCase()) ||
+                    (t.ToLocation || '').toLowerCase().includes(transferSearchQuery.toLowerCase())
+                )}
+                keyExtractor={(item) => item.TransferNo}
+                renderItem={({ item }) => (
+                  <TouchableOpacity
+                    style={styles.lovItemRow}
+                    onPress={() => {
+                      setTransferModalVisible(false);
+                      fetchTransferDetails(item.TransferNo);
+                    }}
+                    activeOpacity={0.7}
+                  >
+                    <ThemedText style={[styles.lovItemText, styles.codeCell, { flex: 1.6 }]}>
+                      {item.TransferNo}
+                    </ThemedText>
+                    <ThemedText style={[styles.lovItemText, { flex: 1.2 }]}>
+                      {item.TransferDate ? String(item.TransferDate).substring(0, 10) : '-'}
+                    </ThemedText>
+                    <ThemedText style={[styles.lovItemText, { flex: 1.1 }]}>
+                      {item.ToLocation || '-'}
+                    </ThemedText>
+                    <ThemedText style={[styles.lovItemText, { flex: 1, textAlign: 'right' }]}>
+                      {Number(item.TotalWeight || 0).toFixed(3)}
+                    </ThemedText>
+                    <ThemedText style={[styles.lovItemText, { flex: 0.8, textAlign: 'right' }]}>
+                      {item.TotalPCS || 0}
+                    </ThemedText>
+                  </TouchableOpacity>
+                )}
+              />
+            )}
+          </View>
+        </View>
+      </Modal>
+
+      {/* SALESMAN PASSWORD AUTHORIZATION MODAL */}
+      <Modal
+        visible={showPasswordModal}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setShowPasswordModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.passwordModalCard}>
+            <View style={styles.passwordModalHeader}>
+              <View style={styles.headerTitleContainer}>
+                <View style={styles.headerIconBadgeSmall}>
+                  <Ionicons name="lock-closed" size={13} color="#B48218" />
+                </View>
+                <ThemedText style={styles.modalHeaderTitle}>Salesman Authorization</ThemedText>
+              </View>
+              <TouchableOpacity
+                onPress={() => {
+                  setShowPasswordModal(false);
+                  setSalesManPassword('');
+                }}
+                activeOpacity={0.7}
+              >
+                <Ionicons name="close" size={18} color="#3B2D17" />
+              </TouchableOpacity>
+            </View>
+
+            <View style={{ padding: 16 }}>
+              <ThemedText style={styles.passwordInstruction}>
+                Enter salesman password to authorize trade-in transfer:
+              </ThemedText>
+              <TextInput
+                style={[styles.formInput, { height: 32, marginBottom: 14 }]}
+                value={salesManPassword}
+                onChangeText={setSalesManPassword}
+                secureTextEntry
+                autoFocus
+                placeholder="Enter password..."
+                placeholderTextColor="#9E8D77"
+                onSubmitEditing={verifyPasswordAndTransfer}
+              />
+              <View style={{ flexDirection: 'row', gap: 10, justifyContent: 'flex-end' }}>
+                <TouchableOpacity
+                  style={[styles.actionBtn, styles.clearBtn]}
+                  onPress={() => {
+                    setShowPasswordModal(false);
+                    setSalesManPassword('');
+                  }}
+                  activeOpacity={0.8}
+                >
+                  <ThemedText style={styles.clearBtnText}>Cancel</ThemedText>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.actionBtn, styles.saveBtn]}
+                  onPress={verifyPasswordAndTransfer}
+                  activeOpacity={0.8}
+                >
+                  <ThemedText style={styles.saveBtnText}>Authorize</ThemedText>
+                </TouchableOpacity>
+              </View>
+            </View>
           </View>
         </View>
       </Modal>
@@ -919,7 +1161,7 @@ const styles = StyleSheet.create({
     borderColor: '#D4C3A3',
   },
 
-  // Metric Boxes for clean, label-less aesthetic
+  // Metric Boxes
   metricBox: {
     backgroundColor: '#FAF7F0',
     borderWidth: 1,
@@ -1056,8 +1298,8 @@ const styles = StyleSheet.create({
   tableActionBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 5,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
     borderRadius: 5,
     borderWidth: 1,
   },
@@ -1070,6 +1312,15 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: '#9E6D08',
   },
+  scrapBtn: {
+    backgroundColor: '#F5EFE6',
+    borderColor: '#D4C3A3',
+  },
+  scrapBtnText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#6D4C10',
+  },
 
   // ===== LOV MODALS =====
   modalOverlay: {
@@ -1081,7 +1332,7 @@ const styles = StyleSheet.create({
   },
   lovModalCard: {
     width: '92%',
-    maxWidth: 600,
+    maxWidth: 620,
     maxHeight: '80%',
     backgroundColor: '#FFFFFF',
     borderRadius: 10,
@@ -1091,33 +1342,6 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.15,
     shadowRadius: 10,
     elevation: 8,
-  },
-  passwordModalCard: {
-    width: '88%',
-    maxWidth: 380,
-    backgroundColor: '#FFFFFF',
-    borderRadius: 10,
-    overflow: 'hidden',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.15,
-    shadowRadius: 10,
-    elevation: 8,
-  },
-  passwordModalHeader: {
-    backgroundColor: '#F5E7CA',
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    borderBottomWidth: 1,
-    borderBottomColor: '#E8DCB8',
-  },
-  passwordInstruction: {
-    fontSize: 12,
-    color: '#5C4A28',
-    marginBottom: 10,
   },
   modalHeaderBanner: {
     backgroundColor: '#F5E7CA',
@@ -1191,6 +1415,35 @@ const styles = StyleSheet.create({
   lovItemText: {
     fontSize: 12,
     color: '#3B2D17',
+  },
+
+  // ===== SALESMAN PASSWORD MODAL =====
+  passwordModalCard: {
+    width: '90%',
+    maxWidth: 400,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 10,
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 10,
+    elevation: 8,
+  },
+  passwordModalHeader: {
+    backgroundColor: '#F5E7CA',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    borderBottomWidth: 1,
+    borderBottomColor: '#E8DCB8',
+  },
+  passwordInstruction: {
+    fontSize: 12,
+    color: '#5C4A28',
+    marginBottom: 10,
   },
 
   // Toasts

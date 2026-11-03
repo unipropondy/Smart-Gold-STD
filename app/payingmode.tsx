@@ -246,11 +246,23 @@ export default function PayingModeScreen() {
       setSaving(true);
       try {
         const payloadObj = JSON.parse(payloadStr);
-        payloadObj.paymodeDetails = selectedModes.map((m) => ({
-          payMode: m.PayMode,
-          amount: m.Amount,
-          remarks: m.SlipNo,
+        const mappedPayments = selectedModes.map((m) => ({
+          paymode: m.PayMode,
+          PayMode: m.PayMode,
+          amount: parseFloat(m.Amount) || 0,
+          Amount: parseFloat(m.Amount) || 0,
+          slipNo: m.SlipNo || '',
+          remarks: m.SlipNo || '',
+          commission: m.Commission || 0,
         }));
+
+        // Support both payload shapes (paymodeDetails and payments)
+        payloadObj.paymodeDetails = mappedPayments;
+        payloadObj.payments = mappedPayments;
+        payloadObj.paidAmount = paid;
+        payloadObj.balance = balance;
+        payloadObj.commission = commission;
+        payloadObj.returnAmount = returnAmount;
 
         const res = await fetch(apiEndpoint, {
           method: 'POST',
@@ -261,9 +273,20 @@ export default function PayingModeScreen() {
         if (json.success) {
           showToast('Payment Saved Successfully!', 'success');
           setTimeout(() => {
-            if (returnPath) router.push(returnPath as any);
-            else router.back();
-          }, 1000);
+            if (returnPath) {
+              router.push({
+                pathname: returnPath as any,
+                params: {
+                  paymentSuccess: 'true',
+                  savedInvoiceNo: json.schemeNo || json.invoiceNo || '',
+                  savedCustomerCode: customerCode,
+                  ...params
+                }
+              });
+            } else {
+              router.back();
+            }
+          }, 800);
         } else {
           showToast(json.message || 'Failed to save payment', 'error');
         }

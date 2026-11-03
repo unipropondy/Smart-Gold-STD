@@ -12,6 +12,14 @@ const getPool = async (req) => {
   return await dbGetPool(process.env.DB_NAME || 'smartgold');
 };
 
+// Safe date formatter to YYYY-MM-DD
+function formatDate(d) {
+  if (!d) return null;
+  const dateObj = new Date(d);
+  if (isNaN(dateObj.getTime())) return null;
+  return dateObj.toISOString().split('T')[0];
+}
+
 // Pad voucher numbers
 function padZero(num, size) {
   let s = num + "";
@@ -160,6 +168,17 @@ router.get("/inventory/:code", async (req, res) => {
 
     const inv = invResult.recordset[0];
 
+    // Check location restriction if fromLocation is provided
+    const userFromLoc = req.query.fromLocation ? String(req.query.fromLocation).trim() : '';
+    const itemLoc = String(findVal(inv, 'LocationCode') || '').trim();
+    if (userFromLoc && itemLoc && itemLoc.toUpperCase() !== userFromLoc.toUpperCase()) {
+      return res.json({
+        success: false,
+        message: `The selected Inventory belongs to the Location - ${itemLoc}!`,
+        locationMismatch: true
+      });
+    }
+
     // Determine quantity using any available quantity/pcs column
     const rawQty = findVal(inv, 'QtyOnHand', 'QtyonHand', 'Qty', 'Quantity', 'Pcs', 'PCS', 'StockQty');
     let qty = rawQty !== undefined && rawQty !== null && !isNaN(parseFloat(rawQty)) ? parseFloat(rawQty) : 1;
@@ -220,20 +239,34 @@ router.get("/inventory/:code", async (req, res) => {
     const defaultCostPerGram = parseFloat(findVal(inv, 'CostPerGram', 'Rate') || 0);
     const costPerGram = classRate !== null ? classRate : defaultCostPerGram;
 
+    const weightVal = parseFloat(findVal(inv, 'Weight', 'TotalWeight', 'GrossWeight') || 0);
+    const pmcVal = parseFloat(findVal(inv, 'PMC') || 0);
+    const smcVal = parseFloat(findVal(inv, 'SMC', 'sMc') || 0);
+    let totalCostVal = parseFloat(findVal(inv, 'TotalCost') || 0);
+
+    // Calculate totalCost if zero
+    if (!totalCostVal || totalCostVal === 0) {
+      if (salesType === 'P') {
+        totalCostVal = smcVal;
+      } else {
+        totalCostVal = weightVal * costPerGram + smcVal;
+      }
+    }
+
     const resultData = {
       InventoryCode: String(findVal(inv, 'InventoryCode') || sCode).trim(),
       Description: String(findVal(inv, 'Description') || '').trim(),
       ClassCode: classCode,
       CategoryCode: String(findVal(inv, 'CategoryCode') || '').trim(),
       CatalogueCode: String(findVal(inv, 'CatalogueCode') || '').trim(),
-      Weight: parseFloat(findVal(inv, 'Weight', 'TotalWeight', 'GrossWeight') || 0),
+      Weight: weightVal,
       SizeCode: String(findVal(inv, 'SizeCode', 'Size') || '').trim(),
       QtyonHand: qty,
       PCS: qty > 0 ? qty : 1,
       CostPerGram: costPerGram,
-      PMC: parseFloat(findVal(inv, 'PMC') || 0),
-      SMC: parseFloat(findVal(inv, 'SMC', 'sMc') || 0),
-      TotalCost: parseFloat(findVal(inv, 'TotalCost') || 0),
+      PMC: pmcVal,
+      SMC: smcVal,
+      TotalCost: totalCostVal,
       SalesType: salesType,
       LocationCode: String(findVal(inv, 'LocationCode') || '').trim()
     };
@@ -254,34 +287,55 @@ router.get("/scrap-inventory", async (req, res) => {
   try {
     const pool = await getPool(req);
     // Scrap items query safely without hardcoded columns
+    // Check if user specified a fromLocation to restrict scrap selection
+    const userFromLoc = req.query.fromLocation ? String(req.query.fromLocation).trim() : '';
+    let locCondition = "";
+    if (userFromLoc) {
+      locCondition = "AND (LocationCode IS NULL OR RTRIM(LocationCode) = '' OR UPPER(RTRIM(LocationCode)) = UPPER(@FromLoc))";
+    }
+
     const query = `
-      SELECT TOP 200 *
+      SELECT TOP 500 *
       FROM tblInventory
       WHERE (
         UPPER(ISNULL(CategoryCode, '')) LIKE '%SCRAP%' OR 
         UPPER(ISNULL(Description, '')) LIKE '%SCRAP%' OR 
         UPPER(ISNULL(ClassCode, '')) LIKE '%SCRAP%'
       )
+      ${locCondition}
       ORDER BY InventoryCode ASC
     `;
-    const result = await pool.request().query(query);
+    const reqBuilder = pool.request();
+    if (userFromLoc) {
+      reqBuilder.input("FromLoc", sql.VarChar(50), userFromLoc);
+    }
+    const result = await reqBuilder.query(query);
     const scrapItems = result.recordset.map(inv => {
       const rawQty = findVal(inv, 'QtyOnHand', 'QtyonHand', 'Qty', 'Quantity', 'Pcs', 'PCS', 'StockQty');
       const qty = rawQty !== undefined && rawQty !== null && !isNaN(parseFloat(rawQty)) ? parseFloat(rawQty) : 1;
+      const weightVal = parseFloat(findVal(inv, 'Weight') || 0);
+      const costPerGramVal = parseFloat(findVal(inv, 'CostPerGram') || 0);
+      const pmcVal = parseFloat(findVal(inv, 'PMC') || 0);
+      const smcVal = parseFloat(findVal(inv, 'SMC', 'sMc') || 0);
+      let totalCostVal = parseFloat(findVal(inv, 'TotalCost') || 0);
+      if (!totalCostVal || totalCostVal === 0) {
+        totalCostVal = weightVal * costPerGramVal + smcVal;
+      }
+
       return {
         InventoryCode: String(findVal(inv, 'InventoryCode') || '').trim(),
         Description: String(findVal(inv, 'Description') || '').trim(),
         ClassCode: String(findVal(inv, 'ClassCode') || '').trim(),
         CategoryCode: String(findVal(inv, 'CategoryCode') || '').trim(),
         CatalogueCode: String(findVal(inv, 'CatalogueCode') || '').trim(),
-        Weight: parseFloat(findVal(inv, 'Weight') || 0),
+        Weight: weightVal,
         SizeCode: String(findVal(inv, 'SizeCode') || '').trim(),
         QtyonHand: qty,
         PCS: qty > 0 ? qty : 1,
-        CostPerGram: parseFloat(findVal(inv, 'CostPerGram') || 0),
-        PMC: parseFloat(findVal(inv, 'PMC') || 0),
-        SMC: parseFloat(findVal(inv, 'SMC', 'sMc') || 0),
-        TotalCost: parseFloat(findVal(inv, 'TotalCost') || 0)
+        CostPerGram: costPerGramVal,
+        PMC: pmcVal,
+        SMC: smcVal,
+        TotalCost: totalCostVal
       };
     }).filter(item => item.QtyonHand >= 1);
 
@@ -462,48 +516,63 @@ router.post("/transfer", async (req, res) => {
     const tDate = transferDate ? new Date(transferDate) : new Date();
 
     // Inspect table column types to prevent any "Error converting data type varchar to numeric"
-    const headerColTypes = await getTableColumnTypes(pool, 'tblInventoryTransferHeader');
-    const detailColTypes = await getTableColumnTypes(pool, 'tblInventoryTransferDetail');
-    const movementColTypes = await getTableColumnTypes(pool, 'tblInventoryMovement');
-    const companyColTypes = await getTableColumnTypes(pool, 'tblCompany');
+    // Use pool directly outside the transaction for schema inspection so we avoid blocking or locks
+    const [headerColTypes, detailColTypes, movementColTypes, companyColTypes, headerCols] = await Promise.all([
+      getTableColumnTypes(pool, 'tblInventoryTransferHeader'),
+      getTableColumnTypes(pool, 'tblInventoryTransferDetail'),
+      getTableColumnTypes(pool, 'tblInventoryMovement'),
+      getTableColumnTypes(pool, 'tblCompany'),
+      getTableColumns(pool, 'tblInventoryTransferHeader')
+    ]);
 
     const fromLocStatusVal = isNumericType(headerColTypes['fromlocstatus']) ? 2 : "2";
     const toLocStatusVal = isNumericType(headerColTypes['tolocstatus']) ? 0 : "0";
 
-    // 2. Insert into tblInventoryTransferHeader
+    // 2. Insert into tblInventoryTransferHeader dynamically
+    const headerObj = {
+      TransferNo: transferNo,
+      TransferDate: !isNaN(tDate.getTime()) ? tDate : new Date(),
+      FromLocation: loc,
+      ToLocation: toLocation.trim(),
+      TotalWeight: parseFloat(totalWeight) || 0,
+      TotalPcs: parseInt(totalPcs, 10) || items.length,
+      TotalCost: parseFloat(totalCost) || 0,
+      TotalPMC: parseFloat(totalPMC) || 0,
+      TotalSMC: parseFloat(totalSMC) || 0,
+      FromLocStatus: fromLocStatusVal,
+      ToLocStatus: toLocStatusVal,
+      Remarks: (remarks || '').trim(),
+      SalesManCode: sSalesMan,
+      CreateUser: sUser,
+      ModifyUser: sUser,
+      CreateDate: new Date(),
+      ModifyDate: new Date()
+    };
+
+    const headerInsertCols = [];
+    const headerPlaceholders = [];
     const insertHeaderReq = new sql.Request(transaction);
-    await insertHeaderReq
-      .input("TransferNo", sql.VarChar(50), transferNo)
-      .input("TransferDate", sql.DateTime, !isNaN(tDate.getTime()) ? tDate : new Date())
-      .input("FromLocation", sql.VarChar(50), loc)
-      .input("ToLocation", sql.VarChar(50), toLocation.trim())
-      .input("TotalWeight", sql.Decimal(18, 3), parseFloat(totalWeight) || 0)
-      .input("TotalPcs", sql.Int, parseInt(totalPcs, 10) || items.length)
-      .input("TotalCost", sql.Decimal(18, 2), parseFloat(totalCost) || 0)
-      .input("TotalPMC", sql.Decimal(18, 2), parseFloat(totalPMC) || 0)
-      .input("TotalSMC", sql.Decimal(18, 2), parseFloat(totalSMC) || 0)
-      .input("FromLocStatus", isNumericType(headerColTypes['fromlocstatus']) ? sql.Int : sql.VarChar(5), fromLocStatusVal)
-      .input("ToLocStatus", isNumericType(headerColTypes['tolocstatus']) ? sql.Int : sql.VarChar(5), toLocStatusVal)
-      .input("Remarks", sql.VarChar(200), (remarks || '').trim())
-      .input("SalesManCode", sql.VarChar(50), sSalesMan)
-      .input("CreateUser", sql.VarChar(50), sUser)
-      .query(`
-        INSERT INTO tblInventoryTransferHeader (
-          TransferNo, TransferDate, FromLocation, ToLocation, 
-          TotalWeight, TotalPcs, TotalCost, TotalPMC, TotalSMC, 
-          FromLocStatus, ToLocStatus, Remarks, SalesManCode, 
-          CreateUser, ModifyUser, CreateDate, ModifyDate
-        ) VALUES (
-          @TransferNo, @TransferDate, @FromLocation, @ToLocation, 
-          @TotalWeight, @TotalPcs, @TotalCost, @TotalPMC, @TotalSMC, 
-          @FromLocStatus, @ToLocStatus, @Remarks, @SalesManCode, 
-          @CreateUser, @CreateUser, GETDATE(), GETDATE()
-        )
-      `);
+
+    for (const [col, val] of Object.entries(headerObj)) {
+      if (headerCols.includes(col.toLowerCase())) {
+        headerInsertCols.push(`[${col}]`);
+        headerPlaceholders.push(`@${col}`);
+        insertHeaderReq.input(col, val);
+      }
+    }
+
+    await insertHeaderReq.query(`
+      INSERT INTO tblInventoryTransferHeader (${headerInsertCols.join(", ")})
+      VALUES (${headerPlaceholders.join(", ")})
+    `);
 
     // 3. Insert Details, Update Inventory, and Log InventoryMovement
-    const invCols = await getTableColumns(pool, 'tblInventory');
-    const stockCols = await getTableColumns(pool, 'tblInventoryStock');
+    const [invCols, stockCols, movCols, detailCols] = await Promise.all([
+      getTableColumns(pool, 'tblInventory'),
+      getTableColumns(pool, 'tblInventoryStock'),
+      getTableColumns(pool, 'tblInventoryMovement'),
+      getTableColumns(pool, 'tblInventoryTransferDetail')
+    ]);
     const isDetailSizeNumeric = isNumericType(detailColTypes['sizecode']);
     const isMovSizeNumeric = isNumericType(movementColTypes['sizecode']);
 
@@ -522,41 +591,43 @@ router.post("/transfer", async (req, res) => {
       const sizeNumericVal = parseFloat(rawSize) || 0;
       const sizeStringVal = String(rawSize || '').trim();
 
-      // Insert Detail
-      const insertDetailReq = new sql.Request(transaction);
-      insertDetailReq
-        .input("TransferNo", sql.VarChar(50), transferNo)
-        .input("InventoryCode", sql.VarChar(50), invCode)
-        .input("ClassCode", sql.VarChar(50), (item.ClassCode || '').trim())
-        .input("CategoryCode", sql.VarChar(50), (item.CategoryCode || '').trim())
-        .input("CatalogueCode", sql.VarChar(50), (item.CatalogueCode || '').trim())
-        .input("Description", sql.VarChar(200), itemDesc)
-        .input("QtyonHand", sql.Int, itemQty)
-        .input("Weight", sql.Decimal(18, 3), itemWeight);
+      // Insert Detail dynamically matching tblInventoryTransferDetail schema
+      const detailObj = {
+        TransferNo: transferNo,
+        InventoryCode: invCode,
+        ClassCode: (item.ClassCode || '').trim(),
+        CategoryCode: (item.CategoryCode || '').trim(),
+        CatalogueCode: (item.CatalogueCode || '').trim(),
+        Description: itemDesc,
+        QtyonHand: itemQty,
+        Weight: itemWeight,
+        SizeCode: isDetailSizeNumeric ? sizeNumericVal : sizeStringVal,
+        CostPerGram: itemCostPerGram,
+        PMC: itemPMC,
+        SMC: itemSMC,
+        TotalCost: itemTotalCost,
+        TransferTag: 0,
+        CreateUser: sUser,
+        ModifyUser: sUser,
+        CreateDate: new Date(),
+        ModifyDate: new Date()
+      };
 
-      if (isDetailSizeNumeric) {
-        insertDetailReq.input("SizeCode", sql.Decimal(18, 2), sizeNumericVal);
-      } else {
-        insertDetailReq.input("SizeCode", sql.VarChar(50), sizeStringVal);
+      const detailInsertCols = [];
+      const detailPlaceholders = [];
+      const insertDetailReq = new sql.Request(transaction);
+
+      for (const [col, val] of Object.entries(detailObj)) {
+        if (detailCols.includes(col.toLowerCase())) {
+          detailInsertCols.push(`[${col}]`);
+          detailPlaceholders.push(`@${col}`);
+          insertDetailReq.input(col, val);
+        }
       }
 
-      insertDetailReq
-        .input("CostPerGram", sql.Decimal(18, 2), itemCostPerGram)
-        .input("PMC", sql.Decimal(18, 2), itemPMC)
-        .input("SMC", sql.Decimal(18, 2), itemSMC)
-        .input("TotalCost", sql.Decimal(18, 2), itemTotalCost)
-        .input("CreateUser", sql.VarChar(50), sUser);
-
       await insertDetailReq.query(`
-        INSERT INTO tblInventoryTransferDetail (
-          TransferNo, InventoryCode, ClassCode, CategoryCode, CatalogueCode, Description, 
-          QtyonHand, Weight, SizeCode, CostPerGram, PMC, SMC, TotalCost, TransferTag, 
-          CreateUser, ModifyUser, CreateDate, ModifyDate
-        ) VALUES (
-          @TransferNo, @InventoryCode, @ClassCode, @CategoryCode, @CatalogueCode, @Description, 
-          @QtyonHand, @Weight, @SizeCode, @CostPerGram, @PMC, @SMC, @TotalCost, 0, 
-          @CreateUser, @CreateUser, GETDATE(), GETDATE()
-        )
+        INSERT INTO tblInventoryTransferDetail (${detailInsertCols.join(", ")})
+        VALUES (${detailPlaceholders.join(", ")})
       `);
 
       // Update tblInventory stock (matching fncupdateInventoryOnTransfer)
@@ -602,39 +673,72 @@ router.post("/transfer", async (req, res) => {
       }
 
       // Record in tblInventoryMovement (TransType = 'TO')
-      const movementReq = new sql.Request(transaction);
-      movementReq
-        .input("TransferNo", sql.VarChar(50), transferNo)
-        .input("InventoryCode", sql.VarChar(50), invCode)
-        .input("ToLocation", sql.VarChar(50), toLocation.trim())
-        .input("Description", sql.VarChar(200), itemDesc)
-        .input("Qty", sql.Int, itemQty)
-        .input("Weight", sql.Decimal(18, 3), itemWeight);
+      // Dynamically map columns for tblInventoryMovement to match the exact schema on the database
+      if (movCols.length > 0) {
+        let locCol = 'LocationCode';
+        if (!movCols.includes('locationcode') && movCols.includes('translocation')) {
+          locCol = 'TransLocation';
+        }
 
-      if (isMovSizeNumeric) {
-        movementReq.input("SizeCode", sql.Decimal(18, 2), sizeNumericVal);
-      } else {
-        movementReq.input("SizeCode", sql.VarChar(50), sizeStringVal);
+        const movData = {
+          InventoryCode: invCode,
+          Description: itemDesc,
+          TransType: 'TO',
+          TransNo: transferNo,
+          TransDate: new Date(),
+          Qty: itemQty,
+          Weight: itemWeight,
+          PMC: itemPMC,
+          SMC: itemSMC,
+          CostPerGram: itemCostPerGram,
+          TotalCost: itemTotalCost,
+        };
+
+        // Handle location column
+        if (movCols.includes(locCol.toLowerCase())) {
+          movData[locCol] = toLocation.trim();
+        }
+
+        // Handle SizeCode
+        if (movCols.includes('sizecode')) {
+          movData['SizeCode'] = isMovSizeNumeric ? sizeNumericVal : sizeStringVal;
+        }
+
+        // Handle User column (CreateUser vs EntryUser vs UserID vs ModifyUser)
+        if (movCols.includes('createuser')) movData['CreateUser'] = sUser;
+        else if (movCols.includes('entryuser')) movData['EntryUser'] = sUser;
+        else if (movCols.includes('userid')) movData['UserID'] = sUser;
+        else if (movCols.includes('modifyuser')) movData['ModifyUser'] = sUser;
+
+        // Handle Date column (CreateDate vs EntryDate vs ModifyDate)
+        if (movCols.includes('createdate')) movData['CreateDate'] = new Date();
+        else if (movCols.includes('entrydate')) movData['EntryDate'] = new Date();
+        else if (movCols.includes('modifydate')) movData['ModifyDate'] = new Date();
+
+        // Build dynamic parameterized INSERT query matching the actual existing columns only
+        const insertCols = [];
+        const paramPlaceholders = [];
+        const movementReq = new sql.Request(transaction);
+
+        for (const [col, val] of Object.entries(movData)) {
+          if (movCols.includes(col.toLowerCase())) {
+            insertCols.push(`[${col}]`);
+            paramPlaceholders.push(`@${col}`);
+            movementReq.input(col, val);
+          }
+        }
+
+        if (insertCols.length > 0) {
+          try {
+            await movementReq.query(`
+              INSERT INTO tblInventoryMovement (${insertCols.join(", ")})
+              VALUES (${paramPlaceholders.join(", ")})
+            `);
+          } catch (eMov) {
+            console.warn("tblInventoryMovement insert warning:", eMov.message);
+          }
+        }
       }
-
-      movementReq
-        .input("PMC", sql.Decimal(18, 2), itemPMC)
-        .input("SMC", sql.Decimal(18, 2), itemSMC)
-        .input("CostPerGram", sql.Decimal(18, 2), itemCostPerGram)
-        .input("TotalCost", sql.Decimal(18, 2), itemTotalCost)
-        .input("UserId", sql.VarChar(50), sUser);
-
-      await movementReq.query(`
-        INSERT INTO tblInventoryMovement (
-          LocationCode, InventoryCode, Description, TransType, 
-          TransNo, TransDate, Qty, Weight, SizeCode, PMC, SMC, 
-          CostPerGram, TotalCost, EntryDate, EntryUser
-        ) VALUES (
-          @ToLocation, @InventoryCode, @Description, 'TO',
-          @TransferNo, GETDATE(), @Qty, @Weight, @SizeCode, @PMC, @SMC, 
-          @CostPerGram, @TotalCost, GETDATE(), @UserId
-        )
-      `);
     }
 
     // 4. Increment NextTransferNo in tblCompany safely without SQL varchar-to-numeric crash
@@ -667,6 +771,44 @@ router.post("/transfer", async (req, res) => {
     }
     console.error("Transfer Out Error:", error);
     res.status(500).json({ success: false, message: "Error during transfer: " + error.message, error: error.message });
+  }
+});
+
+// 8. GET /api/transferout/list
+// Browse prior Transfer Out documents
+router.get("/list", async (req, res) => {
+  try {
+    const pool = await getPool(req);
+    const limit = parseInt(req.query.limit, 10) || 50;
+    const fromLoc = req.query.fromLocation ? String(req.query.fromLocation).trim() : '';
+
+    let whereClause = "WHERE 1=1";
+    const request = pool.request();
+    if (fromLoc) {
+      whereClause += " AND UPPER(RTRIM(FromLocation)) = UPPER(@FromLoc)";
+      request.input("FromLoc", sql.VarChar(50), fromLoc);
+    }
+
+    const query = `
+      SELECT TOP (${limit})
+        RTRIM(TransferNo) as TransferNo,
+        TransferDate,
+        RTRIM(FromLocation) as FromLocation,
+        RTRIM(ToLocation) as ToLocation,
+        ISNULL(TotalWeight, 0) as TotalWeight,
+        ISNULL(TotalPcs, 0) as TotalPcs,
+        ISNULL(TotalCost, 0) as TotalCost,
+        RTRIM(ISNULL(Remarks, '')) as Remarks
+      FROM tblInventoryTransferHeader
+      ${whereClause}
+      ORDER BY TransferDate DESC, TransferNo DESC
+    `;
+
+    const result = await request.query(query);
+    res.json({ success: true, data: result.recordset });
+  } catch (error) {
+    console.error("List Transfers Error:", error);
+    res.status(500).json({ success: false, message: "Error listing transfers: " + error.message });
   }
 });
 

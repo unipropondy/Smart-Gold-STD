@@ -101,18 +101,32 @@ export default function ETRSTicketVoidScreen() {
 
     setLoadingInvoice(true);
     try {
+      let etrsFound = false;
       try {
         const etrsRes = await fetch(`${API_BASE_URL}/paymententry/etrs/${encodeURIComponent(invoiceNo.trim())}`);
         const etrsJson = await etrsRes.json();
         if (etrsJson.success && etrsJson.data) {
+          etrsFound = true;
           const ed = etrsJson.data;
           if (ed.PassPortNo) setPassportNo(ed.PassPortNo);
           if (ed.DocId) setEtrsDocId(ed.DocId);
-          if (ed.eTRSIssueDate) setIssueDate(ed.eTRSIssueDate);
+          if (ed.eTRSIssueDate) {
+            const d = new Date(ed.eTRSIssueDate);
+            if (!isNaN(d.getTime())) {
+              setIssueDate(`${d.getDate()} ${d.toLocaleString('default', { month: 'long' })} ${d.getFullYear()}`);
+            } else {
+              setIssueDate(String(ed.eTRSIssueDate));
+            }
+          }
           if (ed.eTRSIssueTime) setIssueTime(ed.eTRSIssueTime);
           if (ed.Remarks) setRemarks(ed.Remarks);
           if (ed.SalesmanCode) setSelectedStaff(ed.SalesmanCode);
           if (ed.CustomerImage) setPhotoUri(ed.CustomerImage);
+          if (ed.NetAmount) setNetAmount(String(ed.NetAmount));
+          if (ed.Gst) setGstAmount(String(ed.Gst));
+          if (ed.BillDay) setInvoiceDay(String(ed.BillDay).padStart(2, '0'));
+          if (ed.BillMonth) setInvoiceMonth(String(ed.BillMonth).padStart(2, '0'));
+          if (ed.BillYear) setInvoiceYear(String(ed.BillYear));
         }
       } catch (e) {
         console.warn('Error fetching existing eTRS statement:', e);
@@ -123,16 +137,23 @@ export default function ETRSTicketVoidScreen() {
 
       if (json.success && json.header) {
         const h = json.header;
-        setNetAmount(h.NetTotal ? String(h.NetTotal) : '');
-        setGstAmount(h.GST ? String(h.GST) : '');
+        if (!etrsFound) {
+          setNetAmount(h.NetTotal ? String(h.NetTotal) : '');
+          setGstAmount(h.GST ? String(h.GST) : '');
 
-        if (h.InvoiceDate) {
-          const d = new Date(h.InvoiceDate);
-          if (!isNaN(d.getTime())) {
-            setInvoiceDay(String(d.getDate()).padStart(2, '0'));
-            setInvoiceMonth(String(d.getMonth() + 1).padStart(2, '0'));
-            setInvoiceYear(String(d.getFullYear()));
+          if (h.InvoiceDate) {
+            const d = new Date(h.InvoiceDate);
+            if (!isNaN(d.getTime())) {
+              setInvoiceDay(String(d.getDate()).padStart(2, '0'));
+              setInvoiceMonth(String(d.getMonth() + 1).padStart(2, '0'));
+              setInvoiceYear(String(d.getFullYear()));
+            }
           }
+        }
+
+        if (h.JournalNo && String(h.JournalNo).trim() === 'N' && !etrsFound) {
+          const msg = 'This invoice does not have an active eTRS ticket, or it has already been voided.';
+          Platform.OS === 'web' ? window.alert(msg) : Alert.alert('eTRS Status', msg);
         }
 
         if (h.CustomerCode) {
@@ -166,7 +187,7 @@ export default function ETRSTicketVoidScreen() {
             console.warn('Error fetching sales summary:', e);
           }
         }
-      } else {
+      } else if (!etrsFound) {
         const peRes = await fetch(`${API_BASE_URL}/paymententry/invoice/${encodeURIComponent(invoiceNo.trim())}`);
         const peJson = await peRes.json();
         if (peJson.success && peJson.data && peJson.data.length > 0) {
@@ -181,6 +202,8 @@ export default function ETRSTicketVoidScreen() {
               setInvoiceYear(parts[2]);
             }
           }
+          const msg = 'No eTRS statement exists for this invoice, or it has already been voided.';
+          Platform.OS === 'web' ? window.alert(msg) : Alert.alert('Not Found', msg);
         } else {
           Platform.OS === 'web' ? window.alert('Invoice not found.') : Alert.alert('Not Found', 'Invoice not found.');
         }
@@ -242,11 +265,6 @@ export default function ETRSTicketVoidScreen() {
       Platform.OS === 'web' ? window.alert(msg) : Alert.alert('Validation Error', msg);
       return;
     }
-    if (!etrsDocId.trim()) {
-      const msg = 'eTRS Ticket Doc ID is required.';
-      Platform.OS === 'web' ? window.alert(msg) : Alert.alert('Validation Error', msg);
-      return;
-    }
     if (!remarks.trim()) {
       const msg = 'Remarks are required for voiding an eTRS Ticket.';
       Platform.OS === 'web' ? window.alert(msg) : Alert.alert('Validation Error', msg);
@@ -271,8 +289,9 @@ export default function ETRSTicketVoidScreen() {
       const json = await res.json();
 
       if (json.success) {
-        const msg = 'eTRS Ticket voided successfully!';
+        const msg = json.message || 'Invoice voided successfully';
         Platform.OS === 'web' ? window.alert(msg) : Alert.alert('Success', msg);
+        handleClear();
       } else {
         const msg = json.message || 'Failed to void eTRS Ticket.';
         Platform.OS === 'web' ? window.alert(msg) : Alert.alert('Error', msg);

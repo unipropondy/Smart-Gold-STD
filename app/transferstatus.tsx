@@ -3,66 +3,105 @@ import { API_BASE_URL } from '@/constants/api';
 import { useThemeColors } from '@/hooks/useThemeColors';
 import { Ionicons } from '@expo/vector-icons';
 import { Stack, useRouter } from 'expo-router';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
   Modal,
-  Platform,
   ScrollView,
   StyleSheet,
   TextInput,
   TouchableOpacity,
-  View,
+  View
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 const API_URL = `${API_BASE_URL}/transferstatus`;
+
+interface TransferRecord {
+  TransferNo: string;
+  TransferDate: string;
+  FromLocation: string;
+  ToLocation: string;
+  Location: string;
+  FromLocStatus: number | string;
+  ToLocStatus: number | string;
+  TotalPCS: number;
+  TotalWeight: number;
+  TotalCost: number;
+  Remarks: string;
+}
+
+interface DetailLineItem {
+  InventoryCode: string;
+  Description: string;
+  ClassCode: string;
+  CategoryCode: string;
+  Weight: number;
+  SizeCode: string;
+  QtyOnHand: number;
+  CostPerGram: number;
+  PMC: number;
+  SMC: number;
+  TotalCost: number;
+}
 
 export default function TransferStatusScreen() {
   const themeColors = useThemeColors();
   const router = useRouter();
 
   const [loading, setLoading] = useState(false);
-  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'warning' } | null>(null);
 
   // Form State
   const [locations, setLocations] = useState<any[]>([]);
-  const [selectedLocation, setSelectedLocation] = useState('');
+  const [selectedLocation, setSelectedLocation] = useState('HQ');
   const [locationModalVisible, setLocationModalVisible] = useState(false);
   const [locationSearchQuery, setLocationSearchQuery] = useState('');
 
-  // Date State - defaulting to today
-  const [transferDate, setTransferDate] = useState(() => {
-    const d = new Date();
-    const mm = String(d.getMonth() + 1).padStart(2, '0');
-    const dd = String(d.getDate()).padStart(2, '0');
-    const yyyy = d.getFullYear();
-    return `${yyyy}-${mm}-${dd}`;
-  });
+  // Date State matching txtTransferDate, txtTransferMonth, txtTransferYear in frmTransferList.vb
+  const today = new Date();
+  const [transferDay, setTransferDay] = useState(String(today.getDate()).padStart(2, '0'));
+  const [transferMonth, setTransferMonth] = useState(String(today.getMonth() + 1).padStart(2, '0'));
+  const [transferYear, setTransferYear] = useState(String(today.getFullYear()));
 
+  // Direction: rbtnTransferIn (checked by default in VB Designer) / rbtnTransferout
   const [transferType, setTransferType] = useState<'in' | 'out'>('in');
 
   // Grid State
-  const [gridData, setGridData] = useState<any[]>([]);
+  const [gridData, setGridData] = useState<TransferRecord[]>([]);
   const [selectedRowIndex, setSelectedRowIndex] = useState<number | null>(null);
+
+  // Detail Modal for previewing lines
+  const [previewModalVisible, setPreviewModalVisible] = useState(false);
+  const [previewLines, setPreviewLines] = useState<DetailLineItem[]>([]);
+  const [loadingLines, setLoadingLines] = useState(false);
+  const [previewVoucher, setPreviewVoucher] = useState<TransferRecord | null>(null);
+
+  const dayInputRef = useRef<TextInput>(null);
+  const monthInputRef = useRef<TextInput>(null);
+  const yearInputRef = useRef<TextInput>(null);
 
   useEffect(() => {
     fetchLocations();
   }, []);
 
-  const showToast = (message: string, type: 'success' | 'error' = 'success') => {
+  const showToast = (message: string, type: 'success' | 'error' | 'warning' = 'success') => {
     setToast({ message, type });
-    setTimeout(() => setToast(null), 3000);
+    setTimeout(() => setToast(null), 3500);
   };
 
   const fetchLocations = async () => {
     try {
       const res = await fetch(`${API_URL}/locations`);
       const data = await res.json();
-      if (data.success) {
-        setLocations(data.data || []);
-        if (data.data && data.data.length > 0) {
+      if (data.success && data.data && data.data.length > 0) {
+        setLocations(data.data);
+        // Default to HQ or first location
+        const hasHQ = data.data.find((l: any) => l.LocationCode.trim().toUpperCase() === 'HQ');
+        if (hasHQ) {
+          setSelectedLocation('HQ');
+        } else {
           setSelectedLocation(data.data[0].LocationCode);
         }
       }
@@ -71,41 +110,82 @@ export default function TransferStatusScreen() {
     }
   };
 
-  const handleFetch = async (isPending = false) => {
-    if (!selectedLocation) {
-      showToast('Please select a branch location.', 'error');
-      return;
+  // Keyboard Shortcuts (F6=Clear, Esc=Back)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'F6') {
+        e.preventDefault();
+        handleClear();
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        if (locationModalVisible) setLocationModalVisible(false);
+        else if (previewModalVisible) setPreviewModalVisible(false);
+        else router.back();
+      }
+    };
+    if (typeof window !== 'undefined') {
+      window.addEventListener('keydown', handleKeyDown);
+      return () => window.removeEventListener('keydown', handleKeyDown);
     }
+  }, [locationModalVisible, previewModalVisible]);
+
+  // Validation function matching fncCheckData in frmTransferList.vb
+  const fncCheckData = (isPending: boolean): boolean => {
+    if (!selectedLocation || !selectedLocation.trim()) {
+      showToast('Please select location.', 'error');
+      return false;
+    }
+    if (!transferType) {
+      showToast('Please select Transfer In / Transfer Out', 'error');
+      return false;
+    }
+    if (!isPending) {
+      if (!transferDay.trim() || !transferMonth.trim() || !transferYear.trim()) {
+        showToast('Please enter date.', 'error');
+        return false;
+      }
+      const d = parseInt(transferDay, 10);
+      const m = parseInt(transferMonth, 10);
+      const y = parseInt(transferYear, 10);
+      if (isNaN(d) || isNaN(m) || isNaN(y) || d < 1 || d > 31 || m < 1 || m > 12 || y < 1900) {
+        showToast('Please enter valid date.', 'error');
+        return false;
+      }
+    }
+    return true;
+  };
+
+  // Query Execution (Matching cmdFetch_Click & btnPending_Click in frmTransferList.vb)
+  const handleFetch = async (isPending = false) => {
+    if (!fncCheckData(isPending)) return;
 
     try {
       setLoading(true);
       setGridData([]);
       setSelectedRowIndex(null);
 
+      const formattedDate = `${transferYear}-${transferMonth.padStart(2, '0')}-${transferDay.padStart(2, '0')}`;
+
       let url = `${API_URL}/fetch?location=${encodeURIComponent(
-        selectedLocation
-      )}&transferDate=${transferDate}&type=${transferType}`;
+        selectedLocation.trim()
+      )}&transferDate=${encodeURIComponent(formattedDate)}&type=${transferType}`;
 
       if (isPending) {
-        url = `${API_URL}/pending?location=${encodeURIComponent(selectedLocation)}&type=${transferType}`;
+        url = `${API_URL}/pending?location=${encodeURIComponent(
+          selectedLocation.trim()
+        )}&type=${transferType}`;
       }
 
       const res = await fetch(url);
-
-      let data;
-      const contentType = res.headers.get('content-type');
-      if (contentType && contentType.indexOf('application/json') !== -1) {
-        data = await res.json();
-      } else {
-        throw new Error(`Server returned a non-JSON response: ${res.status}`);
-      }
+      const data = await res.json();
 
       if (data.success) {
         if (!data.data || data.data.length === 0) {
-          showToast(`No transfers found for ${selectedLocation}`, 'error');
+          showToast(`No transfer ${transferType === 'out' ? 'from' : 'to'} ${selectedLocation}`, 'warning');
         } else {
           setGridData(data.data);
-          showToast(`Found ${data.data.length} transfer record(s)`, 'success');
+          showToast(`Loaded ${data.data.length} transfer voucher(s)`, 'success');
         }
       } else {
         showToast(data.message || 'No transfer records found', 'error');
@@ -117,17 +197,32 @@ export default function TransferStatusScreen() {
     }
   };
 
+  // Clear function matching cmdClear_Click in frmTransferList.vb
   const handleClear = () => {
+    setTransferDay('');
+    setTransferMonth('');
+    setTransferYear('');
     setGridData([]);
     setSelectedRowIndex(null);
+    showToast('Transfer list cleared', 'success');
   };
 
+  // Reset to today
+  const handleSetToday = () => {
+    const cur = new Date();
+    setTransferDay(String(cur.getDate()).padStart(2, '0'));
+    setTransferMonth(String(cur.getMonth() + 1).padStart(2, '0'));
+    setTransferYear(String(cur.getFullYear()));
+  };
+
+  // View Voucher (matching btnView_Click & subTransferDetails in frmTransferList.vb)
   const handleView = () => {
     if (selectedRowIndex === null || !gridData[selectedRowIndex]) {
-      showToast('Please select a transfer voucher to view details', 'error');
+      showToast('Please select a transfer voucher from the list', 'error');
       return;
     }
-    const transferNo = gridData[selectedRowIndex].TransferNo;
+    const item = gridData[selectedRowIndex];
+    const transferNo = item.TransferNo;
 
     if (transferType === 'in') {
       router.push(`/transferin?transferNo=${encodeURIComponent(transferNo)}` as any);
@@ -136,13 +231,38 @@ export default function TransferStatusScreen() {
     }
   };
 
-  const selectedLocationObj = locations.find((l) => l.LocationCode === selectedLocation);
+  // Quick inspect line items modal
+  const handleInspectLines = async (voucher: TransferRecord) => {
+    setPreviewVoucher(voucher);
+    setPreviewModalVisible(true);
+    setLoadingLines(true);
+    try {
+      const res = await fetch(`${API_URL}/details/${encodeURIComponent(voucher.TransferNo)}`);
+      const data = await res.json();
+      if (data.success) {
+        setPreviewLines(data.details || []);
+      } else {
+        showToast(data.message || 'Could not load line items', 'error');
+      }
+    } catch (e: any) {
+      showToast('Error loading line details', 'error');
+    } finally {
+      setLoadingLines(false);
+    }
+  };
 
-  // Quick summary counts
+  const selectedLocationObj = locations.find((l) => l.LocationCode.trim() === selectedLocation.trim());
+
+  // Metrics
   const totalRecords = gridData.length;
   const totalPcsSum = gridData.reduce((sum, it) => sum + (Number(it.TotalPCS) || 0), 0);
-  const pendingCount = gridData.filter((it) => it.ToLocStatus == 0).length;
-  const acceptedCount = gridData.filter((it) => it.ToLocStatus != 0).length;
+  const totalWeightSum = gridData.reduce((sum, it) => sum + (Number(it.TotalWeight) || 0), 0);
+  const pendingCount = gridData.filter(
+    (it) => it.ToLocStatus == 0 || String(it.ToLocStatus).trim() === '0'
+  ).length;
+  const acceptedCount = gridData.filter(
+    (it) => it.ToLocStatus != 0 && String(it.ToLocStatus).trim() !== '0'
+  ).length;
 
   return (
     <SafeAreaView style={styles.safeArea} edges={['top']}>
@@ -155,7 +275,10 @@ export default function TransferStatusScreen() {
             <Ionicons name="arrow-back" size={20} color="#3B2D17" />
           </TouchableOpacity>
           <View>
-            <ThemedText style={styles.headerTitle}>Transfer Status</ThemedText>
+            <ThemedText style={styles.headerTitle}>Branch Stock Movement Log</ThemedText>
+            <ThemedText style={styles.headerSubtitle}>
+              Transfer Status, Inter-Branch Tracking & Dispatch Audit
+            </ThemedText>
           </View>
           {loading && <ActivityIndicator size="small" color="#B48218" style={{ marginLeft: 8 }} />}
         </View>
@@ -169,26 +292,6 @@ export default function TransferStatusScreen() {
           >
             <Ionicons name="refresh-outline" size={14} color="#5C4A28" />
             <ThemedText style={styles.clearBtnText}>Clear</ThemedText>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={[styles.actionBtn, styles.pendingBtn]}
-            onPress={() => handleFetch(true)}
-            activeOpacity={0.8}
-            disabled={loading}
-          >
-            <Ionicons name="time-outline" size={14} color="#B48218" />
-            <ThemedText style={styles.pendingBtnText}>Pending Only</ThemedText>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={[styles.actionBtn, styles.fetchBtn]}
-            onPress={() => handleFetch(false)}
-            activeOpacity={0.8}
-            disabled={loading}
-          >
-            <Ionicons name="search-outline" size={14} color="#5C4A28" />
-            <ThemedText style={styles.clearBtnText}>Query Date</ThemedText>
           </TouchableOpacity>
 
           <TouchableOpacity
@@ -209,9 +312,24 @@ export default function TransferStatusScreen() {
 
       {/* TOAST ALERTS */}
       {toast && (
-        <View style={[styles.toast, toast.type === 'error' ? styles.toastError : styles.toastSuccess]}>
+        <View
+          style={[
+            styles.toast,
+            toast.type === 'error'
+              ? styles.toastError
+              : toast.type === 'warning'
+                ? styles.toastWarning
+                : styles.toastSuccess,
+          ]}
+        >
           <Ionicons
-            name={toast.type === 'error' ? 'alert-circle' : 'checkmark-circle'}
+            name={
+              toast.type === 'error'
+                ? 'alert-circle'
+                : toast.type === 'warning'
+                  ? 'warning-outline'
+                  : 'checkmark-circle'
+            }
             size={16}
             color="#FFFFFF"
             style={{ marginRight: 6 }}
@@ -220,11 +338,18 @@ export default function TransferStatusScreen() {
         </View>
       )}
 
-      <ScrollView contentContainerStyle={styles.scrollContainer}>
+      <ScrollView contentContainerStyle={styles.scrollContainer} keyboardShouldPersistTaps="handled">
         {/* CARD 1: FILTER CONTROLS & MOVEMENT DIRECTION */}
         <View style={styles.goldCard}>
-          <View style={[styles.cardHeaderBanner, { justifyContent: 'flex-start' }]}>
-            {/* Movement Direction Toggle Segment */}
+          <View style={styles.cardHeaderBanner}>
+            <View style={styles.headerTitleContainer}>
+              <View style={styles.headerIconBadgeSmall}>
+                <Ionicons name="funnel-outline" size={13} color="#B48218" />
+              </View>
+              <ThemedText style={styles.cardHeaderTitleSmall}>Query Filters & Movement Direction</ThemedText>
+            </View>
+
+            {/* Movement Direction Toggle Segment (rbtnTransferIn vs rbtnTransferout) */}
             <View style={styles.segmentContainer}>
               <TouchableOpacity
                 style={[styles.segmentBtn, transferType === 'in' && styles.segmentBtnActive]}
@@ -268,7 +393,7 @@ export default function TransferStatusScreen() {
             <View style={styles.threeColumnGrid}>
               {/* Location Selector (with LOV lookup modal support) */}
               <View style={[styles.inlineFieldRow, { flex: 1.3, minWidth: 260 }]}>
-                <ThemedText style={[styles.inlineFieldLabel, { width: 95 }]}>Branch Loc. *</ThemedText>
+                <ThemedText style={[styles.inlineFieldLabel, { width: 95 }]}>Location *</ThemedText>
                 <View style={styles.inputWithLookup}>
                   <TextInput
                     style={[styles.formInput, styles.inputAttached, { flex: 1 }]}
@@ -294,16 +419,57 @@ export default function TransferStatusScreen() {
                 </View>
               </View>
 
-              {/* Transfer Date Input */}
-              <View style={[styles.inlineFieldRow, { flex: 1, minWidth: 210 }]}>
+              {/* Transfer Date Input (DD / MM / YYYY) */}
+              <View style={[styles.inlineFieldRow, { flex: 1.2, minWidth: 240 }]}>
                 <ThemedText style={[styles.inlineFieldLabel, { width: 95 }]}>Transfer Date</ThemedText>
-                <TextInput
-                  style={[styles.formInput, { flex: 1, minWidth: 100 }]}
-                  value={transferDate}
-                  onChangeText={setTransferDate}
-                  placeholder="YYYY-MM-DD"
-                  placeholderTextColor="#9E8D77"
-                />
+                <View style={styles.dateTripleInputGroup}>
+                  <TextInput
+                    ref={dayInputRef}
+                    style={[styles.formInput, styles.datePartInput]}
+                    value={transferDay}
+                    onChangeText={(txt) => {
+                      setTransferDay(txt);
+                      if (txt.length === 2) monthInputRef.current?.focus();
+                    }}
+                    maxLength={2}
+                    keyboardType="number-pad"
+                    placeholder="DD"
+                    placeholderTextColor="#9E8D77"
+                  />
+                  <ThemedText style={styles.dateSlash}>/</ThemedText>
+                  <TextInput
+                    ref={monthInputRef}
+                    style={[styles.formInput, styles.datePartInput]}
+                    value={transferMonth}
+                    onChangeText={(txt) => {
+                      setTransferMonth(txt);
+                      if (txt.length === 2) yearInputRef.current?.focus();
+                    }}
+                    maxLength={2}
+                    keyboardType="number-pad"
+                    placeholder="MM"
+                    placeholderTextColor="#9E8D77"
+                  />
+                  <ThemedText style={styles.dateSlash}>/</ThemedText>
+                  <TextInput
+                    ref={yearInputRef}
+                    style={[styles.formInput, styles.dateYearInput]}
+                    value={transferYear}
+                    onChangeText={setTransferYear}
+                    maxLength={4}
+                    keyboardType="number-pad"
+                    placeholder="YYYY"
+                    placeholderTextColor="#9E8D77"
+                  />
+                  <TouchableOpacity
+                    style={styles.todaySmallBtn}
+                    onPress={handleSetToday}
+                    activeOpacity={0.7}
+                    accessibilityLabel="Set Today"
+                  >
+                    <Ionicons name="calendar-outline" size={12} color="#7D5E19" />
+                  </TouchableOpacity>
+                </View>
               </View>
 
               {/* Action Buttons inside Card */}
@@ -314,7 +480,7 @@ export default function TransferStatusScreen() {
                   activeOpacity={0.8}
                 >
                   <Ionicons name="search" size={13} color="#9E6D08" style={{ marginRight: 4 }} />
-                  <ThemedText style={styles.searchBtnText}>Run Query</ThemedText>
+                  <ThemedText style={styles.searchBtnText}>Fetch Date</ThemedText>
                 </TouchableOpacity>
 
                 <TouchableOpacity
@@ -322,8 +488,8 @@ export default function TransferStatusScreen() {
                   onPress={() => handleFetch(true)}
                   activeOpacity={0.8}
                 >
-                  <Ionicons name="alert-circle-outline" size={13} color="#B48218" style={{ marginRight: 4 }} />
-                  <ThemedText style={styles.pendingPillText}>View Pending</ThemedText>
+                  <Ionicons name="time-outline" size={13} color="#B48218" style={{ marginRight: 4 }} />
+                  <ThemedText style={styles.pendingPillText}>Pending</ThemedText>
                 </TouchableOpacity>
               </View>
             </View>
@@ -359,6 +525,16 @@ export default function TransferStatusScreen() {
                 <TextInput
                   style={[styles.formInput, styles.readonlyInput, { flex: 1, minWidth: 70, textAlign: 'right' }]}
                   value={String(totalPcsSum)}
+                  editable={false}
+                />
+              </View>
+
+              {/* Total Weight */}
+              <View style={[styles.inlineFieldRow, { flex: 1, minWidth: 180 }]}>
+                <ThemedText style={[styles.inlineFieldLabel, { width: 85 }]}>Total Wt (g)</ThemedText>
+                <TextInput
+                  style={[styles.formInput, styles.readonlyInput, { flex: 1, minWidth: 70, textAlign: 'right' }]}
+                  value={totalWeightSum.toFixed(3)}
                   editable={false}
                 />
               </View>
@@ -410,23 +586,23 @@ export default function TransferStatusScreen() {
             </View>
 
             <ThemedText style={styles.cardInstruction}>
-              Tip: Tap a row to select, double tap or click "View Voucher" to open detail
+              Tip: Tap a row to select, double tap to open detail voucher
             </ThemedText>
           </View>
 
-          {/* Table Header */}
+          {/* Table Header matching colTransferNo, colTransferDate, colFromLoc, colToLoc, colLocation, colNoofQty, ColNoofItems */}
           <View style={styles.tableHeadRow}>
             <ThemedText style={[styles.tableHeadCell, { flex: 1.8 }]}>Transfer No</ThemedText>
-            <ThemedText style={[styles.tableHeadCell, { flex: 1.4 }]}>Date</ThemedText>
-            <ThemedText style={[styles.tableHeadCell, { flex: 1.6, textAlign: 'center' }]}>
-              From Loc Status
+            <ThemedText style={[styles.tableHeadCell, { flex: 1.3 }]}>Date</ThemedText>
+            <ThemedText style={[styles.tableHeadCell, { flex: 1.5, textAlign: 'center' }]}>
+              From Loc. Status
             </ThemedText>
-            <ThemedText style={[styles.tableHeadCell, { flex: 1.6, textAlign: 'center' }]}>
-              To Loc Status
+            <ThemedText style={[styles.tableHeadCell, { flex: 1.5, textAlign: 'center' }]}>
+              To Loc. Status
             </ThemedText>
-            <ThemedText style={[styles.tableHeadCell, { flex: 1.4 }]}>Target Loc</ThemedText>
-            <ThemedText style={[styles.tableHeadCell, { flex: 1, textAlign: 'right' }]}>PCS</ThemedText>
-            <ThemedText style={[styles.tableHeadCell, { width: 70, textAlign: 'center' }]}>Action</ThemedText>
+            <ThemedText style={[styles.tableHeadCell, { flex: 1.3 }]}>Location</ThemedText>
+            <ThemedText style={[styles.tableHeadCell, { flex: 1, textAlign: 'right' }]}>No. of PCS</ThemedText>
+            <ThemedText style={[styles.tableHeadCell, { flex: 1, textAlign: 'right' }]}>No of Items</ThemedText>
           </View>
 
           {/* Table Body */}
@@ -434,39 +610,42 @@ export default function TransferStatusScreen() {
             <View style={styles.emptyTableContainer}>
               <Ionicons name="file-tray-outline" size={32} color="#D4C3A3" />
               <ThemedText style={styles.emptyTableText}>
-                No transfer records found. Select your filters and click "Run Query" or "View Pending".
+                No transfer records found. Select your filters and click "Fetch Date" or "Pending".
               </ThemedText>
             </View>
           ) : (
             gridData.map((item, index) => {
               const isSelected = selectedRowIndex === index;
-              const isPending = item.ToLocStatus == 0;
+              const isPending = item.ToLocStatus == 0 || String(item.ToLocStatus).trim() === '0';
+              const isDispatched = item.FromLocStatus == 2 || String(item.FromLocStatus).trim() === '2';
+
               return (
                 <TouchableOpacity
-                  key={item.TransferNo || index}
+                  key={`${item.TransferNo}-${index}`}
                   style={[styles.tableRow, isSelected && styles.tableRowSelected]}
                   onPress={() => setSelectedRowIndex(index)}
                   onLongPress={handleView}
+                  onPressIn={() => setSelectedRowIndex(index)}
                   activeOpacity={0.8}
                 >
                   <ThemedText style={[styles.tableCell, styles.codeCell, { flex: 1.8 }]}>
                     {item.TransferNo}
                   </ThemedText>
-                  <ThemedText style={[styles.tableCell, { flex: 1.4 }]}>
-                    {item.TransferDate ? new Date(item.TransferDate).toLocaleDateString() : '-'}
+                  <ThemedText style={[styles.tableCell, { flex: 1.3 }]}>
+                    {item.TransferDate ? String(item.TransferDate).substring(0, 10) : '-'}
                   </ThemedText>
-                  <View style={{ flex: 1.6, alignItems: 'center' }}>
+                  <View style={{ flex: 1.5, alignItems: 'center' }}>
                     <View style={styles.statusBadgeDispatched}>
                       <ThemedText style={styles.statusBadgeTextDispatched}>
-                        {item.FromLocStatus == 2 ? 'Dispatched' : 'Created'}
+                        {isDispatched ? 'Transferred' : 'Created'}
                       </ThemedText>
                     </View>
                   </View>
-                  <View style={{ flex: 1.6, alignItems: 'center' }}>
+                  <View style={{ flex: 1.5, alignItems: 'center' }}>
                     {isPending ? (
                       <View style={styles.statusBadgePending}>
                         <Ionicons name="time-outline" size={11} color="#C62828" style={{ marginRight: 3 }} />
-                        <ThemedText style={styles.statusBadgeTextPending}>Pending</ThemedText>
+                        <ThemedText style={styles.statusBadgeTextPending}>Pending...</ThemedText>
                       </View>
                     ) : (
                       <View style={styles.statusBadgeAccepted}>
@@ -475,29 +654,15 @@ export default function TransferStatusScreen() {
                       </View>
                     )}
                   </View>
-                  <ThemedText style={[styles.tableCell, { flex: 1.4 }]}>
+                  <ThemedText style={[styles.tableCell, { flex: 1.3 }]}>
                     {item.Location || '-'}
                   </ThemedText>
                   <ThemedText style={[styles.tableCell, { flex: 1, textAlign: 'right', fontWeight: 'bold' }]}>
                     {item.TotalPCS || 0}
                   </ThemedText>
-                  <View style={{ width: 70, alignItems: 'center' }}>
-                    <TouchableOpacity
-                      style={styles.rowActionBtn}
-                      onPress={() => {
-                        setSelectedRowIndex(index);
-                        const tNo = item.TransferNo;
-                        if (transferType === 'in') {
-                          router.push(`/transferin?transferNo=${encodeURIComponent(tNo)}` as any);
-                        } else {
-                          router.push(`/transferout?transferNo=${encodeURIComponent(tNo)}` as any);
-                        }
-                      }}
-                      activeOpacity={0.7}
-                    >
-                      <Ionicons name="eye-outline" size={14} color="#7D5E19" />
-                    </TouchableOpacity>
-                  </View>
+                  <ThemedText style={[styles.tableCell, { flex: 1, textAlign: 'right' }]}>
+                    {item.TotalPCS || 0}
+                  </ThemedText>
                 </TouchableOpacity>
               );
             })
@@ -580,6 +745,115 @@ export default function TransferStatusScreen() {
           </View>
         </View>
       </Modal>
+
+      {/* INSPECT LINE ITEMS MODAL */}
+      <Modal
+        visible={previewModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setPreviewModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={[styles.lovModalCard, { maxWidth: 760, maxHeight: 520 }]}>
+            <View style={styles.modalHeaderBanner}>
+              <View style={styles.headerTitleContainer}>
+                <View style={styles.headerIconBadgeSmall}>
+                  <Ionicons name="cube-outline" size={13} color="#B48218" />
+                </View>
+                <ThemedText style={styles.modalHeaderTitle}>
+                  Voucher Items: #{previewVoucher?.TransferNo}
+                </ThemedText>
+              </View>
+              <TouchableOpacity
+                onPress={() => setPreviewModalVisible(false)}
+                activeOpacity={0.7}
+                style={styles.closeModalBtn}
+              >
+                <Ionicons name="close" size={18} color="#3B2D17" />
+              </TouchableOpacity>
+            </View>
+
+            <View style={{ padding: 10, backgroundColor: '#FAF7F0', borderBottomWidth: 1, borderBottomColor: '#E8DCB8' }}>
+              <ThemedText style={{ fontSize: 11, color: '#4A3B22' }}>
+                From: <ThemedText style={{ fontWeight: 'bold' }}>{previewVoucher?.FromLocation}</ThemedText> → To: <ThemedText style={{ fontWeight: 'bold' }}>{previewVoucher?.ToLocation}</ThemedText> | Total PCS: <ThemedText style={{ fontWeight: 'bold' }}>{previewVoucher?.TotalPCS}</ThemedText>
+              </ThemedText>
+              {Boolean(previewVoucher?.Remarks) && (
+                <ThemedText style={{ fontSize: 10, color: '#7D5E19', fontStyle: 'italic', marginTop: 2 }}>
+                  Remarks: {previewVoucher?.Remarks}
+                </ThemedText>
+              )}
+            </View>
+
+            {/* Subtable Header */}
+            <View style={styles.lovHeadRow}>
+              <ThemedText style={[styles.lovHeadText, { flex: 1.8 }]}>Item Code</ThemedText>
+              <ThemedText style={[styles.lovHeadText, { flex: 2.6 }]}>Description</ThemedText>
+              <ThemedText style={[styles.lovHeadText, { flex: 1, textAlign: 'right' }]}>Weight</ThemedText>
+              <ThemedText style={[styles.lovHeadText, { flex: 0.8, textAlign: 'center' }]}>Size</ThemedText>
+              <ThemedText style={[styles.lovHeadText, { flex: 1.2, textAlign: 'right' }]}>Total Cost</ThemedText>
+            </View>
+
+            <ScrollView style={{ flex: 1 }}>
+              {loadingLines ? (
+                <View style={{ padding: 24, alignItems: 'center' }}>
+                  <ActivityIndicator size="small" color="#B48218" />
+                  <ThemedText style={{ color: '#7D5E19', fontSize: 12, marginTop: 8 }}>Loading items...</ThemedText>
+                </View>
+              ) : previewLines.length === 0 ? (
+                <View style={{ padding: 24, alignItems: 'center' }}>
+                  <ThemedText style={{ color: '#7D5E19', fontSize: 12 }}>No items found in detail</ThemedText>
+                </View>
+              ) : (
+                previewLines.map((line, idx) => (
+                  <View key={`${line.InventoryCode}-${idx}`} style={styles.lovItemRow}>
+                    <ThemedText style={[styles.lovItemText, styles.codeCell, { flex: 1.8 }]}>
+                      {line.InventoryCode}
+                    </ThemedText>
+                    <ThemedText style={[styles.lovItemText, { flex: 2.6 }]} numberOfLines={1}>
+                      {line.Description || '-'}
+                    </ThemedText>
+                    <ThemedText style={[styles.lovItemText, { flex: 1, textAlign: 'right', fontWeight: 'bold' }]}>
+                      {Number(line.Weight || 0).toFixed(3)}g
+                    </ThemedText>
+                    <ThemedText style={[styles.lovItemText, { flex: 0.8, textAlign: 'center' }]}>
+                      {line.SizeCode || '-'}
+                    </ThemedText>
+                    <ThemedText style={[styles.lovItemText, { flex: 1.2, textAlign: 'right', color: '#2E7D32', fontWeight: 'bold' }]}>
+                      ${Number(line.TotalCost || 0).toFixed(2)}
+                    </ThemedText>
+                  </View>
+                ))
+              )}
+            </ScrollView>
+
+            <View style={{ padding: 10, borderTopWidth: 1, borderTopColor: '#E8DCB8', flexDirection: 'row', justifyContent: 'flex-end', gap: 8 }}>
+              <TouchableOpacity
+                style={[styles.actionBtn, styles.clearBtn]}
+                onPress={() => setPreviewModalVisible(false)}
+              >
+                <ThemedText style={styles.clearBtnText}>Close</ThemedText>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.actionBtn, styles.saveBtn]}
+                onPress={() => {
+                  setPreviewModalVisible(false);
+                  if (previewVoucher) {
+                    const tNo = previewVoucher.TransferNo;
+                    if (transferType === 'in') {
+                      router.push(`/transferin?transferNo=${encodeURIComponent(tNo)}` as any);
+                    } else {
+                      router.push(`/transferout?transferNo=${encodeURIComponent(tNo)}` as any);
+                    }
+                  }
+                }}
+              >
+                <Ionicons name="open-outline" size={14} color="#9E6D08" style={{ marginRight: 4 }} />
+                <ThemedText style={styles.saveBtnText}>Open in Editor</ThemedText>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -659,13 +933,13 @@ const styles = StyleSheet.create({
     marginLeft: 4,
   },
   pendingBtn: {
-    backgroundColor: '#FFF9E6',
-    borderColor: '#B8903B',
+    backgroundColor: '#FFF8E7',
+    borderColor: '#E2CA8E',
   },
   pendingBtnText: {
     fontSize: 12,
     fontWeight: 'bold',
-    color: '#8D6409',
+    color: '#9E6D08',
     marginLeft: 4,
   },
   fetchBtn: {
@@ -734,23 +1008,38 @@ const styles = StyleSheet.create({
     color: '#7D5E19',
     fontStyle: 'italic',
   },
+  counterBadge: {
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+    borderRadius: 10,
+    marginLeft: 6,
+    borderWidth: 1,
+    borderColor: '#E8DCB8',
+  },
+  counterBadgeText: {
+    fontSize: 10,
+    fontWeight: 'bold',
+    color: '#9E6D08',
+  },
   cardBody: {
     padding: 10,
   },
 
-  // Movement Direction Segment
+  // ===== SEGMENTED CONTROL =====
   segmentContainer: {
     flexDirection: 'row',
-    backgroundColor: '#EBD8B0',
+    backgroundColor: '#EDE4D1',
     borderRadius: 6,
     padding: 2,
-    gap: 3,
+    borderWidth: 1,
+    borderColor: '#D4C3A3',
   },
   segmentBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 10,
-    paddingVertical: 3,
+    paddingVertical: 4,
     borderRadius: 4,
   },
   segmentBtnActive: {
@@ -758,102 +1047,223 @@ const styles = StyleSheet.create({
   },
   segmentBtnText: {
     fontSize: 11,
-    fontWeight: '600',
-    color: '#5C4A28',
+    fontWeight: 'bold',
+    color: '#6A5636',
   },
   segmentBtnTextActive: {
     color: '#FFFFFF',
-    fontWeight: 'bold',
   },
 
-  // ===== GRIDS & INLINE ROWS =====
+  // ===== FORM GRID & INPUTS =====
   threeColumnGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 12,
+    gap: 8,
     alignItems: 'center',
   },
   fourColumnGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 12,
+    gap: 8,
   },
   inlineFieldRow: {
-    flex: 1,
-    minWidth: 215,
     flexDirection: 'row',
     alignItems: 'center',
   },
   inlineFieldLabel: {
-    width: 95,
     fontSize: 11,
-    fontWeight: 'bold',
-    color: '#3B2D17',
-    marginRight: 8,
-    flexShrink: 0,
+    fontWeight: '600',
+    color: '#4A3B22',
   },
   formInput: {
-    height: 26,
-    backgroundColor: '#FFFFFF',
+    height: 28,
     borderWidth: 1,
     borderColor: '#D4C3A3',
     borderRadius: 4,
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    fontSize: 12,
-    color: '#2B2118',
+    paddingHorizontal: 8,
+    fontSize: 11,
+    color: '#2A1F10',
+    backgroundColor: '#FFFFFF',
   },
-  readonlyInput: {
-    backgroundColor: '#F5EFE6',
-    color: '#5C4A28',
-  },
-  highlightPending: {
-    backgroundColor: '#FFEBEE',
-    color: '#C62828',
-    borderColor: '#FFCDD2',
-  },
-  highlightAccepted: {
-    backgroundColor: '#E8F5E9',
-    color: '#2E7D32',
-    borderColor: '#A5D6A7',
-  },
-
-  // Input Combo
-  inputWithLookup: {
-    flex: 1,
+  dateTripleInputGroup: {
     flexDirection: 'row',
     alignItems: 'center',
+    flex: 1,
+  },
+  datePartInput: {
+    width: 34,
+    textAlign: 'center',
+    paddingHorizontal: 2,
+  },
+  dateYearInput: {
+    width: 50,
+    textAlign: 'center',
+    paddingHorizontal: 4,
+  },
+  dateSlash: {
+    fontSize: 12,
+    fontWeight: 'bold',
+    color: '#7D5E19',
+    marginHorizontal: 3,
+  },
+  todaySmallBtn: {
+    padding: 5,
+    marginLeft: 4,
+    borderRadius: 4,
+    backgroundColor: '#F5E7CA',
+    borderWidth: 1,
+    borderColor: '#D4C3A3',
+  },
+  inputWithLookup: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
   },
   inputAttached: {
     borderTopRightRadius: 0,
     borderBottomRightRadius: 0,
+    borderRightWidth: 0,
   },
   attachedLookupBtn: {
-    height: 26,
-    width: 26,
+    width: 28,
+    height: 28,
     backgroundColor: '#F5E7CA',
     borderWidth: 1,
-    borderLeftWidth: 0,
     borderColor: '#D4C3A3',
     borderTopRightRadius: 4,
     borderBottomRightRadius: 4,
     justifyContent: 'center',
     alignItems: 'center',
-    flexShrink: 0,
+  },
+  readonlyInput: {
+    backgroundColor: '#F7F3EB',
+    color: '#5C4A28',
+    borderColor: '#E2D5C0',
+  },
+  highlightPending: {
+    backgroundColor: '#FFEBEE',
+    borderColor: '#EF9A9A',
+    color: '#C62828',
+  },
+  highlightAccepted: {
+    backgroundColor: '#E8F5E9',
+    borderColor: '#A5D6A7',
+    color: '#2E7D32',
   },
 
-  // Actions
+  // ===== TABLE DESIGN =====
+  tableHeadRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F9F5EC',
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E8DCB8',
+  },
+  tableHeadCell: {
+    fontSize: 10,
+    fontWeight: 'bold',
+    color: '#6A5636',
+    textTransform: 'uppercase',
+  },
+  tableRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F0E8D8',
+    backgroundColor: '#FFFFFF',
+  },
+  tableRowSelected: {
+    backgroundColor: '#FFF8E6',
+  },
+  tableCell: {
+    fontSize: 11,
+    color: '#3B2D17',
+  },
+  codeCell: {
+    fontWeight: 'bold',
+    color: '#9E6D08',
+  },
+  statusBadgeDispatched: {
+    backgroundColor: '#E3F2FD',
+    borderColor: '#90CAF9',
+    borderWidth: 1,
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+    borderRadius: 4,
+  },
+  statusBadgeTextDispatched: {
+    fontSize: 9,
+    fontWeight: 'bold',
+    color: '#1565C0',
+  },
+  statusBadgePending: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFEBEE',
+    borderColor: '#FFCDD2',
+    borderWidth: 1,
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+    borderRadius: 4,
+  },
+  statusBadgeTextPending: {
+    fontSize: 9,
+    fontWeight: 'bold',
+    color: '#C62828',
+  },
+  statusBadgeAccepted: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#E8F5E9',
+    borderColor: '#A5D6A7',
+    borderWidth: 1,
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+    borderRadius: 4,
+  },
+  statusBadgeTextAccepted: {
+    fontSize: 9,
+    fontWeight: 'bold',
+    color: '#2E7D32',
+  },
+  emptyTableContainer: {
+    padding: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  emptyTableText: {
+    fontSize: 11,
+    color: '#9E8D77',
+    textAlign: 'center',
+    marginTop: 6,
+  },
+  rowActionBtn: {
+    width: 24,
+    height: 24,
+    borderRadius: 4,
+    backgroundColor: '#F5E7CA',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#E8DCB8',
+  },
+
+  // ===== CARD ACTION BUTTONS =====
   tableActionBtn: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
     paddingHorizontal: 12,
-    paddingVertical: 5,
-    borderRadius: 5,
+    height: 28,
+    borderRadius: 4,
     borderWidth: 1,
-    height: 26,
   },
   searchBtn: {
-    backgroundColor: '#F9F2E2',
+    backgroundColor: '#F5E7CA',
     borderColor: '#B8903B',
   },
   searchBtnText: {
@@ -863,236 +1273,128 @@ const styles = StyleSheet.create({
   },
   pendingPillBtn: {
     backgroundColor: '#FFF8E7',
-    borderColor: '#D4C3A3',
+    borderColor: '#E2CA8E',
   },
   pendingPillText: {
     fontSize: 11,
     fontWeight: 'bold',
-    color: '#7D5E19',
+    color: '#9E6D08',
   },
 
-  // ===== TABLE SECTION =====
-  counterBadge: {
-    backgroundColor: '#FFFFFF',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 10,
-    marginLeft: 6,
-    borderWidth: 1,
-    borderColor: '#E2D3B3',
-  },
-  counterBadgeText: {
-    fontSize: 10,
-    fontWeight: 'bold',
-    color: '#8D6409',
-  },
-  tableHeadRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#FAF5EA',
-    borderBottomWidth: 1,
-    borderBottomColor: '#E8DCB8',
-    paddingHorizontal: 12,
-    paddingVertical: 5,
-  },
-  tableHeadCell: {
-    fontSize: 11,
-    fontWeight: 'bold',
-    color: '#5C4A28',
-    textTransform: 'uppercase',
-    letterSpacing: 0.3,
-  },
-  tableRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderBottomWidth: 1,
-    borderBottomColor: '#F0E7D5',
-    backgroundColor: '#FFFFFF',
-  },
-  tableRowSelected: {
-    backgroundColor: '#FFF8E7',
-  },
-  tableCell: {
-    fontSize: 11,
-    color: '#3B2D17',
-  },
-  codeCell: {
-    fontWeight: 'bold',
-    color: '#8D6409',
-  },
-  statusBadgeDispatched: {
-    backgroundColor: '#EFF6FF',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 4,
-    borderWidth: 1,
-    borderColor: '#BFDBFE',
-  },
-  statusBadgeTextDispatched: {
-    fontSize: 10,
-    fontWeight: '600',
-    color: '#1D4ED8',
-  },
-  statusBadgePending: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#FFEBEE',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 4,
-    borderWidth: 1,
-    borderColor: '#FFCDD2',
-  },
-  statusBadgeTextPending: {
-    fontSize: 10,
-    fontWeight: 'bold',
-    color: '#C62828',
-  },
-  statusBadgeAccepted: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#E8F5E9',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 4,
-    borderWidth: 1,
-    borderColor: '#A5D6A7',
-  },
-  statusBadgeTextAccepted: {
-    fontSize: 10,
-    fontWeight: 'bold',
-    color: '#2E7D32',
-  },
-  rowActionBtn: {
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    backgroundColor: '#FAF5EA',
-    borderRadius: 4,
-    borderWidth: 1,
-    borderColor: '#DFD5C3',
-  },
-  emptyTableContainer: {
-    paddingVertical: 32,
-    alignItems: 'center',
-    justifyContent: 'center',
-    width: '100%',
-  },
-  emptyTableText: {
-    fontSize: 12,
-    color: '#9E8D77',
-    marginTop: 6,
-    textAlign: 'center',
-    maxWidth: 420,
-  },
-
-  // ===== LOV MODALS =====
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.45)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 16,
-  },
-  lovModalCard: {
-    width: '92%',
-    maxWidth: 600,
-    maxHeight: '80%',
-    backgroundColor: '#FFFFFF',
-    borderRadius: 10,
-    overflow: 'hidden',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.15,
-    shadowRadius: 10,
-    elevation: 8,
-  },
-  modalHeaderBanner: {
-    backgroundColor: '#F5E7CA',
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    borderBottomWidth: 1,
-    borderBottomColor: '#E8DCB8',
-  },
-  modalHeaderTitle: {
-    fontSize: 13,
-    fontWeight: 'bold',
-    color: '#3B2D17',
-  },
-  closeModalBtn: {
-    padding: 4,
-  },
-  modalSearchBox: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#FCFAF6',
-    borderBottomWidth: 1,
-    borderBottomColor: '#E8DCB8',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-  },
-  modalSearchInput: {
-    flex: 1,
-    height: 30,
-    fontSize: 12,
-    color: '#3B2D17',
-  },
-  lovHeadRow: {
-    flexDirection: 'row',
-    backgroundColor: '#FAF5EA',
-    paddingHorizontal: 14,
-    paddingVertical: 6,
-    borderBottomWidth: 1,
-    borderBottomColor: '#E8DCB8',
-  },
-  lovHeadText: {
-    fontSize: 11,
-    fontWeight: 'bold',
-    color: '#7D5E19',
-    textTransform: 'uppercase',
-  },
-  lovItemRow: {
-    flexDirection: 'row',
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderBottomWidth: 1,
-    borderBottomColor: '#F5EFE6',
-  },
-  lovItemText: {
-    fontSize: 12,
-    color: '#3B2D17',
-  },
-
-  // Toasts
+  // ===== TOAST NOTIFICATION =====
   toast: {
     position: 'absolute',
-    top: 54,
-    alignSelf: 'center',
+    top: 56,
+    left: '25%',
+    right: '25%',
+    zIndex: 9999,
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 16,
+    paddingHorizontal: 14,
     paddingVertical: 8,
     borderRadius: 6,
-    elevation: 4,
+    elevation: 6,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.15,
     shadowRadius: 4,
-    zIndex: 9999,
   },
   toastSuccess: {
     backgroundColor: '#2E7D32',
   },
   toastError: {
-    backgroundColor: '#C62828',
+    backgroundColor: '#D32F2F',
+  },
+  toastWarning: {
+    backgroundColor: '#F57C00',
   },
   toastText: {
     color: '#FFFFFF',
     fontSize: 12,
     fontWeight: '600',
+    flex: 1,
+  },
+
+  // ===== MODAL STYLING =====
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 16,
+  },
+  lovModalCard: {
+    width: '100%',
+    maxWidth: 480,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#E8DCB8',
+    overflow: 'hidden',
+    elevation: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+    maxHeight: 460,
+  },
+  modalHeaderBanner: {
+    backgroundColor: '#F5E7CA',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E8DCB8',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  modalHeaderTitle: {
+    fontSize: 12,
+    fontWeight: 'bold',
+    color: '#3B2D17',
+  },
+  closeModalBtn: {
+    padding: 2,
+  },
+  modalSearchBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E8DCB8',
+    backgroundColor: '#FAF7F0',
+  },
+  modalSearchInput: {
+    flex: 1,
+    fontSize: 12,
+    color: '#2A1F10',
+    height: 26,
+    padding: 0,
+  },
+  lovHeadRow: {
+    flexDirection: 'row',
+    backgroundColor: '#F0E8D8',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E8DCB8',
+  },
+  lovHeadText: {
+    fontSize: 10,
+    fontWeight: 'bold',
+    color: '#6A5636',
+  },
+  lovItemRow: {
+    flexDirection: 'row',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F5EFE0',
+    alignItems: 'center',
+  },
+  lovItemText: {
+    fontSize: 11,
+    color: '#3B2D17',
   },
 });

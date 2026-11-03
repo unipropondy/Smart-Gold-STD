@@ -1,5 +1,5 @@
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
-import { Stack, useRouter } from 'expo-router';
+import { Stack, useRouter, useLocalSearchParams } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
@@ -33,6 +33,44 @@ interface TransactionRow {
 
 export default function GoldSchemeTransactionScreen() {
   const router = useRouter();
+  const params = useLocalSearchParams();
+
+  // Sync state from URL parameters when returning from Customer screen or Paying Mode Tender screen
+  useEffect(() => {
+    // If returning from Customer Details screen with selected or newly created customer
+    if (params.selectedCustomerCode) {
+      const code = String(params.selectedCustomerCode).trim();
+      setCustomerCode(code);
+      if (params.selectedCustomerName) setCustomerName(String(params.selectedCustomerName));
+      if (params.selectedAddress) setAddress1(String(params.selectedAddress));
+      fetchCustomerDetailsByCode(code);
+    }
+
+    // Preserve existing Scheme form state if passed back in params
+    if (params.prevSchemeCode) setSchemeCode(String(params.prevSchemeCode));
+    if (params.prevSchemeValue) setSchemeValue(String(params.prevSchemeValue));
+    if (params.prevMode) setMode(String(params.prevMode) as 'VALUE' | 'GRAM');
+    if (params.prevSalesmanCode) setSalesmanCode(String(params.prevSalesmanCode));
+    if (params.prevSalesmanName) setSalesmanName(String(params.prevSalesmanName));
+    if (params.prevSalesmanPassword) setSalesmanPassword(String(params.prevSalesmanPassword));
+
+    // If returning from Paying Mode Tender screen after successful payment
+    if (params.paymentSuccess === 'true') {
+      const savedInv = String(params.savedInvoiceNo || '');
+      const custC = String(params.savedCustomerCode || customerCode || '');
+      if (custC) {
+        fetchTransactionHistory(custC);
+      }
+      fetchNextSchemeNo();
+      // Reset scheme fields after successful transaction
+      setSchemeCode('');
+      setSchemeValue('');
+      const msg = savedInv 
+        ? `Scheme Transaction ${savedInv} saved successfully with payments!`
+        : 'Scheme Transaction and payments saved successfully!';
+      Platform.OS === 'web' ? window.alert(msg) : Alert.alert('Success', msg);
+    }
+  }, [params.selectedCustomerCode, params.paymentSuccess, params.savedInvoiceNo]);
 
   // Salesman State
   const [salesmanPassword, setSalesmanPassword] = useState('');
@@ -63,6 +101,8 @@ export default function GoldSchemeTransactionScreen() {
   const [schemeCode, setSchemeCode] = useState('');
   const [schemeValue, setSchemeValue] = useState('');
   const [mode, setMode] = useState<'VALUE' | 'GRAM'>('VALUE');
+  const [dailyRate, setDailyRate] = useState<number>(0);
+  const [fetchingDailyRate, setFetchingDailyRate] = useState<boolean>(false);
   const [schemeModalVisible, setSchemeModalVisible] = useState(false);
   const [schemeList, setSchemeList] = useState<SchemeMasterItem[]>([]);
   const [loadingSchemes, setLoadingSchemes] = useState(false);
@@ -77,28 +117,32 @@ export default function GoldSchemeTransactionScreen() {
   // Modal Visibility States
   const [customerModalVisible, setCustomerModalVisible] = useState(false);
   const [customerDetailsVisible, setCustomerDetailsVisible] = useState(false);
+  const [payingModalVisible, setPayingModalVisible] = useState(false);
+  const [payingModalTotal, setPayingModalTotal] = useState(0);
 
   // Customer Help Search Modal States (Image 1)
-  const [custSearchField, setCustSearchField] = useState<'CustomerName' | 'CustomerCode' | 'NricNo' | 'Address1'>('CustomerName');
+  const [custSearchField, setCustSearchField] = useState<'CustomerName' | 'CustomerCode' | 'NricNo'>('CustomerName');
   const [showCustFieldDropdown, setShowCustFieldDropdown] = useState(false);
   const [custSearchText, setCustSearchText] = useState('');
-  const [custSearchMode, setCustSearchMode] = useState<'Start' | 'End' | 'Any'>('Start');
+  const [custSearchMode, setCustSearchMode] = useState<'Start' | 'End' | 'Any'>('Any');
   const [customerSearchResults, setCustomerSearchResults] = useState<any[]>([]);
   const [custTotalRecords, setCustTotalRecords] = useState(0);
   const [loadingCustomerSearch, setLoadingCustomerSearch] = useState(false);
   const [selectedCustIndex, setSelectedCustIndex] = useState<number | null>(null);
 
   // Scheme Help Search Modal States (Image 3)
-  const [schemeSearchField, setSchemeSearchField] = useState<'Description' | 'Code' | 'Remarks' | 'CreateUser'>('Description');
+  const [schemeSearchField, setSchemeSearchField] = useState<'Code' | 'Description' | 'Remarks' | 'CreateUser'>('Code');
   const [showSchemeFieldDropdown, setShowSchemeFieldDropdown] = useState(false);
   const [schemeSearchText, setSchemeSearchText] = useState('');
-  const [schemeSearchMode, setSchemeSearchMode] = useState<'Start' | 'End' | 'Any'>('Start');
+  const [schemeSearchMode, setSchemeSearchMode] = useState<'Start' | 'End' | 'Any'>('Any');
   const [schemeTotalRecords, setSchemeTotalRecords] = useState(0);
   const [selectedSchemeIndex, setSelectedSchemeIndex] = useState<number | null>(null);
 
   // New / Edit Customer Details Screen Form States (Image 2)
   const [newCustCode, setNewCustCode] = useState('');
   const [newCustType, setNewCustType] = useState('DIAMOND');
+  const [showCustTypeDropdown, setShowCustTypeDropdown] = useState(false);
+  const [customerTypes, setCustomerTypes] = useState<string[]>(['DIAMOND', 'EMERALD', 'RUBY']);
   const [newCustName, setNewCustName] = useState('');
   const [newCustAddress, setNewCustAddress] = useState('');
   const [newCustCountry, setNewCustCountry] = useState('');
@@ -122,12 +166,79 @@ export default function GoldSchemeTransactionScreen() {
   const [newCustDoaYear, setNewCustDoaYear] = useState('');
   const [newCustActive, setNewCustActive] = useState(true);
   const [newCustContact, setNewCustContact] = useState<'SMS' | 'Phone' | 'None'>('None');
-  const [addKyc, setAddKyc] = useState(false);
-  const [showKyc, setShowKyc] = useState(false);
   const [savingCustomer, setSavingCustomer] = useState(false);
+  const [deletingCustomer, setDeletingCustomer] = useState(false);
+
+  // Customer caller tracker ('main' screen vs 'details' modal)
+  const [custSearchCaller, setCustSearchCaller] = useState<'main' | 'details'>('main');
+
+  // Customer Tabs States (Image 2: Sales Summary, Sales Detail, Customer Points)
+  const [custActiveTab, setCustActiveTab] = useState<'summary' | 'detail' | 'points'>('summary');
+  const [salesSummaryData, setSalesSummaryData] = useState<any[]>([]);
+  const [salesDetailData, setSalesDetailData] = useState<any[]>([]);
+  const [custPointsData, setCustPointsData] = useState<any[]>([]);
+  const [loadingCustTabs, setLoadingCustTabs] = useState(false);
+  const [custPointsSummary, setCustPointsSummary] = useState({ totalReward: 0, totalRedeemed: 0, balance: 0 });
+
+  // KYC States & Modals
+  const [addKycModalVisible, setAddKycModalVisible] = useState(false);
+  const [showKycModalVisible, setShowKycModalVisible] = useState(false);
+  const [kycData, setKycData] = useState<any>({
+    CustomerCode: '',
+    CustomerName: '',
+    NricNo: '',
+    PassportNo: '',
+    Nationality: '',
+    Address: '',
+    DOB: '',
+    CustomerImageName: '',
+    KycStatus: 'Pending',
+    Remarks: ''
+  });
+  const [savingKyc, setSavingKyc] = useState(false);
+
+  // Fetch Current Daily Rate from SQL Server backend
+  const fetchDailyRate = async () => {
+    setFetchingDailyRate(true);
+    try {
+      const res = await fetch(`${API_BASE_URL}/scheme/daily-rate`);
+      const json = await res.json();
+      if (json.success && json.dailyRate) {
+        setDailyRate(Number(json.dailyRate));
+      }
+    } catch (err) {
+      console.error('Error fetching daily rate:', err);
+    } finally {
+      setFetchingDailyRate(false);
+    }
+  };
+
+  // Fetch Next Scheme Number
+  const fetchNextSchemeNo = async () => {
+    setFetchingSchemeNo(true);
+    try {
+      const res = await fetch(`${API_BASE_URL}/scheme/next-number`);
+      const json = await res.json();
+      if (json.success && json.schemeNo) {
+        setSchemeNo(json.schemeNo);
+      }
+    } catch (err) {
+      console.error('Error fetching next scheme no:', err);
+    } finally {
+      setFetchingSchemeNo(false);
+    }
+  };
+
+  // Initial Load: Fetch Next Scheme Number, Daily Rate, and Customer Types
+  useEffect(() => {
+    fetchNextSchemeNo();
+    fetchDailyRate();
+    fetchCustomerTypes();
+  }, []);
 
   // Open Customer Help Search Modal (Image 1)
   const handleOpenCustomerModal = async () => {
+    setCustSearchCaller('main');
     setCustomerModalVisible(true);
     fetchCustomerSearchResults('CustomerName', custSearchText, custSearchMode);
   };
@@ -157,10 +268,14 @@ export default function GoldSchemeTransactionScreen() {
 
   // Customer Row Selected from Search Modal
   const handleSelectCustomerRow = (custRow: any) => {
-    const code = custRow.CustomerCode;
+    const code = (custRow.CustomerCode || '').trim();
     setCustomerModalVisible(false);
-    setCustomerCode(code);
-    fetchCustomerDetailsByCode(code);
+    if (custSearchCaller === 'details') {
+      loadCustomerIntoDetailsForm(code);
+    } else {
+      setCustomerCode(code);
+      fetchCustomerDetailsByCode(code);
+    }
   };
 
   // Fetch Customer Details By Code
@@ -192,7 +307,7 @@ export default function GoldSchemeTransactionScreen() {
   // Open Scheme Lookup Modal (Image 3)
   const handleOpenSchemeModal = async () => {
     setSchemeModalVisible(true);
-    fetchSchemeSearchResults('Description', schemeSearchText, schemeSearchMode);
+    fetchSchemeSearchResults(schemeSearchField, schemeSearchText, schemeSearchMode);
   };
 
   // Fetch Scheme Search API
@@ -225,38 +340,153 @@ export default function GoldSchemeTransactionScreen() {
     setSchemeModalVisible(false);
   };
 
-  // Open New Customer Creation Screen / Modal (Image 2)
-  const handleOpenNewCustomer = () => {
-    setNewCustCode('');
-    setNewCustType('DIAMOND');
-    setNewCustName('');
-    setNewCustAddress('');
-    setNewCustCountry('');
-    setNewCustPostalCode('');
-    setNewCustNationality('');
-    setNewCustGender('Male');
-    setNewCustNric('');
-    setNewCustRemarks('');
-    setNewCustPassport('');
-    setNewCustPhone1('');
-    setNewCustPhone2('');
-    setNewCustMobile('');
-    setNewCustFax('');
-    setNewCustEmail('');
-    setNewCustReligion('');
-    setNewCustDobDay('');
-    setNewCustDobMonth('');
-    setNewCustDobYear('');
-    setNewCustDoaDay('');
-    setNewCustDoaMonth('');
-    setNewCustDoaYear('');
-    setNewCustActive(true);
-    setNewCustContact('None');
-    setCustomerDetailsVisible(true);
+  // Fetch actual Customer Types from SQL Server
+  const fetchCustomerTypes = async () => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/customer/types`);
+      const json = await res.json();
+      if (json.success && Array.isArray(json.data) && json.data.length > 0) {
+        setCustomerTypes(json.data);
+      }
+    } catch (err) {
+      console.warn('Error fetching customer types:', err);
+    }
   };
 
-  // Save New Customer to SQL Database
-  const handleSaveNewCustomer = async () => {
+  // Fetch next Customer Code from SQL Server
+  const fetchNextCustomerCode = async () => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/customer/next-code`);
+      const json = await res.json();
+      if (json.success && json.nextCode) {
+        return json.nextCode;
+      }
+    } catch (err) {
+      console.warn('Error fetching next customer code:', err);
+    }
+    return '';
+  };
+
+  // Fetch Sales Summary, Sales Detail, and Points for Customer Details tabs
+  const fetchCustTabsData = async (code: string) => {
+    if (!code) {
+      setSalesSummaryData([]);
+      setSalesDetailData([]);
+      setCustPointsData([]);
+      return;
+    }
+    setLoadingCustTabs(true);
+    try {
+      const enc = encodeURIComponent(code.trim());
+      const [sumRes, detRes, ptsRes] = await Promise.all([
+        fetch(`${API_BASE_URL}/customer/${enc}/sales-summary`),
+        fetch(`${API_BASE_URL}/customer/${enc}/sales-detail`),
+        fetch(`${API_BASE_URL}/customer/${enc}/points`)
+      ]);
+      const sumJson = await sumRes.json();
+      const detJson = await detRes.json();
+      const ptsJson = await ptsRes.json();
+
+      setSalesSummaryData(sumJson.success && Array.isArray(sumJson.data) ? sumJson.data : []);
+      setSalesDetailData(detJson.success && Array.isArray(detJson.data) ? detJson.data : []);
+      setCustPointsData(ptsJson.success && Array.isArray(ptsJson.data) ? ptsJson.data : []);
+    } catch (err) {
+      console.warn('Error fetching tab data:', err);
+      setSalesSummaryData([]);
+      setSalesDetailData([]);
+      setCustPointsData([]);
+    } finally {
+      setLoadingCustTabs(false);
+    }
+  };
+
+  // Load customer into Customer Details modal form
+  const loadCustomerIntoDetailsForm = async (codeOrCust: any) => {
+    const code = typeof codeOrCust === 'string' ? codeOrCust.trim() : (codeOrCust?.CustomerCode || '').trim();
+    if (!code) return;
+
+    try {
+      const res = await fetch(`${API_BASE_URL}/customer/${encodeURIComponent(code)}`);
+      const json = await res.json();
+      if (json.success && json.data) {
+        const d = json.data;
+        setNewCustCode(d.CustomerCode || '');
+        setNewCustType(d.CustomerType || 'DIAMOND');
+        setNewCustName(d.CustomerName || '');
+        setNewCustAddress(d.Address1 || '');
+        setNewCustCountry(d.Address2 || '');
+        setNewCustPostalCode(d.Address3 || '');
+        setNewCustNationality(d.Address4 || '');
+        setNewCustGender(d.Gender === 'F' ? 'Female' : 'Male');
+        setNewCustNric(d.NricNo || '');
+        setNewCustRemarks(d.Remarks || '');
+        setNewCustPassport(d.PassportNo || '');
+        setNewCustPhone1(d.Phone1 || '');
+        setNewCustPhone2(d.Phone2 || '');
+        setNewCustMobile(d.Mobile || '');
+        setNewCustFax(d.Fax || '');
+        setNewCustEmail(d.eMail || '');
+        setNewCustReligion(d.DateType || '');
+        
+        // DOB
+        if (d.DOB) {
+          const parts = d.DOB.split('-');
+          setNewCustDobYear(parts[0] || '');
+          setNewCustDobMonth(parts[1] || '');
+          setNewCustDobDay(parts[2] || '');
+        } else {
+          setNewCustDobYear('');
+          setNewCustDobMonth('');
+          setNewCustDobDay('');
+        }
+
+        // DOA
+        if (d.DOA) {
+          const parts = d.DOA.split('-');
+          setNewCustDoaYear(parts[0] || '');
+          setNewCustDoaMonth(parts[1] || '');
+          setNewCustDoaDay(parts[2] || '');
+        } else {
+          setNewCustDoaYear('');
+          setNewCustDoaMonth('');
+          setNewCustDoaDay('');
+        }
+
+        setNewCustActive(d.GLAccount1 !== 'N');
+        setNewCustContact(d.AccountType === 'S' ? 'SMS' : d.AccountType === 'P' ? 'Phone' : 'None');
+
+        setCustPointsSummary({
+          totalReward: d.TotalRewardPoints || 0,
+          totalRedeemed: d.TotalRedeemedPoints || 0,
+          balance: d.BalancePoints || 0
+        });
+
+        // Fetch tab data for this customer
+        fetchCustTabsData(d.CustomerCode);
+      }
+    } catch (err) {
+      console.error('Error loading customer into details form:', err);
+    }
+  };
+
+  // Navigate to existing Customer Details Full Screen (/customer)
+  const handleOpenNewCustomer = () => {
+    router.push({
+      pathname: '/customer' as any,
+      params: {
+        returnPath: '/utility/gold-scheme-transaction',
+        prevSchemeCode: schemeCode,
+        prevSchemeValue: schemeValue,
+        prevMode: mode,
+        prevSalesmanCode: salesmanCode,
+        prevSalesmanName: salesmanName,
+        prevSalesmanPassword: salesmanPassword,
+      }
+    });
+  };
+
+  // Save Customer to SQL Database (Insert or Update)
+  const handleSaveCustomer = async () => {
     if (!newCustCode.trim()) {
       const msg = 'Please enter Customer Code.';
       Platform.OS === 'web' ? window.alert(msg) : Alert.alert('Validation Error', msg);
@@ -264,6 +494,11 @@ export default function GoldSchemeTransactionScreen() {
     }
     if (!newCustName.trim()) {
       const msg = 'Please enter Customer Name.';
+      Platform.OS === 'web' ? window.alert(msg) : Alert.alert('Validation Error', msg);
+      return;
+    }
+    if (!newCustType.trim()) {
+      const msg = 'Please select Customer Type.';
       Platform.OS === 'web' ? window.alert(msg) : Alert.alert('Validation Error', msg);
       return;
     }
@@ -282,7 +517,7 @@ export default function GoldSchemeTransactionScreen() {
       const payload = {
         CustomerCode: newCustCode.trim(),
         CustomerName: newCustName.trim(),
-        CustomerType: newCustType,
+        CustomerType: newCustType.trim(),
         Address1: newCustAddress.trim(),
         Address2: newCustCountry.trim(),
         Address3: newCustPostalCode.trim(),
@@ -311,31 +546,148 @@ export default function GoldSchemeTransactionScreen() {
       const json = await res.json();
 
       if (json.success) {
-        const msg = 'Customer created successfully!';
+        const msg = json.message || 'Customer saved successfully!';
         Platform.OS === 'web' ? window.alert(msg) : Alert.alert('Success', msg);
-        setCustomerDetailsVisible(false);
 
-        // Auto populate created customer in scheme transaction screen
-        const createdCode = newCustCode.trim();
-        setCustomerCode(createdCode);
-        fetchCustomerDetailsByCode(createdCode);
+        // Fetch saved customer from SQL Server to display exact saved details
+        const savedCode = newCustCode.trim();
+        await loadCustomerIntoDetailsForm(savedCode);
+
+        // Automatically close Customer Details modal and populate main Gold Scheme Transaction screen
+        setCustomerDetailsVisible(false);
+        setCustomerCode(savedCode);
+        fetchCustomerDetailsByCode(savedCode);
       } else {
-        const msg = json.message || 'Failed to create customer.';
+        const msg = json.message || 'Failed to save customer.';
         Platform.OS === 'web' ? window.alert(msg) : Alert.alert('Error', msg);
       }
     } catch (err) {
       console.error('Error saving customer:', err);
       const msg = 'Unable to connect to server.';
-      Platform.OS === 'web' ? window.alert(msg) : Alert.alert('Error', msg);
+      Platform.OS === 'web' ? window.alert(msg) : Alert.alert('Network Error', msg);
     } finally {
       setSavingCustomer(false);
     }
   };
 
-  // Initial Load: Fetch Next Scheme Number
-  useEffect(() => {
-    fetchNextSchemeNo();
-  }, []);
+  // Delete Customer from SQL Server
+  const handleDeleteCustomer = () => {
+    if (!newCustCode.trim()) {
+      const msg = 'No customer selected to delete.';
+      Platform.OS === 'web' ? window.alert(msg) : Alert.alert('Warning', msg);
+      return;
+    }
+
+    const doDelete = async () => {
+      setDeletingCustomer(true);
+      try {
+        const res = await fetch(`${API_BASE_URL}/customer/${encodeURIComponent(newCustCode.trim())}`, {
+          method: 'DELETE'
+        });
+        const json = await res.json();
+        if (json.success) {
+          const msg = 'Customer deleted successfully.';
+          Platform.OS === 'web' ? window.alert(msg) : Alert.alert('Success', msg);
+          handleOpenNewCustomer();
+        } else {
+          const msg = json.message || 'Failed to delete customer.';
+          Platform.OS === 'web' ? window.alert(msg) : Alert.alert('Cannot Delete', msg);
+        }
+      } catch (err) {
+        console.error('Delete customer error:', err);
+        const msg = 'Error connecting to server to delete customer.';
+        Platform.OS === 'web' ? window.alert(msg) : Alert.alert('Error', msg);
+      } finally {
+        setDeletingCustomer(false);
+      }
+    };
+
+    if (Platform.OS === 'web') {
+      if (window.confirm(`Are you sure you want to delete customer ${newCustCode}?`)) {
+        doDelete();
+      }
+    } else {
+      Alert.alert(
+        'Confirm Delete',
+        `Are you sure you want to delete customer ${newCustCode}?`,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Delete', style: 'destructive', onPress: doDelete }
+        ]
+      );
+    }
+  };
+
+  // KYC Actions
+  const handleOpenAddKycModal = () => {
+    if (!newCustCode.trim()) {
+      const msg = 'Please select or save a customer first.';
+      Platform.OS === 'web' ? window.alert(msg) : Alert.alert('Notice', msg);
+      return;
+    }
+    setKycData({
+      CustomerCode: newCustCode,
+      CustomerName: newCustName,
+      NricNo: newCustNric,
+      PassportNo: newCustPassport,
+      Nationality: newCustNationality,
+      Address: [newCustAddress, newCustCountry, newCustPostalCode].filter(Boolean).join(', '),
+      DOB: (newCustDobYear && newCustDobMonth && newCustDobDay) ? `${newCustDobYear}-${newCustDobMonth}-${newCustDobDay}` : '',
+      CustomerImageName: '',
+      KycStatus: (newCustNric || newCustPassport) ? 'Verified' : 'Pending',
+      Remarks: newCustRemarks
+    });
+    setAddKycModalVisible(true);
+  };
+
+  const handleSaveKycDetails = async () => {
+    setSavingKyc(true);
+    try {
+      const res = await fetch(`${API_BASE_URL}/customer/${encodeURIComponent(newCustCode.trim())}/kyc`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(kycData)
+      });
+      const json = await res.json();
+      if (json.success) {
+        const msg = 'KYC details saved successfully.';
+        Platform.OS === 'web' ? window.alert(msg) : Alert.alert('Success', msg);
+        setAddKycModalVisible(false);
+        // Refresh customer form
+        loadCustomerIntoDetailsForm(newCustCode);
+      } else {
+        const msg = json.message || 'Failed to save KYC.';
+        Platform.OS === 'web' ? window.alert(msg) : Alert.alert('Error', msg);
+      }
+    } catch (err) {
+      console.error('Error saving KYC:', err);
+      const msg = 'Error connecting to server.';
+      Platform.OS === 'web' ? window.alert(msg) : Alert.alert('Error', msg);
+    } finally {
+      setSavingKyc(false);
+    }
+  };
+
+  const handleOpenShowKycModal = async () => {
+    if (!newCustCode.trim()) {
+      const msg = 'Please select or save a customer first.';
+      Platform.OS === 'web' ? window.alert(msg) : Alert.alert('Notice', msg);
+      return;
+    }
+    try {
+      const res = await fetch(`${API_BASE_URL}/customer/${encodeURIComponent(newCustCode.trim())}/kyc`);
+      const json = await res.json();
+      if (json.success && json.data) {
+        setKycData(json.data);
+        setShowKycModalVisible(true);
+      } else {
+        const msg = json.message || 'Customer KYC record not found.';
+        Platform.OS === 'web' ? window.alert(msg) : Alert.alert('Notice', msg);
+      }
+    } catch (err) {
+      console.error('Error loading KYC:', err);
+    }
+  };
 
   // Keyboard Shortcuts Listener for Web (F6, F7, F9, F10, Esc)
   useEffect(() => {
@@ -362,22 +714,6 @@ export default function GoldSchemeTransactionScreen() {
       return () => window.removeEventListener('keydown', handleKeyDown);
     }
   }, [salesmanCode, customerCode, schemeCode, schemeValue, mode, schemeNo]);
-
-  // Fetch Next Scheme Number
-  const fetchNextSchemeNo = async () => {
-    setFetchingSchemeNo(true);
-    try {
-      const res = await fetch(`${API_BASE_URL}/scheme/next-number`);
-      const json = await res.json();
-      if (json.success && json.schemeNo) {
-        setSchemeNo(json.schemeNo);
-      }
-    } catch (err) {
-      console.error('Error fetching next scheme no:', err);
-    } finally {
-      setFetchingSchemeNo(false);
-    }
-  };
 
   // Validate Salesman Password
   const handleValidateSalesman = async () => {
@@ -491,9 +827,10 @@ export default function GoldSchemeTransactionScreen() {
     setMode('VALUE');
     setTransactions([]);
     fetchNextSchemeNo();
+    fetchDailyRate();
   };
 
-  // Save Transaction (F7)
+  // Save Transaction (F7) -> Navigates to existing Paying Mode Tender Full Screen (/payingmode)
   const handleSave = async () => {
     if (!salesmanCode) {
       const msg = 'Please validate Sales Man password first.';
@@ -511,6 +848,57 @@ export default function GoldSchemeTransactionScreen() {
       return;
     }
 
+    const valNum = parseFloat(schemeValue) || 0;
+    if (valNum <= 0) {
+      const msg = 'Scheme Value must be greater than zero.';
+      Platform.OS === 'web' ? window.alert(msg) : Alert.alert('Validation Error', msg);
+      return;
+    }
+
+    // Calculate total net payment required
+    let totalNet = valNum;
+    if (mode === 'GRAM' && dailyRate > 0) {
+      totalNet = parseFloat((valNum * dailyRate).toFixed(2));
+    }
+
+    // Construct transaction payload for /api/scheme/transaction
+    const schemePayload = {
+      customerCode: customerCode.trim(),
+      customerName,
+      customerType,
+      salesmanCode,
+      schemeCode: schemeCode.trim(),
+      schemeValue: schemeValue.trim(),
+      mode,
+      dailyRate: Number(dailyRate) || 0,
+      totalNet,
+      schemeNo
+    };
+
+    router.push({
+      pathname: '/payingmode' as any,
+      params: {
+        totalNet: String(totalNet),
+        customerCode: customerCode.trim(),
+        customerType: customerType || '',
+        apiEndpoint: `${API_BASE_URL}/scheme/transaction`,
+        payload: JSON.stringify(schemePayload),
+        returnPath: '/utility/gold-scheme-transaction',
+        prevSchemeCode: schemeCode,
+        prevSchemeValue: schemeValue,
+        prevMode: mode,
+        prevSalesmanCode: salesmanCode,
+        prevSalesmanName: salesmanName,
+        prevSalesmanPassword: salesmanPassword,
+      }
+    });
+  };
+
+  // Called when user clicks Save(F7) in Paying Mode modal
+  const handleConfirmPayingModeSave = async (
+    payments: Array<{ paymode: string; amount: number; slipNo: string; commission: number }>,
+    summary: { total: number; paid: number; balance: number; commission: number; returnAmt: number }
+  ) => {
     setSaving(true);
     try {
       const payload = {
@@ -521,8 +909,17 @@ export default function GoldSchemeTransactionScreen() {
         schemeCode: schemeCode.trim(),
         schemeValue: schemeValue.trim(),
         mode,
-        paymentMode: 'CASH',
-        paymentAmount: parseFloat(schemeValue) || 0,
+        dailyRate: Number(dailyRate) || 0,
+        payments: payments.map(p => ({
+          paymode: p.paymode,
+          amount: p.amount,
+          slipNo: p.slipNo,
+          commission: p.commission
+        })),
+        totalNet: summary.total,
+        paidAmount: summary.paid,
+        returnAmount: summary.returnAmt,
+        commission: summary.commission
       };
 
       const res = await fetch(`${API_BASE_URL}/scheme/transaction`, {
@@ -533,16 +930,20 @@ export default function GoldSchemeTransactionScreen() {
       const json = await res.json();
 
       if (json.success) {
+        setPayingModalVisible(false);
         const msg = json.message || 'Scheme Transaction saved successfully!';
         Platform.OS === 'web' ? window.alert(msg) : Alert.alert('Success', msg);
         fetchTransactionHistory(customerCode);
         fetchNextSchemeNo();
+        // Reset scheme input fields after successful transaction
+        setSchemeCode('');
+        setSchemeValue('');
       } else {
         const msg = json.message || 'Failed to save Scheme Transaction.';
         Platform.OS === 'web' ? window.alert(msg) : Alert.alert('Error', msg);
       }
     } catch (err) {
-      console.error('Error saving scheme transaction:', err);
+      console.error('Error saving scheme transaction with paying modes:', err);
       const msg = 'Unable to connect to server.';
       Platform.OS === 'web' ? window.alert(msg) : Alert.alert('Error', msg);
     } finally {
@@ -825,20 +1226,34 @@ export default function GoldSchemeTransactionScreen() {
                 </View>
 
                 {/* Mode: By Value / By Gram */}
-                <View style={styles.radioContainerBox}>
-                  <TouchableOpacity style={styles.radioButton} onPress={() => setMode('VALUE')}>
+                <View style={[styles.radioContainerBox, { marginRight: 16 }]}>
+                  <TouchableOpacity style={styles.radioButton} onPress={() => { setMode('VALUE'); fetchDailyRate(); }}>
                     <View style={[styles.radioOuter, mode === 'VALUE' && styles.radioOuterSelected]}>
                       {mode === 'VALUE' && <View style={styles.radioInner} />}
                     </View>
                     <Text style={styles.radioText}>By Value</Text>
                   </TouchableOpacity>
 
-                  <TouchableOpacity style={styles.radioButton} onPress={() => setMode('GRAM')}>
+                  <TouchableOpacity style={styles.radioButton} onPress={() => { setMode('GRAM'); fetchDailyRate(); }}>
                     <View style={[styles.radioOuter, mode === 'GRAM' && styles.radioOuterSelected]}>
                       {mode === 'GRAM' && <View style={styles.radioInner} />}
                     </View>
                     <Text style={styles.radioText}>By Gram</Text>
                   </TouchableOpacity>
+                </View>
+
+                {/* Daily Rate Display Box (Applicable for both By Value & By Gram) */}
+                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                  <Text style={styles.schemeLabel}>Daily Rate</Text>
+                  <View style={[styles.readOnlyBox, { width: 110, height: 32, marginLeft: 8, justifyContent: 'center' }]}>
+                    {fetchingDailyRate ? (
+                      <ActivityIndicator size="small" color="#9E6D08" />
+                    ) : (
+                      <Text style={[styles.readOnlyText, { fontWeight: '700', color: '#9E6D08' }]}>
+                        {dailyRate > 0 ? Number(dailyRate).toFixed(2) : '0.00'}
+                      </Text>
+                    )}
+                  </View>
                 </View>
 
               </View>
@@ -918,49 +1333,42 @@ export default function GoldSchemeTransactionScreen() {
       </ScrollView>
 
       {/* ========================================================= */}
-      {/* 1. CUSTOMER SEARCH HELP SEARCH MODAL (EXACT MATCH IMAGE 1) */}
+      {/* 1. CUSTOMER SEARCH HELP SEARCH MODAL */}
       {/* ========================================================= */}
       <Modal visible={customerModalVisible} transparent animationType="fade" onRequestClose={() => setCustomerModalVisible(false)}>
         <View style={styles.legacyModalOverlay}>
-          <View style={styles.legacyModalContainer}>
+          <View style={[styles.legacyModalContainer, { width: Platform.OS === 'web' ? 760 : '96%' }]}>
             
-            {/* Modal Title & Close */}
-            <View style={styles.legacyModalHeader}>
+            {/* Header: Icon & Close Only (Heading text removed) */}
+            <View style={[styles.legacyModalHeader, { height: 40 }]}>
               <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                <MaterialCommunityIcons name="card-search-outline" size={18} color="#000" style={{ marginRight: 6 }} />
-                <Text style={styles.legacyModalTitle}>Help Search</Text>
+                <MaterialCommunityIcons name="card-search-outline" size={20} color="#9E6D08" />
               </View>
+              <Text style={styles.legacyRecordCountText}>
+                <Text style={{ color: '#DC2626', fontWeight: 'bold' }}>{custTotalRecords}</Text> Records Found
+              </Text>
               <TouchableOpacity onPress={() => setCustomerModalVisible(false)} style={styles.legacyModalCloseBtn}>
                 <Ionicons name="close" size={16} color="#333" />
               </TouchableOpacity>
             </View>
 
-            {/* SubHeader Search Controls */}
-            <View style={styles.legacySearchControlArea}>
-              
-              <View style={styles.legacyTopMetaRow}>
-                <Text style={styles.legacySearchByText}>Search By...</Text>
-                <Text style={styles.legacyRecordCountText}>
-                  <Text style={{ color: 'red', fontWeight: 'bold' }}>{custTotalRecords}</Text> Records Found
-                </Text>
-              </View>
-
-              {/* Search Field Dropdown & Radio Options */}
-              <View style={[styles.legacyOptionsRow, { zIndex: 10 }]}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', zIndex: 10 }}>
-                  <Text style={styles.legacyLabelText}>Search Field </Text>
+            {/* Clean compact search bar with Dropdown, Input, and Search Button */}
+            <View style={[styles.legacySearchControlArea, { paddingVertical: 10 }]}>
+              <View style={[styles.legacySearchBoxRow, { zIndex: 50 }]}>
+                {/* Search Field Dropdown (CustomerName, CustomerCode, NricNo) */}
+                <View style={{ position: 'relative', zIndex: 60, marginRight: 8 }}>
                   <TouchableOpacity 
-                    style={styles.legacyDropdownSelect} 
+                    style={[styles.legacyDropdownSelect, { height: 34, minWidth: 130 }]} 
                     onPress={() => setShowCustFieldDropdown(!showCustFieldDropdown)}
                   >
                     <Text style={styles.legacyDropdownText}>{custSearchField}</Text>
                     <Ionicons name="caret-down" size={12} color="#000" style={{ marginLeft: 4 }} />
                   </TouchableOpacity>
 
-                  {/* Dropdown Options Menu */}
+                  {/* Dropdown Options Menu: exactly CustomerName, CustomerCode, NricNo */}
                   {showCustFieldDropdown && (
-                    <View style={styles.dropdownMenuOverlay}>
-                      {(['CustomerName', 'CustomerCode', 'NricNo', 'Address1'] as const).map((field) => (
+                    <View style={[styles.dropdownMenuOverlay, { top: 38, left: 0, minWidth: 130, zIndex: 100 }]}>
+                      {(['CustomerName', 'CustomerCode', 'NricNo'] as const).map((field) => (
                         <TouchableOpacity
                           key={field}
                           style={[styles.dropdownMenuItem, custSearchField === field && styles.dropdownMenuItemActive]}
@@ -979,78 +1387,79 @@ export default function GoldSchemeTransactionScreen() {
                   )}
                 </View>
 
-                {/* Radio Modes: Start, End, Any */}
-                <View style={{ flexDirection: 'row', alignItems: 'center', marginLeft: 16 }}>
-                  <TouchableOpacity style={styles.legacyRadioOption} onPress={() => { setCustSearchMode('Start'); fetchCustomerSearchResults(custSearchField, custSearchText, 'Start'); }}>
-                    <View style={[styles.legacyRadioCircle, custSearchMode === 'Start' && styles.legacyRadioSelected]} />
-                    <Text style={styles.legacyRadioLabel}>Start</Text>
-                  </TouchableOpacity>
+                {/* Search Input */}
+                <TextInput
+                  style={[styles.legacySearchTextInput, { height: 34 }]}
+                  placeholder={`Search ${custSearchField}...`}
+                  placeholderTextColor="#94A3B8"
+                  value={custSearchText}
+                  onChangeText={(text) => {
+                    setCustSearchText(text);
+                    fetchCustomerSearchResults(custSearchField, text, custSearchMode);
+                  }}
+                  onSubmitEditing={() => fetchCustomerSearchResults(custSearchField, custSearchText, custSearchMode)}
+                />
 
-                  <TouchableOpacity style={styles.legacyRadioOption} onPress={() => { setCustSearchMode('End'); fetchCustomerSearchResults(custSearchField, custSearchText, 'End'); }}>
-                    <View style={[styles.legacyRadioCircle, custSearchMode === 'End' && styles.legacyRadioSelected]} />
-                    <Text style={styles.legacyRadioLabel}>End</Text>
-                  </TouchableOpacity>
-
-                  <TouchableOpacity style={styles.legacyRadioOption} onPress={() => { setCustSearchMode('Any'); fetchCustomerSearchResults(custSearchField, custSearchText, 'Any'); }}>
-                    <View style={[styles.legacyRadioCircle, custSearchMode === 'Any' && styles.legacyRadioSelected]} />
-                    <Text style={styles.legacyRadioLabel}>Any</Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-
-              {/* Search Field Title & Search Text Box */}
-              <View style={styles.legacyInputSection}>
-                <Text style={styles.legacySearchFieldColumnTitle}>{custSearchField}</Text>
-                <View style={styles.legacySearchBoxRow}>
-                  <TextInput
-                    style={styles.legacySearchTextInput}
-                    placeholder="Enter search text..."
-                    value={custSearchText}
-                    onChangeText={(text) => {
-                      setCustSearchText(text);
-                      fetchCustomerSearchResults(custSearchField, text, custSearchMode);
-                    }}
-                  />
-                  <TouchableOpacity style={styles.legacySearchExecuteBtn} onPress={() => fetchCustomerSearchResults(custSearchField, custSearchText, custSearchMode)}>
-                    <Text style={styles.legacySearchExecuteBtnText}>Search</Text>
-                  </TouchableOpacity>
-                </View>
+                {/* Search Button */}
+                <TouchableOpacity 
+                  style={[styles.legacySearchExecuteBtn, { height: 34 }]} 
+                  onPress={() => fetchCustomerSearchResults(custSearchField, custSearchText, custSearchMode)}
+                >
+                  <Ionicons name="search" size={14} color="#FFFFFF" style={{ marginRight: 4 }} />
+                  <Text style={styles.legacySearchExecuteBtnText}>Search</Text>
+                </TouchableOpacity>
               </View>
             </View>
 
-            {/* Customer Results Grid / Table */}
+            {/* Customer Results Grid / Table with Fixed Headers and Exactly Matching Widths */}
             <View style={styles.legacyGridWrapper}>
+              {/* Fixed Header Row */}
               <View style={styles.legacyGridHeaderRow}>
                 <Text style={[styles.legacyGridTh, { width: 140 }]}>CustomerCode</Text>
                 <Text style={[styles.legacyGridTh, { width: 220 }]}>CustomerName</Text>
-                <Text style={[styles.legacyGridTh, { width: 100 }]}>NricNo</Text>
-                <Text style={[styles.legacyGridTh, { flex: 1, minWidth: 160 }]}>Address1</Text>
+                <Text style={[styles.legacyGridTh, { width: 120 }]}>NricNo</Text>
+                <Text style={[styles.legacyGridTh, { flex: 1, minWidth: 180 }]}>Address1</Text>
               </View>
 
               {loadingCustomerSearch ? (
-                <View style={{ padding: 20, alignItems: 'center' }}>
-                  <ActivityIndicator size="small" color="#0000FF" />
+                <View style={{ padding: 24, alignItems: 'center' }}>
+                  <ActivityIndicator size="small" color="#9E6D08" />
+                  <Text style={{ fontSize: 12, color: '#8F7E66', marginTop: 8 }}>Loading customers...</Text>
                 </View>
               ) : (
-                <ScrollView style={{ maxHeight: 320 }}>
-                  {customerSearchResults.map((row, index) => {
-                    const isSelected = selectedCustIndex === index;
-                    return (
-                      <TouchableOpacity
-                        key={index}
-                        style={[styles.legacyGridDataRow, isSelected && styles.legacyRowHighlight]}
-                        onPress={() => {
-                          setSelectedCustIndex(index);
-                          handleSelectCustomerRow(row);
-                        }}
-                      >
-                        <Text style={[styles.legacyGridTd, { width: 140, fontWeight: 'bold' }]}>{row.CustomerCode}</Text>
-                        <Text style={[styles.legacyGridTd, { width: 220 }]}>{row.CustomerName}</Text>
-                        <Text style={[styles.legacyGridTd, { width: 100 }]}>{row.NricNo || ''}</Text>
-                        <Text style={[styles.legacyGridTd, { flex: 1, minWidth: 160 }]}>{row.Address1 || ''}</Text>
-                      </TouchableOpacity>
-                    );
-                  })}
+                <ScrollView style={{ maxHeight: 340 }}>
+                  {customerSearchResults.length > 0 ? (
+                    customerSearchResults.map((row, index) => {
+                      const isSelected = selectedCustIndex === index;
+                      return (
+                        <TouchableOpacity
+                          key={index}
+                          style={[styles.legacyGridDataRow, isSelected && styles.legacyRowHighlight]}
+                          onPress={() => {
+                            setSelectedCustIndex(index);
+                            handleSelectCustomerRow(row);
+                          }}
+                        >
+                          <Text style={[styles.legacyGridTd, { width: 140, fontWeight: '700', color: '#9E6D08' }]}>
+                            {row.CustomerCode}
+                          </Text>
+                          <Text style={[styles.legacyGridTd, { width: 220, flexWrap: 'wrap' }]}>
+                            {row.CustomerName}
+                          </Text>
+                          <Text style={[styles.legacyGridTd, { width: 120, flexWrap: 'wrap' }]}>
+                            {row.NricNo || ''}
+                          </Text>
+                          <Text style={[styles.legacyGridTd, { flex: 1, minWidth: 180, flexWrap: 'wrap' }]}>
+                            {row.Address1 || ''}
+                          </Text>
+                        </TouchableOpacity>
+                      );
+                    })
+                  ) : (
+                    <View style={{ padding: 24, alignItems: 'center' }}>
+                      <Text style={{ fontSize: 12, color: '#8F7E66' }}>No matching customer records found</Text>
+                    </View>
+                  )}
                 </ScrollView>
               )}
             </View>
@@ -1059,305 +1468,6 @@ export default function GoldSchemeTransactionScreen() {
         </View>
       </Modal>
 
-      {/* ========================================================= */}
-      {/* 2. CUSTOMER DETAILS / NEW CUSTOMER SCREEN (EXACT MATCH IMAGE 2) */}
-      {/* ========================================================= */}
-      <Modal visible={customerDetailsVisible} transparent animationType="slide" onRequestClose={() => setCustomerDetailsVisible(false)}>
-        <View style={styles.custDetailsOverlay}>
-          <View style={styles.custDetailsWindow}>
-            
-            {/* Logo & Header Info */}
-            <View style={styles.custDetailsTopHeader}>
-              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                <View style={styles.goldDiamondLogo}>
-                  <Text style={styles.goldDiamondLogoText}>g</Text>
-                </View>
-                <View style={{ marginLeft: 8 }}>
-                  <Text style={styles.smartGoldBrandText}>smart</Text>
-                  <Text style={styles.goldBrandText}>GOLD</Text>
-                </View>
-              </View>
-
-              <View style={styles.custDetailsPointsSummary}>
-                <View style={styles.pointSummaryRow}><Text style={styles.pointLabel}>Total Points</Text><Text style={styles.pointValRed}>0</Text></View>
-                <View style={styles.pointSummaryRow}><Text style={styles.pointLabel}>Redeemed Points</Text><Text style={styles.pointValRed}>0</Text></View>
-                <View style={styles.pointSummaryRow}><Text style={styles.pointLabel}>Balance Points</Text><Text style={styles.pointValRed}>0</Text></View>
-              </View>
-            </View>
-
-            <ScrollView style={{ flex: 1, padding: 10 }}>
-              
-              {/* Customer Details Form Frame */}
-              <View style={styles.custDetailsFrame}>
-                <Text style={styles.custDetailsFrameTitle}>Customer Details</Text>
-                
-                <View style={styles.custDetailsTwoColumnGrid}>
-                  
-                  {/* Left Column Fields */}
-                  <View style={styles.custDetailsCol}>
-                    
-                    {/* Customer Code */}
-                    <View style={styles.custDetailsFormRow}>
-                      <Text style={styles.custFieldLabel}>Customer Code</Text>
-                      <TextInput
-                        style={styles.custFieldInput}
-                        value={newCustCode}
-                        onChangeText={setNewCustCode}
-                        placeholder="Enter Code"
-                      />
-                    </View>
-
-                    {/* Customer Type */}
-                    <View style={styles.custDetailsFormRow}>
-                      <Text style={styles.custFieldLabel}>Customer Type</Text>
-                      <View style={styles.custFieldSelect}>
-                        <Text style={styles.custFieldSelectText}>{newCustType}</Text>
-                        <Ionicons name="caret-down" size={14} color="#000" />
-                      </View>
-                    </View>
-
-                    {/* Customer Name */}
-                    <View style={styles.custDetailsFormRow}>
-                      <Text style={styles.custFieldLabel}>Customer Name</Text>
-                      <TextInput
-                        style={styles.custFieldInput}
-                        value={newCustName}
-                        onChangeText={setNewCustName}
-                      />
-                    </View>
-
-                    {/* Address */}
-                    <View style={styles.custDetailsFormRow}>
-                      <Text style={styles.custFieldLabel}>Address</Text>
-                      <TextInput
-                        style={styles.custFieldInput}
-                        value={newCustAddress}
-                        onChangeText={setNewCustAddress}
-                      />
-                    </View>
-
-                    {/* Country */}
-                    <View style={styles.custDetailsFormRow}>
-                      <Text style={styles.custFieldLabel}>Country</Text>
-                      <TextInput
-                        style={styles.custFieldInput}
-                        value={newCustCountry}
-                        onChangeText={setNewCustCountry}
-                      />
-                    </View>
-
-                    {/* Postal Code */}
-                    <View style={styles.custDetailsFormRow}>
-                      <Text style={styles.custFieldLabel}>Postal Code</Text>
-                      <TextInput
-                        style={styles.custFieldInput}
-                        value={newCustPostalCode}
-                        onChangeText={setNewCustPostalCode}
-                      />
-                    </View>
-
-                    {/* Nationality */}
-                    <View style={styles.custDetailsFormRow}>
-                      <Text style={styles.custFieldLabel}>Nationality</Text>
-                      <TextInput
-                        style={styles.custFieldInput}
-                        value={newCustNationality}
-                        onChangeText={setNewCustNationality}
-                      />
-                    </View>
-
-                    {/* Gender */}
-                    <View style={styles.custDetailsFormRow}>
-                      <Text style={styles.custFieldLabel}>Gender</Text>
-                      <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                        <TouchableOpacity style={{ flexDirection: 'row', alignItems: 'center', marginRight: 15 }} onPress={() => setNewCustGender('Male')}>
-                          <View style={[styles.legacyRadioCircle, newCustGender === 'Male' && styles.legacyRadioSelected]} />
-                          <Text style={styles.legacyRadioLabel}>Male</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity style={{ flexDirection: 'row', alignItems: 'center' }} onPress={() => setNewCustGender('Female')}>
-                          <View style={[styles.legacyRadioCircle, newCustGender === 'Female' && styles.legacyRadioSelected]} />
-                          <Text style={styles.legacyRadioLabel}>Female</Text>
-                        </TouchableOpacity>
-                      </View>
-                    </View>
-
-                    {/* Nric Number */}
-                    <View style={styles.custDetailsFormRow}>
-                      <Text style={styles.custFieldLabel}>Nric Number</Text>
-                      <TextInput
-                        style={styles.custFieldInput}
-                        value={newCustNric}
-                        onChangeText={setNewCustNric}
-                      />
-                    </View>
-
-                    {/* Remarks */}
-                    <View style={styles.custDetailsFormRow}>
-                      <Text style={styles.custFieldLabel}>Remarks</Text>
-                      <TextInput
-                        style={styles.custFieldInput}
-                        value={newCustRemarks}
-                        onChangeText={setNewCustRemarks}
-                      />
-                    </View>
-
-                  </View>
-
-                  {/* Right Column Fields */}
-                  <View style={styles.custDetailsCol}>
-                    
-                    {/* Passport Number */}
-                    <View style={styles.custDetailsFormRow}>
-                      <Text style={styles.custFieldLabel}>Passport Number</Text>
-                      <TextInput style={styles.custFieldInput} value={newCustPassport} onChangeText={setNewCustPassport} />
-                    </View>
-
-                    {/* Phone1 */}
-                    <View style={styles.custDetailsFormRow}>
-                      <Text style={styles.custFieldLabel}>Phone1</Text>
-                      <TextInput style={styles.custFieldInput} value={newCustPhone1} onChangeText={setNewCustPhone1} />
-                    </View>
-
-                    {/* Phone2 */}
-                    <View style={styles.custDetailsFormRow}>
-                      <Text style={styles.custFieldLabel}>Phone2</Text>
-                      <TextInput style={styles.custFieldInput} value={newCustPhone2} onChangeText={setNewCustPhone2} />
-                    </View>
-
-                    {/* Mobile */}
-                    <View style={styles.custDetailsFormRow}>
-                      <Text style={styles.custFieldLabel}>Mobile</Text>
-                      <TextInput style={styles.custFieldInput} value={newCustMobile} onChangeText={setNewCustMobile} />
-                    </View>
-
-                    {/* Fax */}
-                    <View style={styles.custDetailsFormRow}>
-                      <Text style={styles.custFieldLabel}>Fax</Text>
-                      <TextInput style={styles.custFieldInput} value={newCustFax} onChangeText={setNewCustFax} />
-                    </View>
-
-                    {/* Email */}
-                    <View style={styles.custDetailsFormRow}>
-                      <Text style={styles.custFieldLabel}>Email</Text>
-                      <TextInput style={styles.custFieldInput} value={newCustEmail} onChangeText={setNewCustEmail} />
-                    </View>
-
-                    {/* Religion */}
-                    <View style={styles.custDetailsFormRow}>
-                      <Text style={styles.custFieldLabel}>Religion</Text>
-                      <TextInput style={styles.custFieldInput} value={newCustReligion} onChangeText={setNewCustReligion} />
-                    </View>
-
-                    {/* Date Of Birth */}
-                    <View style={styles.custDetailsFormRow}>
-                      <Text style={styles.custFieldLabel}>Date Of Birth</Text>
-                      <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                        <TextInput style={styles.dateMiniInput} value={newCustDobDay} onChangeText={setNewCustDobDay} placeholder="DD" maxLength={2} />
-                        <Text style={{ marginHorizontal: 2 }}>/</Text>
-                        <TextInput style={styles.dateMiniInput} value={newCustDobMonth} onChangeText={setNewCustDobMonth} placeholder="MM" maxLength={2} />
-                        <Text style={{ marginHorizontal: 2 }}>/</Text>
-                        <TextInput style={[styles.dateMiniInput, { width: 45 }]} value={newCustDobYear} onChangeText={setNewCustDobYear} placeholder="YYYY" maxLength={4} />
-                      </View>
-                    </View>
-
-                    {/* Date Of Anniversary */}
-                    <View style={styles.custDetailsFormRow}>
-                      <Text style={styles.custFieldLabel}>Date Of Anniversary</Text>
-                      <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                        <TextInput style={styles.dateMiniInput} value={newCustDoaDay} onChangeText={setNewCustDoaDay} placeholder="DD" maxLength={2} />
-                        <Text style={{ marginHorizontal: 2 }}>/</Text>
-                        <TextInput style={styles.dateMiniInput} value={newCustDoaMonth} onChangeText={setNewCustDoaMonth} placeholder="MM" maxLength={2} />
-                        <Text style={{ marginHorizontal: 2 }}>/</Text>
-                        <TextInput style={[styles.dateMiniInput, { width: 45 }]} value={newCustDoaYear} onChangeText={setNewCustDoaYear} placeholder="YYYY" maxLength={4} />
-                        
-                        <TouchableOpacity style={{ flexDirection: 'row', alignItems: 'center', marginLeft: 10 }} onPress={() => setNewCustActive(!newCustActive)}>
-                          <Ionicons name={newCustActive ? "checkbox" : "square-outline"} size={16} color="#000" />
-                          <Text style={{ fontSize: 12, fontWeight: 'bold', marginLeft: 4 }}>Active</Text>
-                        </TouchableOpacity>
-                      </View>
-                    </View>
-
-                    {/* Contact Radio Options */}
-                    <View style={styles.custDetailsFormRow}>
-                      <Text style={styles.custFieldLabel}>Contact</Text>
-                      <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                        <TouchableOpacity style={{ flexDirection: 'row', alignItems: 'center', marginRight: 10 }} onPress={() => setNewCustContact('SMS')}>
-                          <View style={[styles.legacyRadioCircle, newCustContact === 'SMS' && styles.legacyRadioSelected]} />
-                          <Text style={styles.legacyRadioLabel}>SMS</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity style={{ flexDirection: 'row', alignItems: 'center', marginRight: 10 }} onPress={() => setNewCustContact('Phone')}>
-                          <View style={[styles.legacyRadioCircle, newCustContact === 'Phone' && styles.legacyRadioSelected]} />
-                          <Text style={styles.legacyRadioLabel}>Phone</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity style={{ flexDirection: 'row', alignItems: 'center' }} onPress={() => setNewCustContact('None')}>
-                          <View style={[styles.legacyRadioCircle, newCustContact === 'None' && styles.legacyRadioSelected]} />
-                          <Text style={styles.legacyRadioLabel}>None</Text>
-                        </TouchableOpacity>
-                      </View>
-                    </View>
-
-                  </View>
-
-                </View>
-              </View>
-
-              {/* Bottom Customer Tab Header */}
-              <View style={styles.custTabHeader}>
-                <View style={[styles.custTabItem, styles.custTabItemActive]}><Text style={styles.custTabTextActive}>Sales Summary</Text></View>
-                <View style={styles.custTabItem}><Text style={styles.custTabText}>Sales Detail</Text></View>
-                <View style={styles.custTabItem}><Text style={styles.custTabText}>Customer Points</Text></View>
-              </View>
-
-              {/* Empty Sales Table Frame */}
-              <View style={styles.custSalesTableFrame}>
-                <View style={styles.custSalesTableHeader}>
-                  <Text style={[styles.custSalesTh, { width: 120 }]}>InvoiceNo</Text>
-                  <Text style={[styles.custSalesTh, { width: 100 }]}>InvoiceDate</Text>
-                  <Text style={[styles.custSalesTh, { width: 80 }]}>Weight</Text>
-                  <Text style={[styles.custSalesTh, { width: 80 }]}>PCS</Text>
-                  <Text style={[styles.custSalesTh, { width: 100 }]}>Price</Text>
-                </View>
-                <View style={{ height: 80 }} />
-              </View>
-
-              {/* Action Buttons Bar matching Image 2 */}
-              <View style={styles.custModalActionBar}>
-                
-                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                  <TouchableOpacity style={{ flexDirection: 'row', alignItems: 'center', marginRight: 15 }} onPress={() => setAddKyc(!addKyc)}>
-                    <Ionicons name={addKyc ? "checkbox" : "square-outline"} size={16} color="#000" />
-                    <Text style={{ fontSize: 12, marginLeft: 4 }}>Add KYC</Text>
-                  </TouchableOpacity>
-
-                  <TouchableOpacity style={{ flexDirection: 'row', alignItems: 'center' }} onPress={() => setShowKyc(!showKyc)}>
-                    <Ionicons name={showKyc ? "checkbox" : "square-outline"} size={16} color="#000" />
-                    <Text style={{ fontSize: 12, marginLeft: 4 }}>Show KYC</Text>
-                  </TouchableOpacity>
-                </View>
-
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                  <TouchableOpacity style={styles.orangeActionBtn} onPress={handleOpenNewCustomer}>
-                    <Text style={styles.orangeActionBtnText}>New</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity style={styles.orangeActionBtn} onPress={handleSaveNewCustomer} disabled={savingCustomer}>
-                    <Text style={styles.orangeActionBtnText}>{savingCustomer ? 'Saving...' : 'Save'}</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity style={styles.orangeActionBtn} onPress={() => setCustomerDetailsVisible(false)}>
-                    <Text style={styles.orangeActionBtnText}>Delete</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity style={styles.orangeActionBtn} onPress={() => setCustomerDetailsVisible(false)}>
-                    <Text style={styles.orangeActionBtnText}>Close</Text>
-                  </TouchableOpacity>
-                </View>
-
-              </View>
-
-            </ScrollView>
-          </View>
-        </View>
-      </Modal>
-
-      {/* ========================================================= */}
       {/* 3. SCHEME CODE SEARCH HELP SEARCH MODAL (EXACT MATCH IMAGE 3) */}
       {/* ========================================================= */}
       <Modal visible={schemeModalVisible} transparent animationType="fade" onRequestClose={() => setSchemeModalVisible(false)}>
@@ -1376,82 +1486,69 @@ export default function GoldSchemeTransactionScreen() {
             </View>
 
             {/* SubHeader Search Controls */}
-            <View style={styles.legacySearchControlArea}>
+            <View style={[styles.legacySearchControlArea, { paddingVertical: 10 }]}>
               
-              <View style={styles.legacyTopMetaRow}>
-                <Text style={styles.legacySearchByText}>Search By...</Text>
+              {/* Row 1: Search Field Dropdown on Left, Records Found on Right */}
+              <View style={[styles.legacyTopMetaRow, { zIndex: 50, marginBottom: 4 }]}>
+                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                  <Text style={styles.legacyLabelText}>Search Field </Text>
+                  <View style={{ position: 'relative', zIndex: 60 }}>
+                    <TouchableOpacity 
+                      style={styles.legacyDropdownSelect} 
+                      onPress={() => setShowSchemeFieldDropdown(!showSchemeFieldDropdown)}
+                    >
+                      <Text style={styles.legacyDropdownText}>{schemeSearchField}</Text>
+                      <Ionicons name="caret-down" size={12} color="#000" style={{ marginLeft: 4 }} />
+                    </TouchableOpacity>
+
+                    {/* Dropdown Options Menu */}
+                    {showSchemeFieldDropdown && (
+                      <View style={[styles.dropdownMenuOverlay, { top: 34, left: 0, minWidth: 140, zIndex: 100 }]}>
+                        {(['Code', 'Description', 'Remarks', 'CreateUser'] as const).map((field) => (
+                          <TouchableOpacity
+                            key={field}
+                            style={[styles.dropdownMenuItem, schemeSearchField === field && styles.dropdownMenuItemActive]}
+                            onPress={() => {
+                              setSchemeSearchField(field);
+                              setShowSchemeFieldDropdown(false);
+                              fetchSchemeSearchResults(field, schemeSearchText, schemeSearchMode);
+                            }}
+                          >
+                            <Text style={[styles.dropdownMenuItemText, schemeSearchField === field && styles.dropdownMenuItemTextActive]}>
+                              {field}
+                            </Text>
+                          </TouchableOpacity>
+                        ))}
+                      </View>
+                    )}
+                  </View>
+                </View>
+
                 <Text style={styles.legacyRecordCountText}>
-                  <Text style={{ color: 'red', fontWeight: 'bold' }}>{schemeTotalRecords}</Text> Records Found
+                  <Text style={{ color: '#DC2626', fontWeight: 'bold' }}>{schemeTotalRecords}</Text> Records Found
                 </Text>
               </View>
 
-              {/* Search Field Dropdown & Radio Options */}
-              <View style={[styles.legacyOptionsRow, { zIndex: 10 }]}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', zIndex: 10 }}>
-                  <Text style={styles.legacyLabelText}>Search Field </Text>
-                  <TouchableOpacity 
-                    style={styles.legacyDropdownSelect} 
-                    onPress={() => setShowSchemeFieldDropdown(!showSchemeFieldDropdown)}
-                  >
-                    <Text style={styles.legacyDropdownText}>{schemeSearchField}</Text>
-                    <Ionicons name="caret-down" size={12} color="#000" style={{ marginLeft: 4 }} />
-                  </TouchableOpacity>
-
-                  {/* Dropdown Options Menu */}
-                  {showSchemeFieldDropdown && (
-                    <View style={styles.dropdownMenuOverlay}>
-                      {(['Description', 'Code', 'Remarks', 'CreateUser'] as const).map((field) => (
-                        <TouchableOpacity
-                          key={field}
-                          style={[styles.dropdownMenuItem, schemeSearchField === field && styles.dropdownMenuItemActive]}
-                          onPress={() => {
-                            setSchemeSearchField(field);
-                            setShowSchemeFieldDropdown(false);
-                            fetchSchemeSearchResults(field, schemeSearchText, schemeSearchMode);
-                          }}
-                        >
-                          <Text style={[styles.dropdownMenuItemText, schemeSearchField === field && styles.dropdownMenuItemTextActive]}>
-                            {field}
-                          </Text>
-                        </TouchableOpacity>
-                      ))}
-                    </View>
-                  )}
-                </View>
-
-                {/* Radio Modes: Start, End, Any */}
-                <View style={{ flexDirection: 'row', alignItems: 'center', marginLeft: 16 }}>
-                  <TouchableOpacity style={styles.legacyRadioOption} onPress={() => { setSchemeSearchMode('Start'); fetchSchemeSearchResults(schemeSearchField, schemeSearchText, 'Start'); }}>
-                    <View style={[styles.legacyRadioCircle, schemeSearchMode === 'Start' && styles.legacyRadioSelected]} />
-                    <Text style={styles.legacyRadioLabel}>Start</Text>
-                  </TouchableOpacity>
-
-                  <TouchableOpacity style={styles.legacyRadioOption} onPress={() => { setSchemeSearchMode('End'); fetchSchemeSearchResults(schemeSearchField, schemeSearchText, 'End'); }}>
-                    <View style={[styles.legacyRadioCircle, schemeSearchMode === 'End' && styles.legacyRadioSelected]} />
-                    <Text style={styles.legacyRadioLabel}>End</Text>
-                  </TouchableOpacity>
-
-                  <TouchableOpacity style={styles.legacyRadioOption} onPress={() => { setSchemeSearchMode('Any'); fetchSchemeSearchResults(schemeSearchField, schemeSearchText, 'Any'); }}>
-                    <View style={[styles.legacyRadioCircle, schemeSearchMode === 'Any' && styles.legacyRadioSelected]} />
-                    <Text style={styles.legacyRadioLabel}>Any</Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-
-              {/* Search Field Title & Search Text Box */}
+              {/* Row 2: Selected Field Title & Search Text Box */}
               <View style={styles.legacyInputSection}>
                 <Text style={styles.legacySearchFieldColumnTitle}>{schemeSearchField}</Text>
                 <View style={styles.legacySearchBoxRow}>
                   <TextInput
                     style={styles.legacySearchTextInput}
                     placeholder="Enter search text..."
+                    placeholderTextColor="#94A3B8"
                     value={schemeSearchText}
                     onChangeText={(text) => {
                       setSchemeSearchText(text);
                       fetchSchemeSearchResults(schemeSearchField, text, schemeSearchMode);
                     }}
+                    onSubmitEditing={() => fetchSchemeSearchResults(schemeSearchField, schemeSearchText, schemeSearchMode)}
                   />
-                  <TouchableOpacity style={styles.legacySearchExecuteBtn} onPress={() => fetchSchemeSearchResults(schemeSearchField, schemeSearchText, schemeSearchMode)}>
+                  <TouchableOpacity 
+                    style={styles.legacySearchExecuteBtn} 
+                    onPress={() => fetchSchemeSearchResults(schemeSearchField, schemeSearchText, schemeSearchMode)}
+                  >
+                    <Ionicons name="search" size={13} color="#FFFFFF" style={{ marginRight: 4 }} />
                     <Text style={styles.legacySearchExecuteBtnText}>Search</Text>
                   </TouchableOpacity>
                 </View>
@@ -2168,6 +2265,89 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     padding: 12,
+  },
+  
+  custDetailsModalHeaderBar: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    backgroundColor: '#F5E7CA',
+    borderBottomWidth: 1,
+    borderBottomColor: '#E2D3B3',
+  },
+  custDetailsModalHeaderTitle: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#3B2D17',
+  },
+  custCodeSearchBtn: {
+    height: 28,
+    width: 28,
+    backgroundColor: '#9E6D08',
+    borderRadius: 6,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginLeft: 6,
+  },
+  custTypeDropdownMenu: {
+    position: 'absolute',
+    top: 32,
+    left: 0,
+    right: 0,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#DFD5C3',
+    borderRadius: 6,
+    zIndex: 999,
+    elevation: 10,
+    shadowColor: '#3B2D17',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+  },
+  custTypeDropdownItem: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F0E6D2',
+  },
+  custTypeDropdownItemActive: {
+    backgroundColor: '#FAF7F0',
+  },
+  custTypeDropdownText: {
+    fontSize: 11,
+    color: '#3B2D17',
+  },
+  custTypeDropdownTextActive: {
+    fontWeight: '700',
+    color: '#9E6D08',
+  },
+  custTableRow: {
+    flexDirection: 'row',
+    paddingVertical: 6,
+    paddingHorizontal: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F0E6D2',
+    alignItems: 'center',
+  },
+  custTableTd: {
+    fontSize: 11,
+    color: '#332717',
+  },
+  pointsSummaryBanner: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    paddingVertical: 8,
+    backgroundColor: '#FAF7F0',
+    borderTopWidth: 1,
+    borderTopColor: '#E8DCB8',
+  },
+  pointsSummaryText: {
+    fontSize: 11,
+    color: '#6B5738',
+    fontWeight: '600',
   },
   custDetailsWindow: {
     width: Platform.OS === 'web' ? 840 : '98%',

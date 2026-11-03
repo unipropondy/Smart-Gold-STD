@@ -3,7 +3,7 @@ import { API_BASE_URL } from '@/constants/api';
 import { useThemeContext } from '@/contexts/ThemeContext';
 import { useThemeColors } from '@/hooks/useThemeColors';
 import { Ionicons } from '@expo/vector-icons';
-import { Stack, useRouter } from 'expo-router';
+import { Stack, useRouter, useLocalSearchParams } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
@@ -31,6 +31,8 @@ export default function CustomerScreen() {
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
   const router = useRouter();
+  const params = useLocalSearchParams();
+  const returnPath = params.returnPath as string;
 
   const [data, setData] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -167,6 +169,21 @@ export default function CustomerScreen() {
       if (json.success) {
         showToast(`Customer ${isEditing ? 'updated' : 'added'} successfully`, 'success');
         fetchCustomers();
+        if (returnPath) {
+          const retCustCode = customerCode.trim();
+          setTimeout(() => {
+            router.push({
+              pathname: returnPath as any,
+              params: {
+                selectedCustomerCode: retCustCode,
+                selectedCustomerName: customerName.trim(),
+                selectedAddress: address1.trim(),
+                ...params
+              }
+            });
+          }, 800);
+          return;
+        }
       } else {
         showToast(json.message || 'Failed to save', 'error');
       }
@@ -270,6 +287,20 @@ export default function CustomerScreen() {
 
     setIsEditing(true);
     setIsModalVisible(false);
+
+    if (returnPath) {
+      setTimeout(() => {
+        router.push({
+          pathname: returnPath as any,
+          params: {
+            selectedCustomerCode: item.CustomerCode,
+            selectedCustomerName: item.CustomerName || '',
+            selectedAddress: item.Address1 || '',
+            ...params
+          }
+        });
+      }, 300);
+    }
   };
 
   const getCustomerTypeBadgeStyle = (type: string) => {

@@ -32,7 +32,7 @@ export default function TransferOutScreen() {
   // Form State
   const [locations, setLocations] = useState<any[]>([]);
   const [toLocation, setToLocation] = useState('');
-  const [fromLocation] = useState('HQ');
+  const [fromLocation, setFromLocation] = useState('HQ');
   const [transferNo, setTransferNo] = useState(params.transferNo ? String(params.transferNo) : '');
   const [remarks, setRemarks] = useState('');
   const [isLocked, setIsLocked] = useState(false);
@@ -40,6 +40,20 @@ export default function TransferOutScreen() {
   // Location LOV modal state
   const [locationModalVisible, setLocationModalVisible] = useState(false);
   const [locationSearchQuery, setLocationSearchQuery] = useState('');
+
+  // Browse Past Transfers modal state
+  const [browseModalVisible, setBrowseModalVisible] = useState(false);
+  const [transferList, setTransferList] = useState<any[]>([]);
+  const [transferSearchQuery, setTransferSearchQuery] = useState('');
+
+  // Salesman Password Modal (matching PnlSalesManPwd in frmTransferOut.vb)
+  const [salesmanModalVisible, setSalesmanModalVisible] = useState(false);
+  const [salesmanPassword, setSalesmanPassword] = useState('');
+  const [verifiedSalesman, setVerifiedSalesman] = useState<{ code: string; name: string } | null>(null);
+
+  // Print Dialog Modal (matching vbYesNo "Do you want to print ?" and subPrintTransferOut)
+  const [printModalVisible, setPrintModalVisible] = useState(false);
+  const [printedTransferNo, setPrintedTransferNo] = useState('');
 
   // Date State
   const [transferDate, setTransferDate] = useState(() => {
@@ -50,9 +64,20 @@ export default function TransferOutScreen() {
     return `${yyyy}-${mm}-${dd}`;
   });
 
-  // Scanner State
+  // Scanner & Staged Item Detail Form State (matching txtInventoryCode, txtDescription, txtWeight, txtSize, txtPCS, txtCostPerGram, txtPMC, txtSMC, txtTotalCost in frmTransferOut.vb)
   const [inventoryCode, setInventoryCode] = useState('');
-  const [scannedItem, setScannedItem] = useState<any>(null);
+  const [itemDescription, setItemDescription] = useState('');
+  const [itemClassCode, setItemClassCode] = useState('');
+  const [itemCategoryCode, setCategoryCode] = useState('');
+  const [itemCatalogueCode, setCatalogueCode] = useState('');
+  const [itemWeight, setItemWeight] = useState('');
+  const [itemSize, setItemSize] = useState('');
+  const [itemPCS, setItemPCS] = useState('1');
+  const [itemCostPerGram, setItemCostPerGram] = useState('');
+  const [itemPMC, setItemPMC] = useState('');
+  const [itemSMC, setItemSMC] = useState('');
+  const [itemTotalCost, setItemTotalCost] = useState('');
+  const [itemSalesType, setItemSalesType] = useState('');
 
   // Grid State
   const [gridData, setGridData] = useState<any[]>([]);
@@ -95,6 +120,21 @@ export default function TransferOutScreen() {
     }
   };
 
+  const fetchTransferList = async () => {
+    try {
+      setLoading(true);
+      const res = await fetch(`${API_URL}/list?fromLocation=${encodeURIComponent(fromLocation)}&limit=100`);
+      const data = await res.json();
+      if (data.success) {
+        setTransferList(data.data || []);
+      }
+    } catch (err) {
+      console.error('Error fetching transfer list', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const fetchTransferDetails = async (tNo: string) => {
     if (!tNo.trim()) return;
     try {
@@ -106,14 +146,18 @@ export default function TransferOutScreen() {
         setTransferNo(data.header.TransferNo);
         setToLocation(data.header.ToLocation);
         setRemarks(data.header.Remarks || '');
+        if (data.header.FromLocation) {
+          setFromLocation(data.header.FromLocation);
+        }
         if (data.header.TransferDate) {
           setTransferDate(new Date(data.header.TransferDate).toISOString().split('T')[0]);
         }
         setGridData(data.details || []);
         setIsLocked(true);
+        subClearTransfer();
         showToast('Transfer details loaded', 'success');
       } else {
-        showToast(data.message || 'Transfer not found', 'error');
+        showToast(data.message || 'Transfer number does not exists.', 'error');
         setTransferNo('');
       }
     } catch (err: any) {
@@ -123,42 +167,87 @@ export default function TransferOutScreen() {
     }
   };
 
-  const handleScanInventory = async () => {
-    if (!inventoryCode.trim()) return;
+  const subClearTransfer = () => {
+    setInventoryCode('');
+    setItemDescription('');
+    setItemClassCode('');
+    setCategoryCode('');
+    setCatalogueCode('');
+    setItemWeight('0.00');
+    setItemSize('0.00');
+    setItemPCS('0');
+    setItemCostPerGram('0.00');
+    setItemPMC('0.00');
+    setItemSMC('0.00');
+    setItemTotalCost('0.00');
+    setItemSalesType('');
+  };
+
+  // Scan or lost-focus on txtInventoryCode (matching txtInventoryCode_LostFocus & fncGetInventory in frmTransferOut.vb)
+  const handleScanInventory = async (codeToScan?: string) => {
+    const code = (codeToScan || inventoryCode).trim();
+    if (!code) return;
 
     if (!toLocation || !toLocation.trim()) {
       showToast('Select the ToLocation Code', 'error');
       return;
     }
 
-    if (gridData.some((item) => item.InventoryCode.trim().toLowerCase() === inventoryCode.trim().toLowerCase())) {
-      showToast('Item already in transfer list', 'error');
-      setInventoryCode('');
-      setScannedItem(null);
+    if (gridData.some((item) => item.InventoryCode.trim().toUpperCase() === code.toUpperCase())) {
+      showToast('Item found in transfer list', 'error');
+      subClearTransfer();
       return;
     }
 
     try {
       setLoading(true);
-      const res = await fetch(`${API_URL}/inventory/${encodeURIComponent(inventoryCode.trim())}`);
+      const res = await fetch(`${API_URL}/inventory/${encodeURIComponent(code)}?fromLocation=${encodeURIComponent(fromLocation)}`);
       const data = await res.json();
 
       if (res.ok && data.success && data.data) {
         const item = data.data;
+
+        // Populate subform state
+        setInventoryCode(item.InventoryCode);
+        setItemDescription(item.Description || '');
+        setItemClassCode(item.ClassCode || '');
+        setCategoryCode(item.CategoryCode || '');
+        setCatalogueCode(item.CatalogueCode || '');
+        setItemWeight(Number(item.Weight || 0).toFixed(2));
+        setItemSize(String(item.SizeCode || '0.00'));
+        setItemPCS(String(item.PCS || item.QtyonHand || 1));
+        setItemCostPerGram(Number(item.CostPerGram || 0).toFixed(2));
+        setItemPMC(Number(item.PMC || 0).toFixed(2));
+        setItemSMC(Number(item.SMC || 0).toFixed(2));
+        setItemTotalCost(Number(item.TotalCost || 0).toFixed(2));
+        setItemSalesType(item.SalesType || '');
+
         // In frmTransferOut.vb: If msClsSalesType <> "P" Then btnAdd_Click (auto-add to grid)
         if (item.SalesType !== 'P') {
-          setGridData((prev) => [...prev, item]);
-          setInventoryCode('');
-          setScannedItem(null);
-          showToast('Item added: ' + (item.Description || item.InventoryCode), 'success');
+          const gridItem = {
+            InventoryCode: item.InventoryCode,
+            Description: item.Description,
+            ClassCode: item.ClassCode,
+            CategoryCode: item.CategoryCode,
+            CatalogueCode: item.CatalogueCode,
+            Weight: Number(item.Weight) || 0,
+            SizeCode: item.SizeCode || '',
+            QtyonHand: Number(item.PCS || item.QtyonHand || 1),
+            Pcs: Number(item.PCS || item.QtyonHand || 1),
+            CostPerGram: Number(item.CostPerGram) || 0,
+            PMC: Number(item.PMC) || 0,
+            SMC: Number(item.SMC) || 0,
+            TotalCost: Number(item.TotalCost) || 0,
+          };
+          setGridData((prev) => [...prev, gridItem]);
+          subClearTransfer();
+          showToast(`Item added: ${item.InventoryCode}`, 'success');
         } else {
-          setScannedItem(item);
-          showToast('Item scanned: ' + (item.Description || item.InventoryCode), 'success');
+          showToast(`Piece-based item scanned: ${item.InventoryCode}. Enter PCS and press Add.`, 'success');
         }
       } else {
-        showToast(data.message || 'Inventory item not found or out of stock', 'error');
-        setInventoryCode('');
-        setScannedItem(null);
+        showToast(data.message || 'Inventory Not Found ...', 'error');
+        subClearTransfer();
       }
     } catch (err: any) {
       showToast('Error fetching inventory item', 'error');
@@ -167,18 +256,81 @@ export default function TransferOutScreen() {
     }
   };
 
+  // Add Item to Grid (matching btnAdd_Click in frmTransferOut.vb)
   const handleAddScannedItem = () => {
-    if (!scannedItem) {
-      if (inventoryCode.trim()) {
-        handleScanInventory();
-      }
+    if (!inventoryCode.trim()) {
+      showToast('Enter Inventory Code', 'error');
       return;
     }
 
-    setGridData([...gridData, scannedItem]);
-    setInventoryCode('');
-    setScannedItem(null);
-    showToast('Item added to transfer queue', 'success');
+    if (gridData.some((item) => item.InventoryCode.trim().toUpperCase() === inventoryCode.trim().toUpperCase())) {
+      showToast('Item found in transfer list', 'error');
+      subClearTransfer();
+      return;
+    }
+
+    const pcsVal = parseInt(itemPCS, 10) || 1;
+    const gridItem = {
+      InventoryCode: inventoryCode.trim(),
+      Description: itemDescription.trim(),
+      ClassCode: itemClassCode.trim(),
+      CategoryCode: itemCategoryCode.trim(),
+      CatalogueCode: itemCatalogueCode.trim(),
+      Weight: parseFloat(itemWeight) || 0,
+      SizeCode: itemSize.trim(),
+      QtyonHand: pcsVal,
+      Pcs: pcsVal,
+      CostPerGram: parseFloat(itemCostPerGram) || 0,
+      PMC: parseFloat(itemPMC) || 0,
+      SMC: parseFloat(itemSMC) || 0,
+      TotalCost: parseFloat(itemTotalCost) || 0,
+    };
+
+    setGridData((prev) => [...prev, gridItem]);
+    subClearTransfer();
+    showToast(`Item added: ${gridItem.InventoryCode}`, 'success');
+  };
+
+  // Load Scrap Inventory (matching btnScrapInventory_Click in frmTransferOut.vb)
+  const handleLoadScrapInventory = async () => {
+    if (isLocked) return;
+    try {
+      setLoading(true);
+      const res = await fetch(`${API_URL}/scrap-inventory?fromLocation=${encodeURIComponent(fromLocation)}`);
+      const data = await res.json();
+      if (data.success && Array.isArray(data.data)) {
+        if (data.data.length === 0) {
+          showToast('No scrap inventory available to load', 'error');
+          return;
+        }
+        // In VB code: cboToLocationCode.Text = "HQ"
+        setToLocation('HQ');
+        const scrapGrid = data.data.map((item: any) => ({
+          InventoryCode: item.InventoryCode,
+          Description: item.Description,
+          ClassCode: item.ClassCode,
+          CategoryCode: item.CategoryCode,
+          CatalogueCode: item.CatalogueCode,
+          Weight: Number(item.Weight) || 0,
+          SizeCode: item.SizeCode || '',
+          QtyonHand: Number(item.QtyonHand || item.PCS || 1),
+          Pcs: Number(item.PCS || item.QtyonHand || 1),
+          CostPerGram: Number(item.CostPerGram) || 0,
+          PMC: Number(item.PMC) || 0,
+          SMC: Number(item.SMC) || 0,
+          TotalCost: Number(item.TotalCost) || 0,
+        }));
+        setGridData(scrapGrid);
+        subClearTransfer();
+        showToast(`Loaded ${scrapGrid.length} scrap items. Destination set to HQ.`, 'success');
+      } else {
+        showToast(data.message || 'Error loading scrap inventory', 'error');
+      }
+    } catch (err: any) {
+      showToast('Network error loading scrap inventory', 'error');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const calculateTotals = () => {
@@ -197,39 +349,94 @@ export default function TransferOutScreen() {
     setTotals({ Weight: weight, PMC: pmc, PCS: pcs, SMC: smc, TotalCost: cost });
   };
 
+  // Delete row (matching btnDelete_Click in frmTransferOut.vb)
   const handleDeleteItem = (index: number) => {
     if (isLocked) return;
+    const itemToDelete = gridData[index];
     const newData = [...gridData];
     newData.splice(index, 1);
     setGridData(newData);
     if (selectedRowIndex === index) setSelectedRowIndex(null);
+    showToast(`Item ${itemToDelete.InventoryCode} removed`, 'success');
   };
 
+  // Full clear of voucher (matching btnTransferClear_Click & subClearDetail in frmTransferOut.vb)
   const handleClear = () => {
     setTransferNo('');
     setToLocation('');
     setRemarks('');
     setGridData([]);
     setIsLocked(false);
-    setInventoryCode('');
-    setScannedItem(null);
     setSelectedRowIndex(null);
+    setVerifiedSalesman(null);
+    setSalesmanPassword('');
+    subClearTransfer();
+    const d = new Date();
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    const yyyy = d.getFullYear();
+    setTransferDate(`${yyyy}-${mm}-${dd}`);
+    showToast('Transfer voucher cleared', 'success');
   };
 
-  const handleTransfer = async () => {
+  // Initiation of Transfer Button (matching btnTransfer_Click in frmTransferOut.vb: prompts for salesman password)
+  const handleTransferButtonClick = async () => {
     if (isLocked) {
       showToast('This transfer is already completed and locked.', 'error');
       return;
     }
     if (!toLocation.trim()) {
-      showToast('Please select destination (To Location)', 'error');
+      showToast('Select the ToLocation Code', 'error');
       return;
     }
     if (gridData.length === 0) {
-      showToast('No items staged for transfer', 'error');
+      showToast('No Item To Transfer', 'error');
       return;
     }
 
+    // Mandatory salesman password check before transfer (matching PnlSalesManPwd.Visible = True in frmTransferOut.vb)
+    setSalesmanPassword('');
+    setSalesmanModalVisible(true);
+  };
+
+  // Verify Salesman Password and Execute Transfer (matching txtSalesManPWD_LostFocus & fncUpdateTransfer in frmTransferOut.vb)
+  const handleVerifyAndExecuteTransfer = async () => {
+    if (!salesmanPassword.trim()) {
+      showToast('Please enter salesman password', 'error');
+      return;
+    }
+
+    try {
+      setSaving(true);
+      const verifyRes = await fetch(`${API_URL}/verify-salesman`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: salesmanPassword.trim() }),
+      });
+      const verifyData = await verifyRes.json();
+
+      if (!verifyData.success || !verifyData.salesman) {
+        showToast(verifyData.message || 'SalesMan Password is Incorrect!', 'error');
+        setSalesmanPassword('');
+        setSaving(false);
+        return;
+      }
+
+      setVerifiedSalesman({
+        code: verifyData.salesman.SalesmanCode,
+        name: verifyData.salesman.SalesManName,
+      });
+      setSalesmanModalVisible(false);
+
+      // Execute transfer directly with verified salesman code
+      executeTransferAPI(verifyData.salesman.SalesmanCode);
+    } catch (err: any) {
+      setSaving(false);
+      showToast('Error validating salesman password', 'error');
+    }
+  };
+
+  const executeTransferAPI = async (salesManCode: string) => {
     try {
       setSaving(true);
       const payload = {
@@ -242,12 +449,15 @@ export default function TransferOutScreen() {
         totalCost: totals.TotalCost,
         totalPMC: totals.PMC,
         totalSMC: totals.SMC,
+        salesManCode: salesManCode || 'admin',
         items: gridData.map((i) => ({
           ...i,
           Qty: i.Pcs || i.QtyonHand || 1,
         })),
-        userId: 'admin',
+        userId: salesManCode || 'admin',
       };
+
+      console.log('Sending transfer payload:', payload);
 
       const res = await fetch(`${API_URL}/transfer`, {
         method: 'POST',
@@ -256,19 +466,32 @@ export default function TransferOutScreen() {
       });
 
       const data = await res.json();
+      console.log('Transfer response:', data);
 
       if (data.success) {
-        showToast(data.message || 'Transfer completed successfully', 'success');
-        setTransferNo(data.transferNo);
+        const assignedNo = data.transferNo;
+        setTransferNo(assignedNo);
         setIsLocked(true);
+        showToast(data.message || `Please take note reference no. ${assignedNo}`, 'success');
+        setPrintedTransferNo(assignedNo);
       } else {
         showToast(data.message || 'Failed to complete transfer', 'error');
       }
     } catch (err: any) {
-      showToast('Network error saving transfer', 'error');
+      showToast('Network error executing transfer', 'error');
     } finally {
       setSaving(false);
     }
+  };
+
+  const handlePrintNote = () => {
+    const targetNo = transferNo || printedTransferNo;
+    if (!targetNo) {
+      showToast('No transfer voucher to print', 'error');
+      return;
+    }
+    setPrintedTransferNo(targetNo);
+    setPrintModalVisible(true);
   };
 
   const selectedLocationObj = locations.find((l) => l.LocationCode === toLocation);
@@ -291,6 +514,32 @@ export default function TransferOutScreen() {
         </View>
 
         <View style={styles.headerRight}>
+          {/* Browse Past Transfers */}
+          <TouchableOpacity
+            style={[styles.actionBtn, styles.clearBtn]}
+            onPress={() => {
+              fetchTransferList();
+              setBrowseModalVisible(true);
+            }}
+            activeOpacity={0.8}
+            disabled={saving || loading}
+          >
+            <Ionicons name="search-outline" size={14} color="#5C4A28" />
+            <ThemedText style={styles.clearBtnText}>Search</ThemedText>
+          </TouchableOpacity>
+
+          {/* Load Scrap Inventory (matching btnScrapInventory in frmTransferOut.vb) */}
+          <TouchableOpacity
+            style={[styles.actionBtn, styles.scrapBtn, isLocked && { opacity: 0.5 }]}
+            onPress={handleLoadScrapInventory}
+            activeOpacity={0.8}
+            disabled={saving || loading || isLocked}
+          >
+            <Ionicons name="hammer-outline" size={14} color="#B76E79" />
+            <ThemedText style={styles.scrapBtnText}>Scrap Inv.</ThemedText>
+          </TouchableOpacity>
+
+          {/* Clear Button (matching btnTransferClear in frmTransferOut.vb) */}
           <TouchableOpacity
             style={[styles.actionBtn, styles.clearBtn]}
             onPress={handleClear}
@@ -301,18 +550,20 @@ export default function TransferOutScreen() {
             <ThemedText style={styles.clearBtnText}>Clear</ThemedText>
           </TouchableOpacity>
 
+          {/* Print Button (matching btnPrint in frmTransferOut.vb) */}
           <TouchableOpacity
             style={[styles.actionBtn, styles.reprintBtn]}
-            onPress={() => showToast('Printing dispatch note...', 'success')}
+            onPress={handlePrintNote}
             activeOpacity={0.8}
           >
             <Ionicons name="print-outline" size={14} color="#5C4A28" />
             <ThemedText style={styles.clearBtnText}>Print</ThemedText>
           </TouchableOpacity>
 
+          {/* Transfer Button (matching btnTransfer in frmTransferOut.vb) */}
           <TouchableOpacity
             style={[styles.actionBtn, styles.saveBtn, isLocked && { opacity: 0.6 }]}
-            onPress={handleTransfer}
+            onPress={handleTransferButtonClick}
             activeOpacity={0.8}
             disabled={saving || loading || isLocked}
           >
@@ -322,7 +573,7 @@ export default function TransferOutScreen() {
               <>
                 <Ionicons name="airplane-outline" size={15} color="#9E6D08" />
                 <ThemedText style={styles.saveBtnText}>
-                  {isLocked ? 'Transfer Locked' : 'Execute Transfer'}
+                  {isLocked ? 'Transfer Locked' : 'Transfer'}
                 </ThemedText>
               </>
             )}
@@ -616,69 +867,150 @@ export default function TransferOutScreen() {
               })
             )}
 
-            {/* SCANNER SUBFORM ENTRY BAR */}
+            {/* SCANNER & ITEM DETAIL ENTRY SUBFORM (matching frmTransferOut.vb single item fields) */}
             {!isLocked && (
               <View style={styles.itemEntryBar}>
-                <View style={styles.itemEntryRow}>
+                {/* Row 1: Barcode scan input, Item Description */}
+                <View style={[styles.itemEntryRow, { marginBottom: 6 }]}>
                   {/* Scan Input */}
-                  <View style={[styles.inlineFieldRow, { flex: 1.6, minWidth: 230 }]}>
-                    <ThemedText style={[styles.inlineFieldLabel, { width: 100 }]}>Scan Barcode *</ThemedText>
+                  <View style={[styles.inlineFieldRow, { flex: 1.4, minWidth: 220 }]}>
+                    <ThemedText style={[styles.inlineFieldLabel, { width: 95 }]}>Scan Barcode *</ThemedText>
                     <TextInput
                       style={[styles.formInput, { flex: 1, minWidth: 110 }]}
                       value={inventoryCode}
                       onChangeText={setInventoryCode}
-                      onBlur={handleScanInventory}
-                      onSubmitEditing={handleScanInventory}
-                      placeholder="Scan or type code..."
+                      onBlur={() => inventoryCode && handleScanInventory()}
+                      onSubmitEditing={() => inventoryCode && handleScanInventory()}
+                      placeholder="Scan or enter code..."
                       placeholderTextColor="#9E8D77"
                     />
                   </View>
 
-                  {/* Scanned Description */}
-                  <View style={[styles.inlineFieldRow, { flex: 2.2, minWidth: 240 }]}>
+                  {/* Description */}
+                  <View style={[styles.inlineFieldRow, { flex: 2.2, minWidth: 260 }]}>
                     <ThemedText style={[styles.inlineFieldLabel, { width: 85 }]}>Description</ThemedText>
                     <TextInput
-                      style={[styles.formInput, styles.readonlyInput, { flex: 1, minWidth: 130 }]}
-                      value={scannedItem?.Description || ''}
+                      style={[styles.formInput, styles.readonlyInput, { flex: 1 }]}
+                      value={itemDescription}
                       editable={false}
-                      placeholder="Scanned description"
+                      placeholder="Item description"
                       placeholderTextColor="#9E8D77"
                     />
                   </View>
 
-                  {/* Scanned Weight */}
-                  <View style={[styles.inlineFieldRow, { flex: 0.9, minWidth: 150 }]}>
-                    <ThemedText style={[styles.inlineFieldLabel, { width: 65 }]}>Weight</ThemedText>
+                  {/* Class Code */}
+                  <View style={[styles.inlineFieldRow, { flex: 0.9, minWidth: 140 }]}>
+                    <ThemedText style={[styles.inlineFieldLabel, { width: 55 }]}>Class</ThemedText>
                     <TextInput
-                      style={[styles.formInput, styles.readonlyInput, { flex: 1, minWidth: 70, textAlign: 'right' }]}
-                      value={scannedItem?.Weight ? Number(scannedItem.Weight).toFixed(3) : ''}
+                      style={[styles.formInput, styles.readonlyInput, { flex: 1, textAlign: 'center' }]}
+                      value={itemClassCode}
                       editable={false}
-                      placeholder="0.000"
-                      placeholderTextColor="#9E8D77"
                     />
                   </View>
+                </View>
 
-                  {/* Scanned Total Cost */}
-                  <View style={[styles.inlineFieldRow, { flex: 1.1, minWidth: 175 }]}>
-                    <ThemedText style={[styles.inlineFieldLabel, { width: 70 }]}>Total ($)</ThemedText>
+                {/* Row 2: Weight, Size, PCS, Cost/g, PMC, SMC, Total Cost, Add Item Button */}
+                <View style={styles.itemEntryRow}>
+                  {/* Weight */}
+                  <View style={styles.subformField}>
+                    <ThemedText style={styles.subformLabel}>Weight</ThemedText>
                     <TextInput
-                      style={[styles.formInput, styles.readonlyInput, styles.highlightTotal, { flex: 1, minWidth: 80, textAlign: 'right' }]}
-                      value={scannedItem?.TotalCost ? Number(scannedItem.TotalCost).toFixed(2) : ''}
+                      style={[styles.formInput, styles.readonlyInput, { textAlign: 'right' }]}
+                      value={itemWeight}
                       editable={false}
                       placeholder="0.00"
                       placeholderTextColor="#9E8D77"
                     />
                   </View>
 
-                  {/* Add Button */}
-                  <TouchableOpacity
-                    style={[styles.tableActionBtn, styles.addBtn, { height: 26, paddingHorizontal: 12, marginLeft: 4 }]}
-                    onPress={handleAddScannedItem}
-                    activeOpacity={0.8}
-                  >
-                    <Ionicons name="add-circle-outline" size={14} color="#9E6D08" style={{ marginRight: 4 }} />
-                    <ThemedText style={styles.addBtnText}>Add Item</ThemedText>
-                  </TouchableOpacity>
+                  {/* Size */}
+                  <View style={styles.subformField}>
+                    <ThemedText style={styles.subformLabel}>Size</ThemedText>
+                    <TextInput
+                      style={[styles.formInput, styles.readonlyInput, { textAlign: 'center' }]}
+                      value={itemSize}
+                      editable={false}
+                    />
+                  </View>
+
+                  {/* PCS (Editable for piece-sales or when msClsSalesType = 'P') */}
+                  <View style={styles.subformField}>
+                    <ThemedText style={styles.subformLabel}>PCS *</ThemedText>
+                    <TextInput
+                      style={[styles.formInput, { textAlign: 'right' }]}
+                      value={itemPCS}
+                      onChangeText={(val) => {
+                        setItemPCS(val);
+                        if (itemSalesType === 'P') {
+                          const pcsNum = parseFloat(val) || 0;
+                          const smcNum = parseFloat(itemSMC) || 0;
+                          setItemTotalCost((pcsNum * smcNum).toFixed(2));
+                        }
+                      }}
+                      keyboardType="numeric"
+                      placeholder="1"
+                    />
+                  </View>
+
+                  {/* Cost Per Gram */}
+                  <View style={styles.subformField}>
+                    <ThemedText style={styles.subformLabel}>Cost/g</ThemedText>
+                    <TextInput
+                      style={[styles.formInput, styles.readonlyInput, { textAlign: 'right' }]}
+                      value={itemCostPerGram}
+                      editable={false}
+                    />
+                  </View>
+
+                  {/* PMC */}
+                  <View style={styles.subformField}>
+                    <ThemedText style={styles.subformLabel}>PMC</ThemedText>
+                    <TextInput
+                      style={[styles.formInput, styles.readonlyInput, { textAlign: 'right' }]}
+                      value={itemPMC}
+                      editable={false}
+                    />
+                  </View>
+
+                  {/* SMC */}
+                  <View style={styles.subformField}>
+                    <ThemedText style={styles.subformLabel}>SMC</ThemedText>
+                    <TextInput
+                      style={[styles.formInput, styles.readonlyInput, { textAlign: 'right' }]}
+                      value={itemSMC}
+                      editable={false}
+                    />
+                  </View>
+
+                  {/* Total Cost */}
+                  <View style={[styles.subformField, { flex: 1.2 }]}>
+                    <ThemedText style={styles.subformLabel}>Total ($)</ThemedText>
+                    <TextInput
+                      style={[styles.formInput, styles.readonlyInput, styles.highlightTotal, { textAlign: 'right', fontWeight: 'bold' }]}
+                      value={itemTotalCost}
+                      editable={false}
+                    />
+                  </View>
+
+                  {/* Action Buttons */}
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'flex-end', paddingBottom: 1 }}>
+                    <TouchableOpacity
+                      style={[styles.tableActionBtn, styles.addBtn, { height: 26, paddingHorizontal: 12 }]}
+                      onPress={handleAddScannedItem}
+                      activeOpacity={0.8}
+                    >
+                      <Ionicons name="add-circle-outline" size={14} color="#9E6D08" style={{ marginRight: 4 }} />
+                      <ThemedText style={styles.addBtnText}>Add</ThemedText>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      style={[styles.tableActionBtn, styles.clearBtn, { height: 26, paddingHorizontal: 8 }]}
+                      onPress={subClearTransfer}
+                      activeOpacity={0.8}
+                    >
+                      <Ionicons name="close-outline" size={14} color="#5C4A28" />
+                    </TouchableOpacity>
+                  </View>
                 </View>
               </View>
             )}
@@ -751,6 +1083,263 @@ export default function TransferOutScreen() {
                 </TouchableOpacity>
               )}
             />
+          </View>
+        </View>
+      </Modal>
+
+      {/* BROWSE PAST TRANSFERS MODAL */}
+      <Modal visible={browseModalVisible} transparent animationType="fade" onRequestClose={() => setBrowseModalVisible(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={[styles.lovModalCard, { maxWidth: 700 }]}>
+            <View style={styles.modalHeaderBanner}>
+              <View style={styles.headerTitleContainer}>
+                <View style={styles.headerIconBadgeSmall}>
+                  <Ionicons name="document-text-outline" size={13} color="#B48218" />
+                </View>
+                <ThemedText style={styles.modalHeaderTitle}>Search Past Transfer Out Vouchers</ThemedText>
+              </View>
+              <TouchableOpacity
+                onPress={() => setBrowseModalVisible(false)}
+                activeOpacity={0.7}
+                style={styles.closeModalBtn}
+              >
+                <Ionicons name="close" size={18} color="#3B2D17" />
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.modalSearchBox}>
+              <Ionicons name="search-outline" size={16} color="#8D6409" style={{ marginRight: 6 }} />
+              <TextInput
+                style={styles.modalSearchInput}
+                value={transferSearchQuery}
+                onChangeText={setTransferSearchQuery}
+                placeholder="Search Transfer No, To Location, Date..."
+                placeholderTextColor="#9E8D77"
+                autoFocus
+              />
+              {transferSearchQuery.length > 0 && (
+                <TouchableOpacity onPress={() => setTransferSearchQuery('')}>
+                  <Ionicons name="close-circle" size={16} color="#9E8D77" />
+                </TouchableOpacity>
+              )}
+            </View>
+
+            <View style={styles.lovHeadRow}>
+              <ThemedText style={[styles.lovHeadText, { flex: 1.8 }]}>Transfer No</ThemedText>
+              <ThemedText style={[styles.lovHeadText, { flex: 1.3 }]}>Date</ThemedText>
+              <ThemedText style={[styles.lovHeadText, { flex: 1.2 }]}>To Loc</ThemedText>
+              <ThemedText style={[styles.lovHeadText, { flex: 1, textAlign: 'right' }]}>Weight (g)</ThemedText>
+              <ThemedText style={[styles.lovHeadText, { flex: 0.8, textAlign: 'right' }]}>PCS</ThemedText>
+              <ThemedText style={[styles.lovHeadText, { flex: 1.2, textAlign: 'right' }]}>Total ($)</ThemedText>
+            </View>
+
+            <FlatList
+              data={transferList.filter(
+                (t) =>
+                  (t.TransferNo || '').toLowerCase().includes(transferSearchQuery.toLowerCase()) ||
+                  (t.ToLocation || '').toLowerCase().includes(transferSearchQuery.toLowerCase()) ||
+                  (t.TransferDate || '').toLowerCase().includes(transferSearchQuery.toLowerCase())
+              )}
+              keyExtractor={(item) => item.TransferNo}
+              renderItem={({ item }) => (
+                <TouchableOpacity
+                  style={styles.lovItemRow}
+                  onPress={() => {
+                    setBrowseModalVisible(false);
+                    fetchTransferDetails(item.TransferNo);
+                  }}
+                  activeOpacity={0.7}
+                >
+                  <ThemedText style={[styles.lovItemText, styles.codeCell, { flex: 1.8 }]}>
+                    {item.TransferNo}
+                  </ThemedText>
+                  <ThemedText style={[styles.lovItemText, { flex: 1.3 }]}>
+                    {item.TransferDate ? new Date(item.TransferDate).toISOString().split('T')[0] : ''}
+                  </ThemedText>
+                  <ThemedText style={[styles.lovItemText, { flex: 1.2 }]}>{item.ToLocation}</ThemedText>
+                  <ThemedText style={[styles.lovItemText, { flex: 1, textAlign: 'right' }]}>
+                    {Number(item.TotalWeight || 0).toFixed(3)}
+                  </ThemedText>
+                  <ThemedText style={[styles.lovItemText, { flex: 0.8, textAlign: 'right' }]}>
+                    {item.TotalPcs || 0}
+                  </ThemedText>
+                  <ThemedText style={[styles.lovItemText, styles.amountCell, { flex: 1.2, textAlign: 'right' }]}>
+                    {Number(item.TotalCost || 0).toFixed(2)}
+                  </ThemedText>
+                </TouchableOpacity>
+              )}
+            />
+          </View>
+        </View>
+      </Modal>
+
+      {/* SALESMAN PASSWORD AUTH MODAL (matching PnlSalesManPwd in frmTransferOut.vb) */}
+      <Modal visible={salesmanModalVisible} transparent animationType="fade" onRequestClose={() => setSalesmanModalVisible(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={[styles.lovModalCard, { maxWidth: 400 }]}>
+            <View style={styles.modalHeaderBanner}>
+              <View style={styles.headerTitleContainer}>
+                <View style={styles.headerIconBadgeSmall}>
+                  <Ionicons name="lock-closed-outline" size={13} color="#B48218" />
+                </View>
+                <ThemedText style={styles.modalHeaderTitle}>Salesman Authorization</ThemedText>
+              </View>
+              <TouchableOpacity
+                onPress={() => setSalesmanModalVisible(false)}
+                activeOpacity={0.7}
+                style={styles.closeModalBtn}
+              >
+                <Ionicons name="close" size={18} color="#3B2D17" />
+              </TouchableOpacity>
+            </View>
+
+            <View style={{ padding: 16 }}>
+              <ThemedText style={{ fontSize: 12, color: '#5C4A28', marginBottom: 8, fontWeight: 'bold' }}>
+                Enter Salesman Password to authorize transfer:
+              </ThemedText>
+
+              <TextInput
+                style={[styles.formInput, { height: 34, fontSize: 14, marginBottom: 16 }]}
+                value={salesmanPassword}
+                onChangeText={setSalesmanPassword}
+                secureTextEntry
+                placeholder="Password"
+                placeholderTextColor="#9E8D77"
+                onSubmitEditing={handleVerifyAndExecuteTransfer}
+                autoFocus
+              />
+
+              <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 10 }}>
+                <TouchableOpacity
+                  style={[styles.actionBtn, styles.clearBtn, { paddingVertical: 8, paddingHorizontal: 16 }]}
+                  onPress={() => setSalesmanModalVisible(false)}
+                  activeOpacity={0.7}
+                >
+                  <ThemedText style={styles.clearBtnText}>Cancel</ThemedText>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[styles.actionBtn, styles.saveBtn, { paddingVertical: 8, paddingHorizontal: 18 }]}
+                  onPress={handleVerifyAndExecuteTransfer}
+                  activeOpacity={0.8}
+                  disabled={saving}
+                >
+                  {saving ? (
+                    <ActivityIndicator size="small" color="#9E6D08" />
+                  ) : (
+                    <>
+                      <Ionicons name="checkmark-circle-outline" size={15} color="#9E6D08" style={{ marginRight: 4 }} />
+                      <ThemedText style={styles.saveBtnText}>Authorize & Transfer</ThemedText>
+                    </>
+                  )}
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* DISPATCH NOTE PRINT PREVIEW MODAL (matching subPrintTransferOut in frmTransferOut.vb) */}
+      <Modal visible={printModalVisible} transparent animationType="fade" onRequestClose={() => setPrintModalVisible(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={[styles.lovModalCard, { maxWidth: 640 }]}>
+            <View style={styles.modalHeaderBanner}>
+              <View style={styles.headerTitleContainer}>
+                <View style={styles.headerIconBadgeSmall}>
+                  <Ionicons name="print-outline" size={13} color="#B48218" />
+                </View>
+                <ThemedText style={styles.modalHeaderTitle}>Transfer Out Note Preview</ThemedText>
+              </View>
+              <TouchableOpacity
+                onPress={() => setPrintModalVisible(false)}
+                activeOpacity={0.7}
+                style={styles.closeModalBtn}
+              >
+                <Ionicons name="close" size={18} color="#3B2D17" />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView style={{ padding: 16, maxHeight: 420 }}>
+              <View style={{ alignItems: 'center', marginBottom: 12, borderBottomWidth: 1, borderBottomColor: '#E8DCB8', paddingBottom: 10 }}>
+                <ThemedText style={{ fontSize: 16, fontWeight: 'bold', color: '#3B2D17' }}>SMART GOLD POS</ThemedText>
+                <ThemedText style={{ fontSize: 13, fontWeight: 'bold', color: '#8D6409', marginTop: 2 }}>TRANSFER NOTE</ThemedText>
+                <ThemedText style={{ fontSize: 11, color: '#7D5E19' }}>Transfer Voucher #{printedTransferNo || transferNo}</ThemedText>
+              </View>
+
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 10 }}>
+                <View>
+                  <ThemedText style={{ fontSize: 11, color: '#5C4A28' }}>
+                    <ThemedText style={{ fontWeight: 'bold' }}>From Location: </ThemedText>{fromLocation}
+                  </ThemedText>
+                  <ThemedText style={{ fontSize: 11, color: '#5C4A28' }}>
+                    <ThemedText style={{ fontWeight: 'bold' }}>To Location: </ThemedText>{toLocation}
+                  </ThemedText>
+                </View>
+                <View style={{ alignItems: 'flex-end' }}>
+                  <ThemedText style={{ fontSize: 11, color: '#5C4A28' }}>
+                    <ThemedText style={{ fontWeight: 'bold' }}>Date: </ThemedText>{transferDate}
+                  </ThemedText>
+                  <ThemedText style={{ fontSize: 11, color: '#5C4A28' }}>
+                    <ThemedText style={{ fontWeight: 'bold' }}>Salesman: </ThemedText>{verifiedSalesman?.code || 'ADMIN'}
+                  </ThemedText>
+                </View>
+              </View>
+
+              {/* Items Summary Table */}
+              <View style={[styles.tableHeadRow, { backgroundColor: '#F0E6D2' }]}>
+                <ThemedText style={[styles.tableHeadCell, { flex: 1.5 }]}>Item Code</ThemedText>
+                <ThemedText style={[styles.tableHeadCell, { flex: 2.5 }]}>Description</ThemedText>
+                <ThemedText style={[styles.tableHeadCell, { flex: 1, textAlign: 'right' }]}>Weight</ThemedText>
+                <ThemedText style={[styles.tableHeadCell, { flex: 0.8, textAlign: 'right' }]}>Qty</ThemedText>
+                <ThemedText style={[styles.tableHeadCell, { flex: 1.2, textAlign: 'right' }]}>Total ($)</ThemedText>
+              </View>
+              {gridData.map((item, idx) => (
+                <View key={idx} style={[styles.tableRow, { paddingVertical: 4 }]}>
+                  <ThemedText style={[styles.tableCell, styles.codeCell, { flex: 1.5 }]}>{item.InventoryCode}</ThemedText>
+                  <ThemedText style={[styles.tableCell, { flex: 2.5 }]} numberOfLines={1}>{item.Description}</ThemedText>
+                  <ThemedText style={[styles.tableCell, { flex: 1, textAlign: 'right' }]}>{Number(item.Weight || 0).toFixed(3)}</ThemedText>
+                  <ThemedText style={[styles.tableCell, { flex: 0.8, textAlign: 'right' }]}>{item.Pcs || item.QtyonHand || 1}</ThemedText>
+                  <ThemedText style={[styles.tableCell, styles.amountCell, { flex: 1.2, textAlign: 'right' }]}>{Number(item.TotalCost || 0).toFixed(2)}</ThemedText>
+                </View>
+              ))}
+
+              {/* Totals Summary */}
+              <View style={{ marginTop: 12, borderTopWidth: 1, borderTopColor: '#E8DCB8', paddingTop: 8, flexDirection: 'row', justifyContent: 'space-between' }}>
+                <ThemedText style={{ fontSize: 11, fontWeight: 'bold', color: '#3B2D17' }}>
+                  Total Items: {gridData.length} | Total PCS: {totals.PCS}
+                </ThemedText>
+                <View style={{ alignItems: 'flex-end' }}>
+                  <ThemedText style={{ fontSize: 11, fontWeight: 'bold', color: '#3B2D17' }}>
+                    Total Weight: {totals.Weight.toFixed(3)} g
+                  </ThemedText>
+                  <ThemedText style={{ fontSize: 12, fontWeight: 'bold', color: '#8A5D00', marginTop: 2 }}>
+                    Total Amount: ${totals.TotalCost.toFixed(2)}
+                  </ThemedText>
+                </View>
+              </View>
+            </ScrollView>
+
+            <View style={{ padding: 12, borderTopWidth: 1, borderTopColor: '#E8DCB8', backgroundColor: '#FBF9F5', flexDirection: 'row', justifyContent: 'flex-end', gap: 10 }}>
+              <TouchableOpacity
+                style={[styles.actionBtn, styles.clearBtn]}
+                onPress={() => setPrintModalVisible(false)}
+                activeOpacity={0.7}
+              >
+                <ThemedText style={styles.clearBtnText}>Close</ThemedText>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.actionBtn, styles.saveBtn]}
+                onPress={() => {
+                  setPrintModalVisible(false);
+                  showToast('Dispatch Note sent to printer', 'success');
+                }}
+                activeOpacity={0.8}
+              >
+                <Ionicons name="print-outline" size={15} color="#9E6D08" style={{ marginRight: 4 }} />
+                <ThemedText style={styles.saveBtnText}>Send to Printer</ThemedText>
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
       </Modal>
@@ -835,6 +1424,16 @@ const styles = StyleSheet.create({
   reprintBtn: {
     backgroundColor: '#FFFFFF',
     borderColor: '#DFD5C3',
+  },
+  scrapBtn: {
+    backgroundColor: '#FFF0F2',
+    borderColor: '#D9Aab0',
+  },
+  scrapBtnText: {
+    fontSize: 12,
+    fontWeight: 'bold',
+    color: '#8A3B47',
+    marginLeft: 4,
   },
   saveBtn: {
     backgroundColor: '#F9F2E2',
@@ -1079,6 +1678,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     flexWrap: 'wrap',
     gap: 12,
+  },
+  subformField: {
+    flex: 1,
+    minWidth: 85,
+  },
+  subformLabel: {
+    fontSize: 10,
+    fontWeight: 'bold',
+    color: '#3B2D17',
+    marginBottom: 3,
   },
   tableActionBtn: {
     flexDirection: 'row',

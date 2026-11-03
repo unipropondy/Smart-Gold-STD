@@ -104,19 +104,45 @@ export default function ETRSTicketScreen() {
 
     setLoadingInvoice(true);
     try {
-      // 0. Check if an eTRS statement already exists for this Invoice/Bill No
+      // 0. Check if an eTRS statement already exists in tbleTRSStatement for this Invoice/Bill No
+      let existingEtrsFound = false;
       try {
         const etrsRes = await fetch(`${API_BASE_URL}/paymententry/etrs/${encodeURIComponent(invoiceNo.trim())}`);
         const etrsJson = await etrsRes.json();
         if (etrsJson.success && etrsJson.data) {
+          existingEtrsFound = true;
           const ed = etrsJson.data;
           if (ed.PassPortNo) setPassportNo(ed.PassPortNo);
           if (ed.DocId) setEtrsDocId(ed.DocId);
-          if (ed.eTRSIssueDate) setIssueDate(ed.eTRSIssueDate);
+          if (ed.NetAmount != null) setNetAmount(String(ed.NetAmount));
+          if (ed.Gst != null) setGstAmount(String(ed.Gst));
+          if (ed.BillDay && ed.BillMonth && ed.BillYear) {
+            setInvoiceDay(String(ed.BillDay).padStart(2, '0'));
+            setInvoiceMonth(String(ed.BillMonth).padStart(2, '0'));
+            setInvoiceYear(String(ed.BillYear));
+          } else if (ed.BillDate) {
+            const bd = new Date(ed.BillDate);
+            if (!isNaN(bd.getTime())) {
+              setInvoiceDay(String(bd.getDate()).padStart(2, '0'));
+              setInvoiceMonth(String(bd.getMonth() + 1).padStart(2, '0'));
+              setInvoiceYear(String(bd.getFullYear()));
+            }
+          }
+          if (ed.eTRSIssueDate) {
+            const id = new Date(ed.eTRSIssueDate);
+            if (!isNaN(id.getTime())) {
+              setIssueDate(`${id.getDate()} ${id.toLocaleString('default', { month: 'long' })} ${id.getFullYear()}`);
+            } else {
+              setIssueDate(String(ed.eTRSIssueDate));
+            }
+          }
           if (ed.eTRSIssueTime) setIssueTime(ed.eTRSIssueTime);
           if (ed.Remarks) setRemarks(ed.Remarks);
           if (ed.SalesmanCode) setSelectedStaff(ed.SalesmanCode);
-          if (ed.CustomerImage) setPhotoUri(ed.CustomerImage);
+          if (ed.CustomerImage) {
+            // Restore saved customer image data URL
+            setPhotoUri(ed.CustomerImage);
+          }
         }
       } catch (e) {
         console.warn('Error fetching existing eTRS statement:', e);
@@ -189,7 +215,7 @@ export default function ETRSTicketScreen() {
               setInvoiceYear(parts[2]);
             }
           }
-        } else {
+        } else if (!existingEtrsFound) {
           if (Platform.OS === 'web') {
             window.alert('Invoice not found.');
           } else {
@@ -275,7 +301,10 @@ export default function ETRSTicketScreen() {
       const payload = {
         type: 'eTRS',
         invoiceNo: invoiceNo.trim(),
-        passportNo,
+        day: invoiceDay,
+        month: invoiceMonth,
+        year: invoiceYear,
+        passportNo: passportNo.trim(),
         netAmount,
         gstAmount,
         etrsDocId: etrsDocId.trim(),
@@ -297,6 +326,16 @@ export default function ETRSTicketScreen() {
       const json = await res.json();
 
       if (json.success) {
+        // Re-fetch saved statement to verify persistence and ensure UI reflects actual DB state
+        try {
+          const verifyRes = await fetch(`${API_BASE_URL}/paymententry/etrs/${encodeURIComponent(invoiceNo.trim())}`);
+          const verifyJson = await verifyRes.json();
+          if (verifyJson.success && verifyJson.data && verifyJson.data.CustomerImage) {
+            setPhotoUri(verifyJson.data.CustomerImage);
+          }
+        } catch (vErr) {
+          console.warn('Post-save verification query error:', vErr);
+        }
         const msg = 'eTRS Statement saved successfully!';
         Platform.OS === 'web' ? window.alert(msg) : Alert.alert('Success', msg);
       } else {
