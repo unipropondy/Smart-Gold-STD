@@ -1,11 +1,12 @@
 const express = require('express');
+const { sql } = require('../db');
 const router = express.Router();
 
 // GET /api/scheme/customers - Dynamic Customer Help Search with Whitelist & Parameterized Query
 router.get('/customers', async (req, res) => {
     try {
         const pool = req.pool;
-        const { searchField = 'CustomerName', searchText = '', searchMode = 'Start', page, limit } = req.query;
+        const { searchField = 'CustomerName', searchText = '', searchMode = 'Any', page, limit } = req.query;
 
         // Whitelist allowed search columns
         const allowedFields = {
@@ -33,7 +34,7 @@ router.get('/customers', async (req, res) => {
         let countQuery = `SELECT COUNT(*) AS total FROM tblCustomer`;
         if (cleanText) {
             countRequest.input('SearchText', searchPattern);
-            countQuery += ` WHERE ${col} LIKE @SearchText`;
+            countQuery += ` WHERE RTRIM(${col}) LIKE @SearchText`;
         }
         const countRes = await countRequest.query(countQuery);
         const total = countRes.recordset[0].total;
@@ -41,16 +42,16 @@ router.get('/customers', async (req, res) => {
         const dataRequest = pool.request();
         let dataQuery = `
             SELECT 
-                RTRIM(CustomerCode) AS CustomerCode, 
-                RTRIM(CustomerName) AS CustomerName, 
-                RTRIM(NricNo) AS NricNo, 
-                RTRIM(Address1) AS Address1 
+                ISNULL(RTRIM(CustomerCode), '') AS CustomerCode, 
+                ISNULL(RTRIM(CustomerName), '') AS CustomerName, 
+                ISNULL(RTRIM(NricNo), '') AS NricNo, 
+                ISNULL(RTRIM(Address1), '') AS Address1 
             FROM tblCustomer
         `;
 
         if (cleanText) {
             dataRequest.input('SearchText', searchPattern);
-            dataQuery += ` WHERE ${col} LIKE @SearchText`;
+            dataQuery += ` WHERE RTRIM(${col}) LIKE @SearchText`;
         }
         dataQuery += ` ORDER BY CustomerName`;
 
@@ -76,7 +77,7 @@ router.get('/customers', async (req, res) => {
 });
 
 // GET /api/scheme/customer-detail/:customerCode - Customer Lookup with HQ logic fallback
-router.get('/customer-detail/:customerCode', async (req, res) => {
+const customerDetailHandler = async (req, res) => {
     try {
         const pool = req.pool;
         const customerCode = req.params.customerCode ? req.params.customerCode.trim() : '';
@@ -106,7 +107,7 @@ router.get('/customer-detail/:customerCode', async (req, res) => {
                     RTRIM(Address2) AS Address2, 
                     RTRIM(Address3) AS Address3 
                 FROM tblCustomer 
-                WHERE CustomerCode = @CustomerCode
+                WHERE RTRIM(CustomerCode) = RTRIM(@CustomerCode)
             `);
 
         if (result.recordset.length > 0) {
@@ -140,7 +141,10 @@ router.get('/customer-detail/:customerCode', async (req, res) => {
         console.error("Error fetching customer for scheme:", err);
         res.status(500).json({ success: false, message: "Error fetching customer details" });
     }
-});
+};
+
+router.get('/customer/:customerCode', customerDetailHandler);
+router.get('/customer-detail/:customerCode', customerDetailHandler);
 
 // GET /api/scheme/master - Dynamic Scheme Master Help Search
 router.get('/master', async (req, res) => {
@@ -173,7 +177,7 @@ router.get('/master', async (req, res) => {
         let countQuery = `SELECT COUNT(*) AS total FROM tblSchemeMaster`;
         if (cleanText) {
             countRequest.input('SearchText', searchPattern);
-            countQuery += ` WHERE ${col} LIKE @SearchText`;
+            countQuery += ` WHERE RTRIM(${col}) LIKE @SearchText`;
         }
         const countRes = await countRequest.query(countQuery);
         const total = countRes.recordset[0].total;
@@ -190,7 +194,7 @@ router.get('/master', async (req, res) => {
 
         if (cleanText) {
             dataRequest.input('SearchText', searchPattern);
-            dataQuery += ` WHERE ${col} LIKE @SearchText`;
+            dataQuery += ` WHERE RTRIM(${col}) LIKE @SearchText`;
         }
         dataQuery += ` ORDER BY Description`;
 
@@ -276,31 +280,75 @@ router.post('/salesman/validate', async (req, res) => {
     }
 });
 
-// GET /api/scheme/next-number - Generate next Scheme No in "GS-XXXXX" format
+// GET /api/scheme/next-number - Generate next Scheme No in "GS-XXXXX" format from actual database records
 router.get('/next-number', async (req, res) => {
     try {
         const pool = req.pool;
-        // Query max number from existing transactions or counter
+        // Query maximum numeric Scheme No across both transaction tables
         const result = await pool.request()
             .query(`
-                SELECT TOP 1 InvoiceNo 
-                FROM tblMemberTransactionAJ 
-                WHERE InvoiceNo LIKE 'GS-%' 
-                ORDER BY InvoiceNo DESC
+                SELECT ISNULL(MAX(CAST(SUBSTRING(RTRIM(InvoiceNo), 4, 30) AS INT)), 10000) AS MaxNum
+                FROM (
+                    SELECT InvoiceNo FROM tblMemberTransactionAJ WHERE InvoiceNo LIKE 'GS-%' AND ISNUMERIC(SUBSTRING(RTRIM(InvoiceNo), 4, 30)) = 1
+                    UNION ALL
+                    SELECT InvoiceNo FROM tblPayModeDetail WHERE InvoiceNo LIKE 'GS-%' AND ISNUMERIC(SUBSTRING(RTRIM(InvoiceNo), 4, 30)) = 1
+                ) t
             `);
 
-        let nextNum = 10001;
-        if (result.recordset.length > 0 && result.recordset[0].InvoiceNo) {
-            const raw = result.recordset[0].InvoiceNo.replace('GS-', '');
-            const parsed = parseInt(raw, 10);
-            if (!isNaN(parsed)) {
-                nextNum = parsed + 1;
-            }
-        }
+        const maxNum = result.recordset[0]?.MaxNum || 10000;
+        const nextNum = maxNum + 1;
         res.json({ success: true, schemeNo: `GS-${nextNum}` });
     } catch (err) {
-        console.error("Error getting next scheme number:", err);
-        res.json({ success: true, schemeNo: `GS-${Date.now().toString().slice(-5)}` });
+        console.error("Error getting next scheme number from SQL Server:", err);
+        res.status(500).json({ success: false, message: "Error generating next Scheme Number from database", error: err.message });
+    }
+});
+
+// GET /api/scheme/daily-rate - Fetch current applicable Gold Daily Rate from SQL Server
+router.get('/daily-rate', async (req, res) => {
+    try {
+        const pool = req.pool;
+        const curDate = new Date().toISOString().slice(0, 10);
+
+        const sqlQuery = `
+            SELECT 
+                ISNULL(
+                    (SELECT TOP 1 Rate FROM tblClassRate WHERE ClassCode IN ('22K', '22K-916', '916') AND @curDate BETWEEN FromDate AND ToDate ORDER BY FromDate DESC),
+                    ISNULL(
+                        (SELECT TOP 1 Rate FROM tblClass WHERE ClassCode IN ('22K', '22K-916', '916')),
+                        (SELECT TOP 1 Rate FROM tblClass WHERE Rate > 0 ORDER BY Rate DESC)
+                    )
+                ) AS DailyRate22K,
+                ISNULL(
+                    (SELECT TOP 1 Rate FROM tblClassRate WHERE ClassCode IN ('24K', '24K-999', '999') AND @curDate BETWEEN FromDate AND ToDate ORDER BY FromDate DESC),
+                    ISNULL(
+                        (SELECT TOP 1 Rate FROM tblClass WHERE ClassCode IN ('24K', '24K-999', '999')),
+                        (SELECT TOP 1 Rate FROM tblClass WHERE Rate > 0 ORDER BY Rate DESC)
+                    )
+                ) AS DailyRate24K,
+                ISNULL(
+                    (SELECT TOP 1 Rate FROM tblClassRate WHERE @curDate BETWEEN FromDate AND ToDate ORDER BY Rate DESC),
+                    (SELECT TOP 1 Rate FROM tblClass WHERE Rate > 0 ORDER BY Rate DESC)
+                ) AS ActiveDailyRate
+        `;
+
+        const result = await pool.request()
+            .input('curDate', sql.Date, curDate)
+            .query(sqlQuery);
+
+        const row = result.recordset[0] || {};
+        const dailyRate = Number(row.DailyRate22K || row.ActiveDailyRate || row.DailyRate24K || 0);
+
+        res.json({
+            success: true,
+            dailyRate: dailyRate,
+            dailyRate22K: Number(row.DailyRate22K || 0),
+            dailyRate24K: Number(row.DailyRate24K || 0),
+            activeDailyRate: Number(row.ActiveDailyRate || 0)
+        });
+    } catch (err) {
+        console.error("Error fetching daily rate from database:", err);
+        res.status(500).json({ success: false, message: "Error fetching daily rate", error: err.message });
     }
 });
 
@@ -317,8 +365,16 @@ router.get('/transactions/:customerCode', async (req, res) => {
                     RTRIM(m.InvoiceNo) AS InvoiceNo,
                     CONVERT(varchar, m.InvoiceDate, 103) AS InvoiceDate,
                     ISNULL(m.InvoiceAmount, 0) AS SchemeAmount,
-                    ISNULL(sd.DailyRate, 0) AS DailyRate,
-                    ISNULL(sd.Weight, ISNULL(m.RewardPoints, 0)) AS WeightAccured
+                    CASE 
+                        WHEN ISNULL(sd.DailyRate, 0) > 0 THEN sd.DailyRate
+                        WHEN ISNULL(m.InvoiceRedeemedPoints, 0) > 0 THEN m.InvoiceRedeemedPoints
+                        ELSE 0
+                    END AS DailyRate,
+                    CASE 
+                        WHEN ISNULL(sd.Weight, 0) > 0 THEN sd.Weight
+                        WHEN ISNULL(m.RewardPoints, 0) > 0 THEN m.RewardPoints
+                        ELSE 0
+                    END AS WeightAccured
                 FROM tblMemberTransactionAJ m
                 LEFT JOIN tblSalesDetail sd ON RTRIM(m.InvoiceNo) = RTRIM(sd.InvoiceNo)
                 WHERE RTRIM(m.CustomerCode) = @CustomerCode
@@ -338,7 +394,7 @@ router.post('/transaction', async (req, res) => {
     const { 
         customerCode, customerName, customerType, 
         salesmanCode, schemeCode, schemeValue, 
-        mode, paymentMode, paymentAmount, payments 
+        mode, dailyRate, paymentMode, paymentAmount, payments 
     } = req.body;
 
     if (!salesmanCode) {
@@ -362,67 +418,124 @@ router.post('/transaction', async (req, res) => {
         transaction = pool.transaction();
         await transaction.begin();
 
-        // 1. Get Next Scheme No inside transaction
+        // 1. Atomically obtain next Scheme No and Company LocationCode with XLOCK inside SQL Transaction
         const nextRes = await transaction.request()
             .query(`
-                SELECT TOP 1 InvoiceNo 
-                FROM tblMemberTransactionAJ 
-                WHERE InvoiceNo LIKE 'GS-%' 
-                ORDER BY InvoiceNo DESC
+                SELECT 
+                    ISNULL((
+                        SELECT ISNULL(MAX(CAST(SUBSTRING(RTRIM(InvoiceNo), 4, 30) AS INT)), 10000)
+                        FROM (
+                            SELECT InvoiceNo FROM tblMemberTransactionAJ WITH (TABLOCKX, HOLDLOCK) WHERE InvoiceNo LIKE 'GS-%' AND ISNUMERIC(SUBSTRING(RTRIM(InvoiceNo), 4, 30)) = 1
+                            UNION ALL
+                            SELECT InvoiceNo FROM tblPayModeDetail WITH (TABLOCKX, HOLDLOCK) WHERE InvoiceNo LIKE 'GS-%' AND ISNUMERIC(SUBSTRING(RTRIM(InvoiceNo), 4, 30)) = 1
+                        ) t
+                    ), 10000) AS MaxNum,
+                    ISNULL((SELECT TOP 1 LocationCode FROM tblCompany), 'HQ') AS LocationCode
             `);
 
-        let nextNum = 10001;
-        if (nextRes.recordset.length > 0 && nextRes.recordset[0].InvoiceNo) {
-            const raw = nextRes.recordset[0].InvoiceNo.replace('GS-', '');
-            const parsed = parseInt(raw, 10);
-            if (!isNaN(parsed)) nextNum = parsed + 1;
-        }
-        const schemeNo = `GS-${nextNum}`;
+        const maxNum = nextRes.recordset[0]?.MaxNum || 10000;
+        const locationCode = (nextRes.recordset[0]?.LocationCode || 'HQ').toString().trim();
+        const schemeNo = `GS-${maxNum + 1}`;
 
-        // 2. Insert into tblMemberTransactionAJ
+        // 2. Resolve Daily Rate from database if not supplied or 0
+        let effectiveDailyRate = parseFloat(dailyRate) || 0;
+        if (effectiveDailyRate <= 0) {
+            const curDate = new Date().toISOString().slice(0, 10);
+            const rateRes = await transaction.request()
+                .input('curDate', sql.Date, curDate)
+                .query(`
+                    SELECT ISNULL(
+                        (SELECT TOP 1 Rate FROM tblClassRate WHERE ClassCode IN ('22K', '22K-916', '916') AND @curDate BETWEEN FromDate AND ToDate ORDER BY FromDate DESC),
+                        ISNULL(
+                            (SELECT TOP 1 Rate FROM tblClass WHERE ClassCode IN ('22K', '22K-916', '916')),
+                            (SELECT TOP 1 Rate FROM tblClass WHERE Rate > 0 ORDER BY Rate DESC)
+                        )
+                    ) AS Rate
+                `);
+            effectiveDailyRate = parseFloat(rateRes.recordset[0]?.Rate) || 0;
+        }
+
+        // Calculate accrued weight according to transaction mode:
+        // By Gram mode: Scheme Value is the Gram quantity -> Scheme Amount = Grams * DailyRate
+        // By Value mode: Scheme Value is Amount -> Accrued Grams = Amount / DailyRate
+        let finalSchemeAmount = numericSchemeVal;
+        let accruedWeight = 0;
+
+        if (mode === 'GRAM') {
+            accruedWeight = numericSchemeVal;
+            if (effectiveDailyRate > 0) {
+                finalSchemeAmount = parseFloat((numericSchemeVal * effectiveDailyRate).toFixed(2));
+            }
+        } else {
+            // Mode: VALUE
+            finalSchemeAmount = numericSchemeVal;
+            if (effectiveDailyRate > 0) {
+                accruedWeight = parseFloat((numericSchemeVal / effectiveDailyRate).toFixed(3));
+            }
+        }
+
+        // Insert into tblMemberTransactionAJ: store daily rate in InvoiceRedeemedPoints, weight in RewardPoints
         await transaction.request()
             .input('LocationCode', 'HQ')
             .input('CustomerCode', customerCode)
             .input('InvoiceNo', schemeNo)
             .input('InvoiceDate', new Date())
-            .input('InvoiceAmount', numericSchemeVal)
-            .input('RewardPoints', mode === 'GRAM' ? numericSchemeVal : 0)
+            .input('InvoiceAmount', finalSchemeAmount)
+            .input('RewardPoints', accruedWeight)
             .input('RedeemPoints', 0)
+            .input('InvoiceRedeemedPoints', effectiveDailyRate)
             .input('CreateUser', salesmanCode || 'SYSTEM')
-            .input('Remarks', `Mode: ${mode || 'VALUE'}`)
+            .input('Remarks', `Mode: ${mode || 'VALUE'} | Rate: ${effectiveDailyRate}`)
             .query(`
                 INSERT INTO tblMemberTransactionAJ (
                     LocationCode, CustomerCode, InvoiceNo, InvoiceDate, 
-                    InvoiceAmount, RewardPoints, RedeemPoints, CreateUser, CreateDate, Remarks
+                    InvoiceAmount, RewardPoints, RedeemPoints, InvoiceRedeemedPoints, CreateUser, CreateDate, Remarks
                 ) VALUES (
                     @LocationCode, @CustomerCode, @InvoiceNo, @InvoiceDate, 
-                    @InvoiceAmount, @RewardPoints, @RedeemPoints, @CreateUser, GETDATE(), @Remarks
+                    @InvoiceAmount, @RewardPoints, @RedeemPoints, @InvoiceRedeemedPoints, @CreateUser, GETDATE(), @Remarks
                 )
             `);
 
-        // 3. Save Payment Modes into tblPayModeDetail
+        // 3. Save Payment Modes into tblPayModeDetail with all columns correctly populated
         const paymentList = Array.isArray(payments) && payments.length > 0 
             ? payments 
-            : [{ paymode: paymentMode || 'CASH', amount: parseFloat(paymentAmount) || numericSchemeVal }];
+            : [{ paymode: paymentMode || 'CASH', amount: parseFloat(paymentAmount) || numericSchemeVal, slipNo: '', commission: 0 }];
+
+        const now = new Date();
+        const currentUser = (salesmanCode || 'SYSTEM').toString().trim();
 
         for (const p of paymentList) {
-            const pAmt = parseFloat(p.amount) || 0;
+            const pAmt = parseFloat(p.amount || p.Amount) || 0;
             if (pAmt > 0) {
-                const pm = p.paymode || 'CASH';
+                const pm = (p.paymode || p.PayMode || 'CASH').toString().trim();
+                // Follow VB.NET: SlipNo is empty string for CASH or if not provided
+                const slipNo = (p.slipNo || p.SlipNo || p.remarks || '').toString().trim();
+                // Follow VB.NET: Commision is 0.00 by default (numeric), not NULL
+                const comm = parseFloat(p.commission || p.Commission) || 0;
+
                 await transaction.request()
-                    .input('InvoiceNo', schemeNo)
-                    .input('InvoiceDate', new Date())
-                    .input('Paymode', pm)
-                    .input('Amount', pAmt)
-                    .input('SalesType', 'SCHEME')
-                    .input('CreateUser', salesmanCode || 'SYSTEM')
+                    .input('InvoiceNo', sql.Char(20), schemeNo)
+                    .input('InvoiceDate', sql.SmallDateTime, now)
+                    .input('Paymode', sql.VarChar(20), pm)
+                    .input('Amount', sql.Numeric(18, 2), pAmt)
+                    .input('Commision', sql.Numeric(18, 2), comm)
+                    .input('SlipNo', sql.VarChar(50), slipNo)
+                    .input('CreateUser', sql.Char(10), currentUser)
+                    .input('CreateDate', sql.SmallDateTime, now)
+                    .input('ModifyUser', sql.Char(10), currentUser)
+                    .input('ModifyDate', sql.SmallDateTime, now)
+                    .input('LocationCode', sql.VarChar(20), locationCode || 'HQ')
+                    .input('SalesType', sql.VarChar(20), 'SCHEME')
+                    .input('IsPaid', sql.Bit, 1)
                     .query(`
                         IF EXISTS (SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'tblPayModeDetail')
                         BEGIN
                             INSERT INTO tblPayModeDetail (
-                                InvoiceNo, InvoiceDate, Paymode, Amount, SalesType, CreateUser, CreateDate
+                                InvoiceNo, InvoiceDate, PayMode, Amount, Commision, SlipNo,
+                                CreateUser, CreateDate, ModifyUser, ModifyDate, LocationCode, SalesType, IsPaid
                             ) VALUES (
-                                @InvoiceNo, @InvoiceDate, @Paymode, @Amount, @SalesType, @CreateUser, GETDATE()
+                                @InvoiceNo, @InvoiceDate, @Paymode, @Amount, @Commision, @SlipNo,
+                                @CreateUser, @CreateDate, @ModifyUser, @ModifyDate, @LocationCode, @SalesType, @IsPaid
                             )
                         END
                     `);

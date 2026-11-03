@@ -643,7 +643,23 @@ router.post("/scan", async (req, res) => {
         if (!invMatch.recordset || invMatch.recordset.length === 0) {
           invMatch = await fbReq.query(`
             SELECT TOP 1
-              RTRIM(JobSheetNo) + '-' + CAST(ID AS varchar(10)) AS InventoryCode,
+              RTRIM(InventoryCode) AS InventoryCode,
+              RTRIM(CatalogueCode) AS CatalogueCode,
+              RTRIM(Description) AS Description,
+              ISNULL(Weight, 0) AS Weight,
+              ISNULL(CostPerGram, 0) AS CostPerGram,
+              ISNULL(TotalCost, 0) AS TotalCost,
+              RTRIM(CategoryCode) AS CategoryCode,
+              ISNULL(JobSheetNo, '') AS JobSheetNo
+            FROM tblPurchase
+            WHERE (UPPER(RTRIM(InventoryCode)) = UPPER(RTRIM(@inventoryCode)) OR UPPER(RTRIM(CatalogueCode)) = UPPER(RTRIM(@inventoryCode)))
+          `);
+        }
+
+        if (!invMatch.recordset || invMatch.recordset.length === 0) {
+          invMatch = await fbReq.query(`
+            SELECT TOP 1
+              RTRIM(JobSheetNo) + '-' + CAST(ROW_NUMBER() OVER(ORDER BY CatalogueCode) AS varchar(10)) AS InventoryCode,
               RTRIM(CatalogueCode) AS CatalogueCode,
               RTRIM(Description) AS Description,
               ISNULL(Weight, 0) AS Weight,
@@ -1208,10 +1224,10 @@ router.post("/report", async (req, res) => {
 
     const normalizedMode = String(mode).toLowerCase().trim();
     if (normalizedMode === "scanned") {
-      whereClause += " AND s.TrayID <> 'X'";
+      whereClause += " AND (s.Scanned = 1 OR (s.TrayID IS NOT NULL AND RTRIM(s.TrayID) <> '' AND UPPER(RTRIM(s.TrayID)) <> 'X'))";
       reportModeTitle = "Purchase Take Report  -Scanned Items";
     } else if (normalizedMode === "unscanned") {
-      whereClause += " AND s.TrayID = 'X'";
+      whereClause += " AND (s.Scanned = 0 OR s.Scanned IS NULL) AND (s.TrayID IS NULL OR RTRIM(s.TrayID) = '' OR UPPER(RTRIM(s.TrayID)) = 'X')";
       reportModeTitle = "Purchase Take Report  -UnScanned Items";
     }
 
@@ -1245,12 +1261,15 @@ router.post("/report", async (req, res) => {
         ISNULL(s.TotalCost, 0) AS TotalCost,
         s.ModifyDate,
         CASE 
-          WHEN s.TrayID IS NOT NULL AND RTRIM(s.TrayID) <> 'X' AND RTRIM(s.TrayID) <> '' THEN 'Scanned'
+          WHEN s.Scanned = 1 OR (s.TrayID IS NOT NULL AND RTRIM(s.TrayID) <> 'X' AND RTRIM(s.TrayID) <> '') THEN 'Scanned'
           ELSE 'Unscanned'
         END AS Status
       FROM tblPurchasestock s WITH (NOLOCK)
       ${whereClause}
-      ORDER BY s.TrayID ASC, s.InventoryCode ASC
+      ORDER BY 
+        CASE WHEN s.Scanned = 1 OR (s.TrayID IS NOT NULL AND RTRIM(s.TrayID) <> 'X' AND RTRIM(s.TrayID) <> '') THEN 0 ELSE 1 END ASC,
+        s.TrayID ASC, 
+        s.InventoryCode ASC
     `;
 
     const result = await request.query(query);
@@ -1267,16 +1286,13 @@ router.post("/report", async (req, res) => {
     });
 
     const columns = [
-      { key: "TrayID", label: "TRAY ID", width: 100, align: "center" },
-      { key: "InventoryCode", label: "INV. CODE", width: 140 },
-      { key: "JobSheetNo", label: "JOBSHEET NO.", width: 120, align: "center" },
-      { key: "Description", label: "DESC.", width: 200 },
-      { key: "CategoryCode", label: "CATEGORY", width: 100, align: "center" },
-      { key: "PCS", label: "TOTAL QTY.", width: 80, align: "center" },
-      { key: "Weight", label: "TOTAL WT.", width: 110, align: "right", format: "decimal3" },
-      { key: "CostPerGram", label: "PURCH. COST", width: 110, align: "right", format: "currency" },
-      { key: "TotalCost", label: "TOTAL COST", width: 120, align: "right", format: "currency" },
-      { key: "Status", label: "STATUS", width: 100, align: "center" },
+      { key: "TrayID", label: "TRAY ID", width: 55, align: "center" },
+      { key: "InventoryCode", label: "INV. CODE", width: 105, align: "center" },
+      { key: "Description", label: "DESC.", width: 235, align: "left" },
+      { key: "CategoryCode", label: "CATEGORY", width: 85, align: "center" },
+      { key: "PCS", label: "TOTAL QTY.", width: 75, align: "center" },
+      { key: "Weight", label: "TOTAL WT.", width: 80, align: "right", format: "decimal3" },
+      { key: "TotalCost", label: "TOTAL COST", width: 85, align: "right", format: "currency" },
     ];
 
     res.json({
@@ -1302,9 +1318,10 @@ router.post("/report", async (req, res) => {
 router.post("/download-html", async (req, res) => {
   try {
     const { generateReportHtml } = require("../utils/reportHtmlTemplate");
-    const { title, columns, data, totals, companyInfo, fromDate, toDate, showPrintButton } = req.body;
+    const { title, subtitle, columns, data, totals, companyInfo, fromDate, toDate, showPrintButton } = req.body;
     const html = await generateReportHtml({
       title: title || "Purchase Take Report",
+      subtitle: subtitle || "",
       columns,
       data,
       totals,
@@ -1313,6 +1330,7 @@ router.post("/download-html", async (req, res) => {
       toDate,
       showPrintButton: showPrintButton ?? false,
       pool: req.pool,
+      orientation: "portrait",
     });
     res.setHeader("Content-Type", "text/html; charset=utf-8");
     res.send(html);

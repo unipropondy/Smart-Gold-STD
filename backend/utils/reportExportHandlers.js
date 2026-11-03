@@ -55,15 +55,16 @@ function handleExportExcel({ req, res, defaultTitle = "Report" }) {
 /**
  * Handle exporting a report to a PDF matching the exact print preview layout
  */
-async function handleExportPdf({ req, res, defaultTitle = "Report" }) {
+async function handleExportPdf({ req, res, defaultTitle = "Report", orientation = null }) {
   try {
-    const { title, columns, data, totals, companyInfo, fromDate, toDate } = req.body;
+    const { title, subtitle, columns, data, totals, companyInfo, fromDate, toDate, orientation: reqOrientation } = req.body;
     if (!columns || !Array.isArray(columns) || !data || !Array.isArray(data)) {
       return res.status(400).json({ success: false, message: "Columns and data arrays are required for export." });
     }
 
     const html = await generateReportHtml({
       title: title || defaultTitle,
+      subtitle: subtitle || "",
       columns,
       data,
       totals,
@@ -72,6 +73,7 @@ async function handleExportPdf({ req, res, defaultTitle = "Report" }) {
       toDate,
       pool: req.pool,
       showPrintButton: false,
+      orientation: reqOrientation || orientation || "portrait",
     });
 
     const pdfBuffer = await convertHtmlToPdf(html);

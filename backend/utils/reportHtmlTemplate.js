@@ -322,7 +322,8 @@ const getIsTextCol = (c) => {
     lower === "billno" || lower === "billnumber" || lower === "orderno" ||
     lower === "orderdatetime" || lower === "categorycode" || lower === "classcode" ||
     lower === "customercode" || lower === "suppliercode" || lower === "locationcode" ||
-    lower === "mobile" || lower === "phone"
+    lower === "mobile" || lower === "phone" || lower === "inventorycode" || lower === "invcode" ||
+    lower === "cataloguecode" || lower === "jobsheetno" || lower === "trayid"
   ) {
     return true;
   }
@@ -406,6 +407,7 @@ async function generateReportHtml({
   showPrintButton = false,
   showStatCards = false,
   subtitle = "",
+  orientation = "portrait",
 }) {
   // Query company dynamically from tblCompany if not supplied or incomplete
   let comp = companyInfo || {};
@@ -500,6 +502,11 @@ async function generateReportHtml({
       ? `${Number(totals.totalBalancePoints).toLocaleString()} pts`
       : "-";
 
+  const isLandscape = orientation === "landscape";
+  const pageSizeStr = isLandscape ? "A4 landscape" : "A4 portrait";
+  const pageSheetWidth = isLandscape ? "297mm" : "210mm";
+  const pageSheetMinHeight = isLandscape ? "210mm" : "297mm";
+
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -507,8 +514,8 @@ async function generateReportHtml({
   <title>${title || "Report"}</title>
   <style>
     @page {
-      size: A4 portrait;
-      margin: 0;
+      size: ${pageSizeStr};
+      margin: 10mm;
     }
     * {
       box-sizing: border-box;
@@ -521,14 +528,15 @@ async function generateReportHtml({
       background: #fbf9f5;
       font-family: Cambria, Georgia, "Times New Roman", serif;
       color: #3b2d17;
-      font-size: 11px;
+      font-size: 10px;
     }
     .page-sheet {
-      width: 210mm;
-      min-height: 297mm;
+      width: ${pageSheetWidth};
+      min-height: ${pageSheetMinHeight};
       margin: 15px auto;
       background: #ffffff;
-      padding: 12mm 12mm 14mm 12mm;
+      padding: 10mm;
+      box-sizing: border-box;
       border: none;
       box-shadow: none;
       position: relative;
@@ -670,10 +678,10 @@ async function generateReportHtml({
       color: #ffffff !important;
       font-weight: 700 !important;
       font-family: Cambria, Georgia, serif;
-      padding: 9px 10px;
-      letter-spacing: 0.5px;
+      padding: 7px 6px;
+      letter-spacing: 0.3px;
       border: 0.75px solid #d4a742;
-      font-size: 10.5px;
+      font-size: 9.5px;
       line-height: 1.2;
       text-align: center !important;
       box-sizing: border-box;
@@ -681,11 +689,11 @@ async function generateReportHtml({
       text-transform: uppercase !important;
     }
     table.report-table tbody td {
-      padding: 6px 8px;
+      padding: 5px 6px;
       color: #3b2d17;
       font-family: Cambria, Georgia, serif;
       border: 0.75px solid #f0d9a0;
-      font-size: 11px;
+      font-size: 9.5px;
       line-height: 1.25;
       text-align: center !important;
       box-sizing: border-box;
@@ -708,8 +716,8 @@ async function generateReportHtml({
       border: 0.75px solid #f0d9a0 !important;
       border-top: 0.75px solid #f0d9a0 !important;
       border-bottom: 0.75px solid #f0d9a0 !important;
-      padding: 8px 8px;
-      font-size: 12px;
+      padding: 6px 6px;
+      font-size: 10px;
       text-align: center !important;
     }
     /* FOOTER */
@@ -764,8 +772,8 @@ async function generateReportHtml({
     }
     @media print {
       @page {
-        margin: 0;
-        size: A4 portrait;
+        margin: 10mm;
+        size: ${pageSizeStr};
       }
       body {
         background: #fff !important;
@@ -777,9 +785,9 @@ async function generateReportHtml({
       }
       .page-sheet {
         width: 100% !important;
-        min-height: 100vh !important;
+        min-height: auto !important;
         margin: 0 !important;
-        padding: 10mm 10mm 10mm 10mm !important;
+        padding: 0 !important;
         border: none !important;
         box-shadow: none !important;
       }
@@ -873,6 +881,15 @@ async function generateReportHtml({
               `;
             }
             if (cols.length > 0) {
+              const hasExplicitWidth = cols.some(c => c.width);
+              if (hasExplicitWidth) {
+                const totalColWidth = cols.reduce((sum, c) => sum + (Number(c.width) || 100), 0);
+                return cols.map(c => {
+                  const w = Number(c.width) || 100;
+                  const pct = ((w / totalColWidth) * 100).toFixed(2);
+                  return `<col style="width: ${pct}%;" />`;
+                }).join("");
+              }
               const pct = (100 / cols.length).toFixed(2);
               return cols.map(() => `<col style="width: ${pct}%;" />`).join("");
             }
@@ -902,7 +919,7 @@ async function generateReportHtml({
                     ${(columns || [])
                       .map(
                         (c) => `
-                      <td>
+                      <td style="${c.align ? `text-align: ${c.align} !important;` : ''}">
                         ${formatVal(row[c.key], c.format, c.key)}
                       </td>
                     `
@@ -1067,29 +1084,30 @@ async function generateReportHtml({
             <tr class="totals-row">
               ${(columns || [])
                 .map((c, cIdx) => {
-                  if (cIdx === 0) return `<td>TOTAL:</td>`;
+                  const alignStyle = c.align ? `text-align: ${c.align} !important;` : '';
+                  if (cIdx === 0) return `<td style="${alignStyle}">TOTAL:</td>`;
                   const k = (c.key || "").toLowerCase().replace(/[\s_\-\.]/g, "");
                   if (k === "pcs" || k === "totalpcs" || k === "qty" || k === "totalqty") {
-                    return `<td>${totals.totalPcs !== undefined ? Number(totals.totalPcs).toLocaleString() : totals.totalQty !== undefined ? Number(totals.totalQty).toLocaleString() : ""}</td>`;
+                    return `<td style="${alignStyle}">${totals.totalPcs !== undefined ? Number(totals.totalPcs).toLocaleString() : totals.totalQty !== undefined ? Number(totals.totalQty).toLocaleString() : ""}</td>`;
                   }
                   if (k.includes("weight")) {
-                    return `<td>${totals.totalWeight !== undefined ? Number(totals.totalWeight).toFixed(3) : totals.totalNetWeight !== undefined ? Number(totals.totalNetWeight).toFixed(3) : ""}</td>`;
+                    return `<td style="${alignStyle}">${totals.totalWeight !== undefined ? Number(totals.totalWeight).toFixed(3) : totals.totalNetWeight !== undefined ? Number(totals.totalNetWeight).toFixed(3) : ""}</td>`;
                   }
                   if (k === "cost" || k === "totalcost" || k === "totalsmc" || k === "smc") {
-                    return `<td>$ ${totals.totalCost !== undefined ? Number(totals.totalCost).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : ""}</td>`;
+                    return `<td style="${alignStyle}">$ ${totals.totalCost !== undefined ? Number(totals.totalCost).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : ""}</td>`;
                   }
                   if (k === "amount" || k === "totalamount" || k === "nettotal" || k === "totalsales") {
                     const amt = totals.totalAmount !== undefined ? totals.totalAmount : totals.totalSales !== undefined ? totals.totalSales : totals.netSales;
-                    return `<td>${amt !== undefined ? "$ " + Number(amt).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : ""}</td>`;
+                    return `<td style="${alignStyle}">${amt !== undefined ? "$ " + Number(amt).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : ""}</td>`;
                   }
                   if (k === "pmc" || k === "totalpmc") {
-                    return `<td>${totals.totalPmc !== undefined ? "$ " + Number(totals.totalPmc).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : ""}</td>`;
+                    return `<td style="${alignStyle}">${totals.totalPmc !== undefined ? "$ " + Number(totals.totalPmc).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : ""}</td>`;
                   }
                   if (totals[c.key] !== undefined) {
                     const num = Number(totals[c.key]);
-                    return `<td>${!isNaN(num) ? num.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : totals[c.key]}</td>`;
+                    return `<td style="${alignStyle}">${!isNaN(num) ? num.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : totals[c.key]}</td>`;
                   }
-                  return `<td></td>`;
+                  return `<td style="${alignStyle}"></td>`;
                 })
                 .join("")}
             </tr>

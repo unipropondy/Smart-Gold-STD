@@ -21,33 +21,63 @@ router.post("/login", async (req, res) => {
 
     const pool = req.pool;
 
-    const result = await pool.request()
+    // Check tblUserMaster first (by UserCode or UserName)
+    let userResult = await pool.request()
       .input("username", sql.VarChar(50), username)
-      .input("password", sql.VarChar(10), password)
+      .input("password", sql.VarChar(50), password)
       .query(`
         SELECT 
-          UserCode,
-          UserGroupCode,
-          UserName,
-          Designation,
-          Email,
-          Phone,
-          StoreCode,
+          RTRIM(UserCode) AS UserCode,
+          RTRIM(UserGroupCode) AS UserGroupCode,
+          RTRIM(UserName) AS UserName,
+          RTRIM(Designation) AS Designation,
+          RTRIM(Email) AS Email,
+          RTRIM(Phone) AS Phone,
+          RTRIM(StoreCode) AS StoreCode,
           Admin
         FROM tblUserMaster
-        WHERE UserName = @username 
-        AND Password = @password
+        WHERE (RTRIM(UserName) = @username OR RTRIM(UserCode) = @username)
+        AND RTRIM(Password) = @password
       `);
 
+    // If not found in tblUserMaster, check tblSalesMan (common POS cashier/salesman login)
+    if (userResult.recordset.length === 0) {
+      const smResult = await pool.request()
+        .input("username", sql.VarChar(50), username)
+        .input("password", sql.VarChar(50), password)
+        .query(`
+          SELECT 
+            RTRIM(SalesManCode) AS UserCode,
+            RTRIM(SalesManGroup) AS UserGroupCode,
+            RTRIM(SalesManName) AS UserName,
+            RTRIM(SalesManGroup) AS Designation,
+            NULL AS Email,
+            NULL AS Phone,
+            'HQ' AS StoreCode,
+            CASE WHEN UPPER(RTRIM(SalesManGroup)) IN ('ADMIN', 'SUPER ADMIN') THEN 1 ELSE 0 END AS Admin
+          FROM tblSalesMan
+          WHERE (
+            RTRIM(SalesManCode) = @username 
+            OR RTRIM(SalesManName) = @username
+            OR RTRIM(Password) = @username
+          )
+          AND RTRIM(Password) = @password
+        `);
+
+      if (smResult.recordset.length > 0) {
+        userResult = smResult;
+      }
+    }
+
     // ❌ Invalid credentials
-    if (result.recordset.length === 0) {
+    if (userResult.recordset.length === 0) {
       return res.status(401).json({
         success: false,
         message: "Invalid username or password"
       });
     }
 
-    const user = result.recordset[0];
+    const user = userResult.recordset[0];
 
     // ✅ Success
     return res.status(200).json({

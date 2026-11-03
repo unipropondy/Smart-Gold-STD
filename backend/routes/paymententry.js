@@ -51,17 +51,55 @@ router.get('/etrs', async (req, res) => {
         const result = await pool.request()
             .query(`
                 SELECT TOP 100 
-                    InvoiceNo, 
-                    CONVERT(varchar, InvoiceDate, 103) as InvoiceDate, 
+                    BillNo AS InvoiceNo, 
+                    CONVERT(varchar, BillDate, 103) as InvoiceDate, 
                     Remarks, 
                     Gst, 
-                    NetTotal 
+                    NetAmount AS NetTotal 
                 FROM tbleTRSStatement 
-                ORDER BY InvoiceDate DESC
+                ORDER BY BillDate DESC
             `);
         res.json({ success: true, data: result.recordset || [] });
     } catch (err) {
         console.error("Error fetching eTRS:", err);
+        res.status(500).json({ success: false, message: err.message });
+    }
+});
+
+// GET /api/paymententry/etrs/:invoiceNo
+router.get('/etrs/:invoiceNo', async (req, res) => {
+    try {
+        const invoiceNo = (req.params.invoiceNo || '').trim();
+        const pool = await getPool(req);
+        const result = await pool.request()
+            .input('InvoiceNo', sql.VarChar, invoiceNo)
+            .query(`
+                SELECT TOP 1 
+                    RTRIM(BillNo) AS BillNo,
+                    BillDate,
+                    DAY(BillDate) AS BillDay,
+                    MONTH(BillDate) AS BillMonth,
+                    YEAR(BillDate) AS BillYear,
+                    RTRIM(SalesmanCode) AS SalesmanCode,
+                    RTRIM(PassPortNo) AS PassPortNo,
+                    Gst,
+                    NetAmount,
+                    RTRIM(DocId) AS DocId,
+                    eTRSIssueDate,
+                    RTRIM(eTRSIssueTime) AS eTRSIssueTime,
+                    RTRIM(Remarks) AS Remarks,
+                    CustomerImage
+                FROM tbleTRSStatement
+                WHERE RTRIM(BillNo) = @InvoiceNo
+            `);
+        
+        if (result.recordset && result.recordset.length > 0) {
+            res.json({ success: true, data: result.recordset[0] });
+        } else {
+            res.json({ success: false, data: null, message: "No eTRS statement found for this invoice." });
+        }
+    } catch (err) {
+        console.error("Error fetching single eTRS:", err);
         res.status(500).json({ success: false, message: err.message });
     }
 });
@@ -297,6 +335,103 @@ router.post('/save', async (req, res) => {
                     SET CreateUser = @UserId
                     WHERE InvoiceNo = @InvoiceNo
                 `);
+        } else if (type === 'eTRS') {
+            const {
+                passportNo,
+                netAmount: rawNetAmount,
+                gstAmount: rawGstAmount,
+                etrsDocId,
+                issueDate: rawIssueDate,
+                issueTime,
+                remarks: rawRemarks,
+                staff: selectedStaff,
+                photo,
+                invoiceDate: rawInvoiceDate,
+                day,
+                month,
+                year,
+            } = req.body;
+
+            // Resolve BillDate
+            let billDate = new Date();
+            if (rawInvoiceDate) {
+                const parsed = new Date(rawInvoiceDate);
+                if (!isNaN(parsed.getTime())) billDate = parsed;
+            } else if (day && month && year) {
+                const parsed = new Date(`${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`);
+                if (!isNaN(parsed.getTime())) billDate = parsed;
+            }
+
+            // Resolve IssueDate
+            let issueDateObj = new Date();
+            if (rawIssueDate) {
+                const parsed = new Date(rawIssueDate);
+                if (!isNaN(parsed.getTime())) issueDateObj = parsed;
+            }
+
+            const cleanBillNo = String(invoiceNo || '').trim().substring(0, 20);
+            const cleanPassportNo = String(passportNo || '').trim().substring(0, 20);
+            const cleanDocId = String(etrsDocId || '').trim().substring(0, 50);
+            const cleanStaff = String(selectedStaff || '').trim().substring(0, 20);
+            const cleanRemarks = String(rawRemarks || '').trim().substring(0, 20);
+            const cleanTime = String(issueTime || '').trim().substring(0, 20);
+            const numGst = parseFloat(String(rawGstAmount)) || 0;
+            const numNet = parseFloat(String(rawNetAmount)) || 0;
+            const imgData = photo ? String(photo).trim() : null;
+            const cleanUser = String(sysUser || 'ADMIN').trim().substring(0, 20);
+
+            const etrsReq = new sql.Request(transaction);
+            etrsReq.input('BillNo', sql.VarChar(20), cleanBillNo);
+            etrsReq.input('BillDate', sql.SmallDateTime, billDate);
+            etrsReq.input('SalesmanCode', sql.VarChar(20), cleanStaff);
+            etrsReq.input('PassportNo', sql.VarChar(20), cleanPassportNo);
+            etrsReq.input('Gst', sql.Numeric(18, 2), numGst);
+            etrsReq.input('NetAmount', sql.Numeric(18, 2), numNet);
+            etrsReq.input('DocId', sql.VarChar(50), cleanDocId);
+            etrsReq.input('eTRSIssueDate', sql.SmallDateTime, issueDateObj);
+            etrsReq.input('eTRSIssueTime', sql.VarChar(20), cleanTime);
+            etrsReq.input('Remarks', sql.VarChar(20), cleanRemarks);
+            etrsReq.input('CustomerImage', sql.NVarChar(sql.MAX), imgData);
+            etrsReq.input('UserId', sql.VarChar(20), cleanUser);
+
+            await etrsReq.query(`
+                IF NOT EXISTS (SELECT 1 FROM tbleTRSStatement WHERE RTRIM(BillNo) = @BillNo)
+                BEGIN
+                    INSERT INTO tbleTRSStatement (
+                        BillNo, BillDate, SalesmanCode, PassPortNo, Gst, NetAmount,
+                        DocId, eTRSIssueDate, eTRSIssueTime, Remarks, CustomerImage,
+                        CreateUser, CreateDate, ModifyUser, ModifyDate
+                    ) VALUES (
+                        @BillNo, @BillDate, @SalesmanCode, @PassportNo, @Gst, @NetAmount,
+                        @DocId, @eTRSIssueDate, @eTRSIssueTime, @Remarks, @CustomerImage,
+                        @UserId, GETDATE(), @UserId, GETDATE()
+                    )
+                END
+                ELSE
+                BEGIN
+                    UPDATE tbleTRSStatement SET
+                        BillDate = @BillDate,
+                        SalesmanCode = @SalesmanCode,
+                        PassPortNo = @PassportNo,
+                        Gst = @Gst,
+                        NetAmount = @NetAmount,
+                        DocId = @DocId,
+                        eTRSIssueDate = @eTRSIssueDate,
+                        eTRSIssueTime = @eTRSIssueTime,
+                        Remarks = @Remarks,
+                        CustomerImage = CASE WHEN @CustomerImage IS NOT NULL THEN @CustomerImage ELSE CustomerImage END,
+                        ModifyUser = @UserId,
+                        ModifyDate = GETDATE()
+                    WHERE RTRIM(BillNo) = @BillNo
+                END
+
+                -- Update tblSalesHeader to mark eTRS ticket issued ('Y')
+                UPDATE tblSalesHeader 
+                SET JournalNo = 'Y',
+                    ModifyUser = @UserId,
+                    ModifyDate = GETDATE()
+                WHERE RTRIM(InvoiceNo) = @BillNo
+            `);
         }
 
         await transaction.commit();
@@ -312,6 +447,85 @@ router.post('/save', async (req, res) => {
             }
         }
         res.status(500).json({ success: false, message: err.message || "Failed to save payment" });
+    }
+});
+
+// POST /api/paymententry/void
+router.post('/void', async (req, res) => {
+    let pool;
+    let transaction;
+    let isTransactionActive = false;
+
+    try {
+        const { type, invoiceNo, remarks, userId } = req.body || {};
+        const cleanInv = String(invoiceNo || '').trim();
+        const cleanRemarks = String(remarks || '').trim();
+        const sysUser = String(userId || 'ADMIN').trim().substring(0, 20);
+
+        if (!cleanInv) {
+            return res.status(400).json({ success: false, message: "Invoice No is required." });
+        }
+
+        if (type === 'eTRS_VOID' || type === 'eTRS') {
+            if (!cleanRemarks) {
+                return res.status(400).json({ success: false, message: "Remarks should not be blank." });
+            }
+
+            pool = await getPool(req);
+
+            // 1. Verify existence in tbleTRSStatement
+            const checkResult = await pool.request()
+                .input('BillNo', sql.VarChar(20), cleanInv)
+                .query(`
+                    SELECT TOP 1 BillNo 
+                    FROM tbleTRSStatement 
+                    WHERE RTRIM(BillNo) = @BillNo
+                `);
+
+            if (!checkResult.recordset || checkResult.recordset.length === 0) {
+                return res.status(404).json({ success: false, message: "eTRS Ticket not exists." });
+            }
+
+            // 2. Perform Void Transaction
+            transaction = new sql.Transaction(pool);
+            await transaction.begin();
+            isTransactionActive = true;
+
+            const voidReq = new sql.Request(transaction);
+            voidReq.input('BillNo', sql.VarChar(20), cleanInv);
+            voidReq.input('Remarks', sql.VarChar(50), ('VOID eTRS: ' + cleanRemarks).substring(0, 50));
+            voidReq.input('UserId', sql.VarChar(20), sysUser);
+
+            // Delete from tbleTRSStatement (matching original VB.NET eTRSStatementDelete logic)
+            await voidReq.query(`
+                DELETE FROM tbleTRSStatement 
+                WHERE RTRIM(BillNo) = @BillNo;
+
+                UPDATE tblSalesHeader 
+                SET JournalNo = 'N',
+                    Remarks = @Remarks,
+                    ModifyUser = @UserId,
+                    ModifyDate = GETDATE()
+                WHERE RTRIM(InvoiceNo) = @BillNo;
+            `);
+
+            await transaction.commit();
+            isTransactionActive = false;
+
+            return res.json({ success: true, message: "eTRS Ticket Voided Successfully" });
+        } else {
+            return res.status(400).json({ success: false, message: `Unsupported void type: ${type}` });
+        }
+    } catch (err) {
+        console.error("Error executing void:", err);
+        if (isTransactionActive && transaction) {
+            try {
+                await transaction.rollback();
+            } catch (rbErr) {
+                console.error("Rollback error:", rbErr);
+            }
+        }
+        return res.status(500).json({ success: false, message: err.message || "Failed to void invoice" });
     }
 });
 
