@@ -111,7 +111,7 @@ export default function EODReportsScreen() {
   const [isReportDropdownOpen, setIsReportDropdownOpen] = useState(false);
   const [actionOption, setActionOption] = useState<ActionOption>('Preview');
 
-  const [eodDate, setEODDate] = useState('2025-01-01');
+  const [eodDate, setEODDate] = useState(formatDateLocal(new Date()));
   const [isLoading, setIsLoading] = useState(false);
 
   const [showDatePicker, setShowDatePicker] = useState(false);
@@ -128,20 +128,9 @@ export default function EODReportsScreen() {
     setTimeout(() => setToastMessage(''), 3000);
   };
 
-  const loadInitialConfig = async () => {
-    try {
-      const res = await fetch(`${API_BASE_URL}/eod/config`);
-      const json = await res.json();
-      if (json.success && json.data?.lastEODDate) {
-        setEODDate(json.data.lastEODDate);
-      }
-    } catch (e) {
-      console.warn('Initial EOD config error:', e);
-    }
-  };
-
+  // Always initialize Dayend Date dynamically using current local system date
   useEffect(() => {
-    loadInitialConfig();
+    setEODDate(getTodayIso());
   }, []);
 
   const handleDateChange = (event: any, selectedDate?: Date) => {

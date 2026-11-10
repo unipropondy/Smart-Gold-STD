@@ -3,7 +3,7 @@ import { downloadExcelReport, downloadPdfReport, printHtmlReport } from '@/utils
 import { formatColumnHeader } from '@/utils/formatColumnHeader';
 import { ReportDropdown } from '@/components/ReportDropdown';
 import { ReportDatePicker } from '@/components/ReportDatePicker';
-import { validateReportDateRange, getTodayDisp } from '@/utils/dateValidation';
+import { validateReportDateRange, getTodayDisp, getCurrentYearStartDisp } from '@/utils/dateValidation';
 import { Ionicons } from '@expo/vector-icons';
 import { Stack, useRouter } from 'expo-router';
 import React, { useEffect, useState, useMemo } from 'react';
@@ -77,7 +77,7 @@ export default function PurchaseTakeReportsScreen() {
   const [isJobSheetDropdownOpen, setIsJobSheetDropdownOpen] = useState<boolean>(false);
 
   // Date filters (using standard DD/MM/YYYY matching Master Reports)
-  const [fromDate, setFromDate] = useState<string>('01/01/2025');
+  const [fromDate, setFromDate] = useState<string>(getTodayDisp('/'));
   const [toDate, setToDate] = useState<string>(getTodayDisp());
 
   // Native Date Picker State
@@ -220,15 +220,9 @@ export default function PurchaseTakeReportsScreen() {
       const subtitleText = `TRAY ID : ${displayTray}${displayJob}`;
 
       if (currentAction === 'Preview') {
-        let win: Window | null = null;
-        if (Platform.OS === 'web' && typeof window !== 'undefined') {
-          win = window.open('', '_blank');
-        }
-
-        const htmlRes = await fetch(`${API_BASE_URL}/purchasetake/download-html`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
+        await printHtmlReport(
+          {
+            endpoint: 'purchasetake',
             title: reportTitle,
             subtitle: subtitleText,
             columns,
@@ -236,35 +230,14 @@ export default function PurchaseTakeReportsScreen() {
             totals: reportTotals,
             fromDate,
             toDate,
-            showPrintButton: false,
-          }),
-        });
-
-        if (!htmlRes.ok) throw new Error('Failed to generate report HTML');
-        const htmlContent = await htmlRes.text();
-
-        if (Platform.OS === 'web' && typeof window !== 'undefined') {
-          if (win) {
-            win.document.open();
-            win.document.write(htmlContent);
-            win.document.close();
-          } else {
-            const blob = new Blob([htmlContent], { type: 'text/html;charset=utf-8;' });
-            const url = URL.createObjectURL(blob);
-            window.open(url, '_blank');
-          }
-        }
+          },
+          false
+        );
         showSuccess('Report preview opened.');
       } else if (currentAction === 'Print') {
-        let win: Window | null = null;
-        if (Platform.OS === 'web' && typeof window !== 'undefined') {
-          win = window.open('', '_blank');
-        }
-
-        const htmlRes = await fetch(`${API_BASE_URL}/purchasetake/download-html`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
+        await printHtmlReport(
+          {
+            endpoint: 'purchasetake',
             title: reportTitle,
             subtitle: subtitleText,
             columns,
@@ -272,28 +245,9 @@ export default function PurchaseTakeReportsScreen() {
             totals: reportTotals,
             fromDate,
             toDate,
-            showPrintButton: false,
-          }),
-        });
-
-        if (!htmlRes.ok) throw new Error('Failed to generate report print template');
-        let htmlContent = await htmlRes.text();
-        htmlContent = htmlContent.replace(
-          '</body>',
-          '<script>window.addEventListener("load", function(){ setTimeout(function(){ window.print(); }, 500); });</script></body>'
+          },
+          true
         );
-
-        if (Platform.OS === 'web' && typeof window !== 'undefined') {
-          if (win) {
-            win.document.open();
-            win.document.write(htmlContent);
-            win.document.close();
-          } else {
-            const blob = new Blob([htmlContent], { type: 'text/html;charset=utf-8;' });
-            const url = URL.createObjectURL(blob);
-            window.open(url, '_blank');
-          }
-        }
         showSuccess('Print dialog opened.');
       } else if (currentAction === 'PDF') {
         const ok = await downloadPdfReport({

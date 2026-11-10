@@ -3,7 +3,7 @@ import { API_BASE_URL } from '@/constants/api';
 import { downloadExcelReport, downloadPdfReport, printHtmlReport } from '@/utils/reportExportClient';
 import { ReportDropdown } from '@/components/ReportDropdown';
 import { ReportDatePicker } from '@/components/ReportDatePicker';
-import { validateReportDateRange, getTodayDisp } from '@/utils/dateValidation';
+import { validateReportDateRange, getTodayDisp, getCurrentYearStartDisp } from '@/utils/dateValidation';
 import { Ionicons } from '@expo/vector-icons';
 import { Stack, useRouter } from 'expo-router';
 import React, { useEffect, useState, useMemo } from 'react';
@@ -83,7 +83,7 @@ export default function MasterReportsScreen() {
   const [selectedReport, setSelectedReport] = useState<string>('Class');
   const [customerDateType, setCustomerDateType] = useState<string>('Date of Birth');
   const [actionOption, setActionOption] = useState<ActionOption>('Preview');
-  const [fromDate, setFromDate] = useState<string>('01/01/2025');
+  const [fromDate, setFromDate] = useState<string>(getTodayDisp('/'));
   const [toDate, setToDate] = useState<string>(getTodayDisp());
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(false);

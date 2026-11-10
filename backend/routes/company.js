@@ -1,10 +1,18 @@
 const express = require("express");
 const router = express.Router();
+const { getPool: dbGetPool } = require("../db");
+
+const getPool = async (req) => {
+  if (req && req.pool && req.pool.connected && !req.pool.closed) {
+    return req.pool;
+  }
+  return await dbGetPool(process.env.DB_NAME || 'smartgold');
+};
 
 // GET all companies
 router.get("/", async (req, res) => {
   try {
-    const pool = req.pool;
+    const pool = await getPool(req);
     const result = await pool.request().query("SELECT * FROM tblCompany ORDER BY CompanyID ASC");
     res.json({ success: true, data: result.recordset });
   } catch (err) {

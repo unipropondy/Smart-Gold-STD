@@ -1,5 +1,7 @@
 const express = require("express");
 const router = express.Router();
+const fs = require("fs");
+const path = require("path");
 const { sql, getPool: dbGetPool } = require("../db");
 
 // Helper to acquire database connection pool reliably
@@ -417,27 +419,53 @@ router.get("/fetch", async (req, res) => {
       return res.json({ success: false, message: "Transfer number does not exists." });
     }
 
-    // Fetch Detail
-    const detailQuery = `
+    // Fetch Detail joined with tblInventory to get SupplierCode
+    let detailQuery = `
       SELECT 
-        RTRIM(InventoryCode) AS InventoryCode,
-        RTRIM(ISNULL(Description, '')) AS Description,
-        RTRIM(ISNULL(ClassCode, '')) AS ClassCode,
-        RTRIM(ISNULL(CategoryCode, '')) AS CategoryCode,
-        RTRIM(ISNULL(CatalogueCode, '')) AS CatalogueCode,
-        ISNULL(Weight, 0) AS Weight,
-        RTRIM(ISNULL(SizeCode, '')) AS SizeCode,
-        ISNULL(QtyonHand, 0) AS QtyonHand,
-        ISNULL(CostPerGram, 0) AS CostPerGram,
-        ISNULL(PMC, 0) AS PMC,
-        ISNULL(SMC, 0) AS SMC,
-        ISNULL(TotalCost, 0) AS TotalCost
-      FROM tblInventoryTransferDetail 
-      WHERE RTRIM(LTRIM(TransferNo)) = @TransferNo
+        d.InventoryCode,
+        ISNULL(d.Description, '') AS Description,
+        ISNULL(d.ClassCode, '') AS ClassCode,
+        ISNULL(d.CategoryCode, '') AS CategoryCode,
+        ISNULL(d.CatalogueCode, '') AS CatalogueCode,
+        ISNULL(d.Weight, 0) AS Weight,
+        ISNULL(d.SizeCode, '') AS SizeCode,
+        ISNULL(d.QtyonHand, 0) AS QtyonHand,
+        ISNULL(d.CostPerGram, 0) AS CostPerGram,
+        ISNULL(d.PMC, 0) AS PMC,
+        ISNULL(d.SMC, 0) AS SMC,
+        ISNULL(d.TotalCost, 0) AS TotalCost,
+        ISNULL(RTRIM(i.SupplierCode), '') AS SupplierCode
+      FROM tblInventoryTransferDetail d
+      LEFT JOIN tblInventory i ON RTRIM(LTRIM(CAST(d.InventoryCode AS VARCHAR(50)))) = RTRIM(LTRIM(CAST(i.InventoryCode AS VARCHAR(50))))
+      WHERE RTRIM(LTRIM(d.TransferNo)) = @TransferNo
     `;
-    const detailResult = await pool.request()
-      .input("TransferNo", sql.VarChar(50), transferNo.trim())
-      .query(detailQuery);
+    let detailResult;
+    try {
+      detailResult = await pool.request()
+        .input("TransferNo", sql.VarChar(50), transferNo.trim())
+        .query(detailQuery);
+    } catch (eDetJoin) {
+      detailQuery = `
+        SELECT 
+          RTRIM(InventoryCode) AS InventoryCode,
+          RTRIM(ISNULL(Description, '')) AS Description,
+          RTRIM(ISNULL(ClassCode, '')) AS ClassCode,
+          RTRIM(ISNULL(CategoryCode, '')) AS CategoryCode,
+          RTRIM(ISNULL(CatalogueCode, '')) AS CatalogueCode,
+          ISNULL(Weight, 0) AS Weight,
+          RTRIM(ISNULL(SizeCode, '')) AS SizeCode,
+          ISNULL(QtyonHand, 0) AS QtyonHand,
+          ISNULL(CostPerGram, 0) AS CostPerGram,
+          ISNULL(PMC, 0) AS PMC,
+          ISNULL(SMC, 0) AS SMC,
+          ISNULL(TotalCost, 0) AS TotalCost
+        FROM tblInventoryTransferDetail 
+        WHERE RTRIM(LTRIM(TransferNo)) = @TransferNo
+      `;
+      detailResult = await pool.request()
+        .input("TransferNo", sql.VarChar(50), transferNo.trim())
+        .query(detailQuery);
+    }
 
     res.json({ 
       success: true, 
@@ -809,6 +837,144 @@ router.get("/list", async (req, res) => {
   } catch (error) {
     console.error("List Transfers Error:", error);
     res.status(500).json({ success: false, message: "Error listing transfers: " + error.message });
+  }
+});
+
+// 9. GET /api/transferout/print-data
+// Matching subPrintTransferOut & rptTransferOutDetail.rpt in frmTransferOut.vb
+router.get("/print-data", async (req, res) => {
+  try {
+    const { transferNo } = req.query;
+    if (!transferNo || !transferNo.trim()) {
+      return res.status(400).json({ success: false, message: "Transfer Number is required for print." });
+    }
+
+    const pool = await getPool(req);
+    const cleanNo = transferNo.trim();
+
+    // 1. Fetch Company Information matching objClsCompany.getCompanyName
+    let logoBase64 = "";
+    try {
+      const logoPath = path.join(__dirname, "../unipro_logo_base64.txt");
+      if (fs.existsSync(logoPath)) {
+        logoBase64 = fs.readFileSync(logoPath, "utf8").trim();
+      }
+    } catch (eLogo) {}
+
+    const compRes = await pool.request().query("SELECT TOP 1 * FROM tblCompany");
+    const rawCompany = compRes.recordset[0] || {};
+    const company = {
+      name: String(findVal(rawCompany, 'Name', 'CompanyName') || '').trim(),
+      address1: String(findVal(rawCompany, 'Address1') || '').trim(),
+      address2: String(findVal(rawCompany, 'Address2') || '').trim(),
+      city: String(findVal(rawCompany, 'City') || '').trim(),
+      state: String(findVal(rawCompany, 'State') || '').trim(),
+      country: String(findVal(rawCompany, 'Country') || '').trim(),
+      phone: String(findVal(rawCompany, 'Phone') || '').trim(),
+      fax: String(findVal(rawCompany, 'Fax') || '').trim(),
+      logo: logoBase64 ? `data:image/png;base64,${logoBase64}` : '',
+      logoBase64: logoBase64
+    };
+
+    // 2. Fetch Header Information
+    const headerQuery = `
+      SELECT TOP 1 *
+      FROM tblInventoryTransferHeader
+      WHERE RTRIM(LTRIM(CONVERT(VARCHAR(50), TransferNo))) = @TransferNo
+    `;
+    const headerRes = await pool.request()
+      .input("TransferNo", sql.VarChar(50), cleanNo)
+      .query(headerQuery);
+
+    if (headerRes.recordset.length === 0) {
+      return res.status(404).json({ success: false, message: `Transfer Note not found for Transfer No: ${cleanNo}` });
+    }
+
+    const rawHeader = headerRes.recordset[0];
+    const header = {
+      transferNo: String(findVal(rawHeader, 'TransferNo') || cleanNo).trim(),
+      transferDate: findVal(rawHeader, 'TransferDate'),
+      fromLocation: String(findVal(rawHeader, 'FromLocation') || '').trim(),
+      toLocation: String(findVal(rawHeader, 'ToLocation') || '').trim(),
+      remarks: String(findVal(rawHeader, 'Remarks') || '').trim(),
+      totalWeight: parseFloat(findVal(rawHeader, 'TotalWeight', 'Totalweight') || 0),
+      totalPcs: parseInt(findVal(rawHeader, 'TotalPcs', 'TotalPCS') || 0, 10),
+      totalCost: parseFloat(findVal(rawHeader, 'TotalCost') || 0),
+      salesManCode: String(findVal(rawHeader, 'SalesManCode') || '').trim(),
+    };
+
+    // 3. Fetch Detail Information joined with tblInventory for SupplierCode
+    let detailQuery = `
+      SELECT 
+        d.*,
+        ISNULL(RTRIM(i.SupplierCode), '') as InvSupplierCode
+      FROM tblInventoryTransferDetail d
+      LEFT JOIN tblInventory i ON RTRIM(LTRIM(CAST(d.InventoryCode AS VARCHAR(50)))) = RTRIM(LTRIM(CAST(i.InventoryCode AS VARCHAR(50))))
+      WHERE RTRIM(LTRIM(CONVERT(VARCHAR(50), d.TransferNo))) = @TransferNo
+      ORDER BY d.InventoryCode ASC
+    `;
+    let detailRes;
+    try {
+      detailRes = await pool.request()
+        .input("TransferNo", sql.VarChar(50), cleanNo)
+        .query(detailQuery);
+    } catch (eDetQ) {
+      detailQuery = `
+        SELECT *
+        FROM tblInventoryTransferDetail
+        WHERE RTRIM(LTRIM(CONVERT(VARCHAR(50), TransferNo))) = @TransferNo
+        ORDER BY InventoryCode ASC
+      `;
+      detailRes = await pool.request()
+        .input("TransferNo", sql.VarChar(50), cleanNo)
+        .query(detailQuery);
+    }
+
+    const details = await Promise.all(detailRes.recordset.map(async (row) => {
+      const rawSize = findVal(row, 'SizeCode', 'Size');
+      const sizeVal = rawSize !== null && rawSize !== undefined && !isNaN(parseFloat(rawSize)) ? parseFloat(rawSize) : 0;
+      const grossWeight = parseFloat(findVal(row, 'GrossWeight', 'Weight') || 0);
+      const netWeight = parseFloat(findVal(row, 'NetWeight', 'Weight') || 0);
+      const rawPcs = findVal(row, 'PCS', 'QtyOnHand', 'Qty');
+      const pcsVal = (rawPcs !== null && rawPcs !== undefined && rawPcs !== '') ? (parseInt(rawPcs, 10) || '') : '';
+      const totalCost = parseFloat(findVal(row, 'TotalCost') || 0);
+      let sCode = String(findVal(row, 'SupplierCode', 'InvSupplierCode') || '').trim();
+
+      if (!sCode && row.InventoryCode) {
+        try {
+          const invLookup = await pool.request()
+            .input("Code", sql.VarChar(50), String(row.InventoryCode).trim())
+            .query("SELECT TOP 1 SupplierCode FROM tblInventory WHERE RTRIM(LTRIM(CAST(InventoryCode AS VARCHAR(50)))) = @Code");
+          if (invLookup.recordset.length > 0 && invLookup.recordset[0].SupplierCode) {
+            sCode = String(invLookup.recordset[0].SupplierCode).trim();
+          }
+        } catch (eInv) {}
+      }
+
+      return {
+        inventoryCode: String(findVal(row, 'InventoryCode') || '').trim(),
+        description: String(findVal(row, 'Description') || '').trim(),
+        size: sizeVal.toFixed(2),
+        supplierCode: sCode,
+        grossWeight: grossWeight,
+        netWeight: netWeight,
+        pcs: pcsVal,
+        totalCost: totalCost
+      };
+    }));
+
+    res.json({
+      success: true,
+      data: {
+        company,
+        header,
+        details
+      }
+    });
+
+  } catch (error) {
+    console.error("Fetch Transfer Out Note Print Data Error:", error);
+    res.status(500).json({ success: false, message: "Error fetching print data: " + error.message });
   }
 });
 

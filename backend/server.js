@@ -14,12 +14,17 @@ app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
 // Database injection middleware with dynamic healthy pool retrieval
 app.use(async (req, res, next) => {
+    const isExportEndpoint = req.path.includes('/export-') || req.path.includes('/download-html');
     try {
         req.pool = await getPool(process.env.DB_NAME || 'smartgold');
-        next();
+        return next();
     } catch (err) {
+        if (isExportEndpoint) {
+            req.pool = null;
+            return next();
+        }
         console.error("Database connection error in middleware:", err.message);
-        res.status(500).json({ success: false, message: "Database connection failed", error: err.message });
+        return res.status(500).json({ success: false, message: "Database connection failed", error: err.message });
     }
 });
 

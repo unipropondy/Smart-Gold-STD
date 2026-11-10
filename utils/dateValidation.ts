@@ -11,13 +11,37 @@ export function getTodayIso(): string {
   return `${year}-${month}-${day}`;
 }
 
-// Format a Date or date string to DD/MM/YYYY
-export function getTodayDisp(): string {
+// Format a Date or date string to DD-MM-YYYY (or DD/MM/YYYY)
+export function getTodayDisp(separator: string = '-'): string {
   const now = new Date();
   const day = String(now.getDate()).padStart(2, '0');
   const month = String(now.getMonth() + 1).padStart(2, '0');
   const year = now.getFullYear();
-  return `${day}/${month}/${year}`;
+  return `${day}${separator}${month}${separator}${year}`;
+}
+
+// Get January 1st of the current system year in YYYY-MM-DD
+export function getCurrentYearStartIso(): string {
+  const now = new Date();
+  const year = now.getFullYear();
+  return `${year}-01-01`;
+}
+
+// Get January 1st of the current system year in DD-MM-YYYY (or DD/MM/YYYY)
+export function getCurrentYearStartDisp(separator: string = '-'): string {
+  const now = new Date();
+  const year = now.getFullYear();
+  return `01${separator}01${separator}${year}`;
+}
+
+// Helper to get both default report dates automatically based on current system date
+export function getDefaultReportDates(separator: string = '-') {
+  return {
+    fromDate: getCurrentYearStartDisp(separator),
+    toDate: getTodayDisp(separator),
+    fromDateIso: getCurrentYearStartIso(),
+    toDateIso: getTodayIso(),
+  };
 }
 
 // Parse string (either YYYY-MM-DD or DD/MM/YYYY) to Date

@@ -3,7 +3,7 @@ import { API_BASE_URL } from '@/constants/api';
 import { downloadExcelReport, downloadPdfReport, printHtmlReport } from '@/utils/reportExportClient';
 import { ReportDropdown } from '@/components/ReportDropdown';
 import { ReportDatePicker } from '@/components/ReportDatePicker';
-import { validateReportDateRange, getTodayIso, toDispDate } from '@/utils/dateValidation';
+import { validateReportDateRange, getTodayIso, toDispDate, getCurrentYearStartIso } from '@/utils/dateValidation';
 import { Ionicons } from '@expo/vector-icons';
 import { Stack, useRouter } from 'expo-router';
 import React, { useEffect, useState, useMemo } from 'react';
@@ -94,7 +94,7 @@ export default function SettlementReportsScreen() {
   const [locations, setLocations] = useState<LocationItem[]>([]);
   const [actionOption, setActionOption] = useState<ActionOption>('Preview');
 
-  const [fromDate, setFromDate] = useState('2025-01-01');
+  const [fromDate, setFromDate] = useState(formatDateLocal(new Date()));
   const [toDate, setToDate] = useState(formatDateLocal(new Date()));
   const [isLoading, setIsLoading] = useState(false);
 
@@ -159,15 +159,6 @@ export default function SettlementReportsScreen() {
 
     setIsLoading(true);
 
-    let win: Window | null = null;
-    if (
-      Platform.OS === 'web' &&
-      typeof window !== 'undefined' &&
-      (currentAction === 'Preview' || currentAction === 'Print')
-    ) {
-      win = window.open('', '_blank');
-    }
-
     try {
       const fromParts = fromDate.split('-');
       const toParts = toDate.split('-');
@@ -188,7 +179,6 @@ export default function SettlementReportsScreen() {
       const json = await res.json();
 
       if (!json.success || !json.data || json.data.length === 0) {
-        if (win) win.close();
         showError(json.message || 'No records found for the selected criteria.');
         setIsLoading(false);
         return;
@@ -199,137 +189,60 @@ export default function SettlementReportsScreen() {
       const columns = rawCols.map((c: any) => ({ ...c, label: formatColumnHeader(c.label || c.key) }));
       const cleanName = repTitle.replace(/[^a-zA-Z0-9_-]/g, '_');
 
-      // 1. PDF DOWNLOAD ACTION
-      if (currentAction === 'PDF') {
-        const pdfRes = await fetch(`${API_BASE_URL}/settlementreports/export-pdf`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
+            const repTotals = json.summary || {};
+
+      if (currentAction === 'Preview') {
+        await printHtmlReport(
+          {
+            endpoint: 'settlementreports',
             title: repTitle,
             columns,
             data: json.data,
-            totals: json.columnTotals || {},
+            totals: repTotals,
             fromDate,
             toDate,
-          }),
-        });
-
-        if (!pdfRes.ok) {
-          throw new Error('Failed to generate PDF document');
-        }
-
-        const pdfBlob = await pdfRes.blob();
-        if (Platform.OS === 'web' && typeof window !== 'undefined') {
-          const url = URL.createObjectURL(pdfBlob);
-          const link = document.createElement('a');
-          link.href = url;
-          link.setAttribute('download', `${cleanName}.pdf`);
-          document.body.appendChild(link);
-          link.click();
-          document.body.removeChild(link);
-          setTimeout(() => URL.revokeObjectURL(url), 1000);
-          showSuccess('PDF downloaded successfully!');
-        } else {
-          showSuccess('PDF report generated!');
-        }
-        setIsLoading(false);
-        return;
-      }
-
-      // 2. EXCEL DOWNLOAD ACTION
-      if (currentAction === 'Excel') {
-        const excelRes = await fetch(`${API_BASE_URL}/settlementreports/export-excel`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
+          },
+          false
+        );
+        showSuccess('Report preview opened.');
+      } else if (currentAction === 'Print') {
+        await printHtmlReport(
+          {
+            endpoint: 'settlementreports',
             title: repTitle,
             columns,
             data: json.data,
-            totals: json.columnTotals || {},
+            totals: repTotals,
             fromDate,
             toDate,
-          }),
-        });
-
-        if (!excelRes.ok) {
-          throw new Error('Failed to generate Excel report');
-        }
-
-        const excelBlob = await excelRes.blob();
-        if (Platform.OS === 'web' && typeof window !== 'undefined') {
-          const url = URL.createObjectURL(excelBlob);
-          const link = document.createElement('a');
-          link.href = url;
-          link.setAttribute('download', `${cleanName}.xlsx`);
-          document.body.appendChild(link);
-          link.click();
-          document.body.removeChild(link);
-          setTimeout(() => URL.revokeObjectURL(url), 1000);
-          showSuccess('Excel file downloaded successfully!');
-        } else {
-          showSuccess('Excel report generated!');
-        }
-        setIsLoading(false);
-        return;
-      }
-
-      // 3. PREVIEW & PRINT ACTIONS (HTML)
-      const htmlRes = await fetch(`${API_BASE_URL}/settlementreports/download-html`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+          },
+          true
+        );
+        showSuccess('Print dialog opened.');
+      } else if (currentAction === 'PDF') {
+        const ok = await downloadPdfReport({
+          endpoint: 'settlementreports',
           title: repTitle,
           columns,
           data: json.data,
-          totals: json.columnTotals || {},
+          totals: repTotals,
           fromDate,
           toDate,
-          showPrintButton: false,
-        }),
-      });
-
-      if (!htmlRes.ok) {
-        throw new Error('Failed to generate report HTML template');
+        });
+        if (ok) showSuccess('PDF downloaded successfully!');
+      } else if (currentAction === 'Excel') {
+        const ok = await downloadExcelReport({
+          endpoint: 'settlementreports',
+          title: repTitle,
+          columns,
+          data: json.data,
+          totals: repTotals,
+          fromDate,
+          toDate,
+        });
+        if (ok) showSuccess('Excel file downloaded successfully!');
       }
-
-      let htmlContent = await htmlRes.text();
-
-      // Trigger print for Print option
-      if (currentAction === 'Print') {
-        htmlContent = htmlContent.replace(
-          '</body>',
-          '<script>window.addEventListener("load", function(){ setTimeout(function(){ window.print(); }, 500); });</script></body>'
-        );
-      }
-
-      if (Platform.OS === 'web' && typeof window !== 'undefined') {
-        if (win) {
-          win.document.open();
-          win.document.write(htmlContent);
-          win.document.close();
-        } else {
-          const blob = new Blob([htmlContent], { type: 'text/html;charset=utf-8;' });
-          const url = URL.createObjectURL(blob);
-          const newTab = window.open(url, '_blank');
-          if (!newTab) {
-            const link = document.createElement('a');
-            link.href = url;
-            link.setAttribute('download', `${repTitle}.html`);
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
-          }
-        }
-        if (currentAction === 'Print') {
-          showSuccess('Print dialog opened.');
-        } else {
-          showSuccess('Report preview opened.');
-        }
-      } else {
-        showSuccess('Report generated! (Use web to view/print)');
-      }
-    } catch (err: any) {
-      if (win) win.close();
+} catch (err: any) {
       console.error(err);
       showError('Failed to generate report: ' + (err.message || 'Error'));
     } finally {

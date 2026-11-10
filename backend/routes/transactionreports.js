@@ -873,7 +873,7 @@ router.post("/report", async (req, res) => {
     <html>
       <head>
         <meta charset="utf-8" />
-        <title>${reportTitle}</title>
+        <title></title>
         <style>
           @page {
             size: A4 portrait;

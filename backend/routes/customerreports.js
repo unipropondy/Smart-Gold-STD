@@ -276,7 +276,7 @@ router.get("/report", async (req, res) => {
           AdjustmentPoints,
           RTRIM(InvoiceNo) AS InvoiceNo,
           RTRIM(CreateUser) AS CreateUser,
-          CreateDate
+          CONVERT(VARCHAR(10), CreateDate, 103) AS CreateDate
         FROM tblCustomersPointAdjustment
         WHERE 1=1
       `;
@@ -331,8 +331,27 @@ router.get("/report", async (req, res) => {
 
       query += ` ORDER BY CreateDate DESC`;
       const result = await request.query(query);
-      data = result.recordset;
-      summary = { totalChanges: data.length };
+      data = (result.recordset || []).map((r) => {
+        let cd = r.CreateDate;
+        if (cd instanceof Date) {
+          const dd = String(cd.getDate()).padStart(2, '0');
+          const mm = String(cd.getMonth() + 1).padStart(2, '0');
+          const yyyy = cd.getFullYear();
+          cd = `${dd}/${mm}/${yyyy}`;
+        }
+        return {
+          ...r,
+          CreateDate: cd
+        };
+      });
+
+      const totalPts = data.reduce((acc, r) => acc + (Number(r.TotalPoints) || 0), 0);
+      const newTotalPts = data.reduce((acc, r) => acc + (Number(r.NewTotalPoints) || 0), 0);
+      summary = {
+        totalChanges: data.length,
+        totalPoints: totalPts,
+        newTotalPoints: newTotalPts
+      };
     }
 
     // =========================================================================

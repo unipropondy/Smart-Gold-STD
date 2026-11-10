@@ -1,8 +1,9 @@
+import { printHtmlReport, downloadPdfReport, downloadExcelReport } from '@/utils/reportExportClient';
 import { formatColumnHeader } from '@/utils/formatColumnHeader';
 import { API_BASE_URL } from '@/constants/api';
 import { ReportDropdown } from '@/components/ReportDropdown';
 import { ReportDatePicker } from '@/components/ReportDatePicker';
-import { validateReportDateRange, getTodayIso, toDispDate } from '@/utils/dateValidation';
+import { validateReportDateRange, getTodayIso, toDispDate, getCurrentYearStartIso } from '@/utils/dateValidation';
 import { Ionicons } from '@expo/vector-icons';
 import { Stack, useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
@@ -126,7 +127,7 @@ export default function CustomerReportsScreen() {
 
   const [actionOption, setActionOption] = useState<ActionOption>('Preview');
 
-  const [fromDate, setFromDate] = useState('2025-01-01');
+  const [fromDate, setFromDate] = useState(formatDateLocal(new Date()));
   const [toDate, setToDate] = useState(formatDateLocal(new Date()));
   const [isLoading, setIsLoading] = useState(false);
 
@@ -278,15 +279,6 @@ export default function CustomerReportsScreen() {
 
     setIsLoading(true);
 
-    let win: Window | null = null;
-    if (
-      Platform.OS === 'web' &&
-      typeof window !== 'undefined' &&
-      (currentAction === 'Preview' || currentAction === 'Print')
-    ) {
-      win = window.open('', '_blank');
-    }
-
     try {
       const params = new URLSearchParams();
       params.append('reportId', selectedReport);
@@ -304,7 +296,6 @@ export default function CustomerReportsScreen() {
       const json = await res.json();
 
       if (!json.success || !json.data || json.data.length === 0) {
-        if (win) win.close();
         showError(json.message || 'No records found for the selected criteria.');
         setIsLoading(false);
         return;
@@ -315,137 +306,60 @@ export default function CustomerReportsScreen() {
       const columns = keys.map((k) => ({ key: k, label: formatColumnHeader(k) }));
       const cleanName = repTitle.replace(/[^a-zA-Z0-9_-]/g, '_');
 
-      // 1. PDF DOWNLOAD ACTION
-      if (currentAction === 'PDF') {
-        const pdfRes = await fetch(`${API_BASE_URL}/customerreports/export-pdf`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
+            const repTotals = json.summary || {};
+
+      if (currentAction === 'Preview') {
+        await printHtmlReport(
+          {
+            endpoint: 'customerreports',
             title: repTitle,
             columns,
             data: json.data,
-            totals: json.summary || {},
+            totals: repTotals,
             fromDate,
             toDate,
-          }),
-        });
-
-        if (!pdfRes.ok) {
-          throw new Error('Failed to generate PDF document');
-        }
-
-        const pdfBlob = await pdfRes.blob();
-        if (Platform.OS === 'web' && typeof window !== 'undefined') {
-          const url = URL.createObjectURL(pdfBlob);
-          const link = document.createElement('a');
-          link.href = url;
-          link.setAttribute('download', `${cleanName}.pdf`);
-          document.body.appendChild(link);
-          link.click();
-          document.body.removeChild(link);
-          setTimeout(() => URL.revokeObjectURL(url), 1000);
-          showSuccess('PDF downloaded successfully!');
-        } else {
-          showSuccess('PDF report generated!');
-        }
-        setIsLoading(false);
-        return;
-      }
-
-      // 2. EXCEL DOWNLOAD ACTION
-      if (currentAction === 'Excel') {
-        const excelRes = await fetch(`${API_BASE_URL}/customerreports/export-excel`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
+          },
+          false
+        );
+        showSuccess('Report preview opened.');
+      } else if (currentAction === 'Print') {
+        await printHtmlReport(
+          {
+            endpoint: 'customerreports',
             title: repTitle,
             columns,
             data: json.data,
-            totals: json.summary || {},
+            totals: repTotals,
             fromDate,
             toDate,
-          }),
-        });
-
-        if (!excelRes.ok) {
-          throw new Error('Failed to generate Excel report');
-        }
-
-        const excelBlob = await excelRes.blob();
-        if (Platform.OS === 'web' && typeof window !== 'undefined') {
-          const url = URL.createObjectURL(excelBlob);
-          const link = document.createElement('a');
-          link.href = url;
-          link.setAttribute('download', `${cleanName}.xlsx`);
-          document.body.appendChild(link);
-          link.click();
-          document.body.removeChild(link);
-          setTimeout(() => URL.revokeObjectURL(url), 1000);
-          showSuccess('Excel file downloaded successfully!');
-        } else {
-          showSuccess('Excel report generated!');
-        }
-        setIsLoading(false);
-        return;
-      }
-
-      // 3. PREVIEW & PRINT ACTIONS (HTML)
-      const htmlRes = await fetch(`${API_BASE_URL}/customerreports/download-html`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+          },
+          true
+        );
+        showSuccess('Print dialog opened.');
+      } else if (currentAction === 'PDF') {
+        const ok = await downloadPdfReport({
+          endpoint: 'customerreports',
           title: repTitle,
           columns,
           data: json.data,
-          totals: json.summary || {},
+          totals: repTotals,
           fromDate,
           toDate,
-          showPrintButton: false,
-        }),
-      });
-
-      if (!htmlRes.ok) {
-        throw new Error('Failed to generate report HTML template');
+        });
+        if (ok) showSuccess('PDF downloaded successfully!');
+      } else if (currentAction === 'Excel') {
+        const ok = await downloadExcelReport({
+          endpoint: 'customerreports',
+          title: repTitle,
+          columns,
+          data: json.data,
+          totals: repTotals,
+          fromDate,
+          toDate,
+        });
+        if (ok) showSuccess('Excel file downloaded successfully!');
       }
-
-      let htmlContent = await htmlRes.text();
-
-      // Trigger print for Print option
-      if (currentAction === 'Print') {
-        htmlContent = htmlContent.replace(
-          '</body>',
-          '<script>window.addEventListener("load", function(){ setTimeout(function(){ window.print(); }, 500); });</script></body>'
-        );
-      }
-
-      if (Platform.OS === 'web' && typeof window !== 'undefined') {
-        if (win) {
-          win.document.open();
-          win.document.write(htmlContent);
-          win.document.close();
-        } else {
-          const blob = new Blob([htmlContent], { type: 'text/html;charset=utf-8;' });
-          const url = URL.createObjectURL(blob);
-          const newTab = window.open(url, '_blank');
-          if (!newTab) {
-            const link = document.createElement('a');
-            link.href = url;
-            link.setAttribute('download', `${repTitle}.html`);
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
-          }
-        }
-        if (currentAction === 'Print') {
-          showSuccess('Print dialog opened.');
-        } else {
-          showSuccess('Report preview opened.');
-        }
-      } else {
-        showSuccess('Report generated! (Use web to view/print)');
-      }
-    } catch (err: any) {
-      if (win) win.close();
+} catch (err: any) {
       console.error(err);
       showError('Failed to generate report: ' + (err.message || 'Error'));
     } finally {
@@ -510,8 +424,8 @@ export default function CustomerReportsScreen() {
       <ScrollView contentContainerStyle={styles.scrollContent}>
         <View style={styles.cardWrapper}>
           <View style={styles.goldCard}>
-            {/* Top row: Customer Report, From Date, To Date */}
-            <View style={styles.inputRow}>
+            {/* ROW 1: Customer Report, From Date, To Date, Customer Code */}
+            <View style={[styles.inputRow, { zIndex: isReportDropdownOpen ? 99999 : 50 }]}>
               {/* Customer Report */}
               <View style={styles.reportCol}>
                 <ReportDropdown
@@ -523,221 +437,203 @@ export default function CustomerReportsScreen() {
                     setIsReportDropdownOpen(false);
                   }}
                   isOpen={isReportDropdownOpen}
-                  onToggle={() => setIsReportDropdownOpen(!isReportDropdownOpen)}
+                  onToggle={() => {
+                    const next = !isReportDropdownOpen;
+                    closeAllDropdowns();
+                    setIsReportDropdownOpen(next);
+                  }}
                   maxHeight={320}
                 />
               </View>
 
-              {/* From Date (only if date filter applies) */}
-              {needsDateRange && (
-                <ReportDatePicker
-                  label="From Date"
-                  value={fromDate}
-                  onChange={setFromDate}
-                  isIsoOutput={true}
-                  onOpenNative={() => setShowDatePicker({ show: true, mode: 'from' })}
-                />
-              )}
+              {/* From Date */}
+              <ReportDatePicker
+                label="From Date"
+                value={fromDate}
+                onChange={setFromDate}
+                isIsoOutput={true}
+                onOpenNative={() => setShowDatePicker({ show: true, mode: 'from' })}
+              />
 
-              {/* To Date (only if date filter applies) */}
-              {needsDateRange && (
-                <ReportDatePicker
-                  label="To Date"
-                  value={toDate}
-                  onChange={setToDate}
-                  isIsoOutput={true}
-                  onOpenNative={() => setShowDatePicker({ show: true, mode: 'to' })}
-                />
-              )}
+              {/* To Date */}
+              <ReportDatePicker
+                label="To Date"
+                value={toDate}
+                onChange={setToDate}
+                isIsoOutput={true}
+                onOpenNative={() => setShowDatePicker({ show: true, mode: 'to' })}
+              />
 
-              {/* Customer Code Lookup for Report 12 */}
-              {needsCustomerCode && (
-                <View style={styles.customerCodeCol}>
-                  <Text style={styles.fieldLabel}>Customer Code:</Text>
-                  <View style={styles.customerCodeInputWrapper}>
-                    <TextInput
-                      style={styles.customerCodeInput}
-                      value={customerCode}
-                      onChangeText={setCustomerCode}
-                      placeholder="Optional Code"
-                      placeholderTextColor="#9E8D77"
-                    />
+              {/* Customer Code */}
+              <View style={styles.customerCodeCol}>
+                <Text style={styles.fieldLabel}>Customer Code</Text>
+                <View style={styles.customerCodeInputWrapper}>
+                  <TextInput
+                    style={styles.customerCodeInput}
+                    value={customerCode}
+                    onChangeText={setCustomerCode}
+                    placeholder="Optional Code"
+                    placeholderTextColor="#9E8D77"
+                  />
+                  <TouchableOpacity
+                    style={styles.customerSearchBtn}
+                    onPress={handleOpenCustomerLookup}
+                    activeOpacity={0.7}
+                  >
+                    <Ionicons name="search" size={16} color="#FFFFFF" />
+                  </TouchableOpacity>
+                  {customerCode ? (
                     <TouchableOpacity
-                      style={styles.customerSearchBtn}
-                      onPress={handleOpenCustomerLookup}
+                      style={styles.customerClearBtn}
+                      onPress={() => setCustomerCode('')}
                       activeOpacity={0.7}
                     >
-                      <Ionicons name="search" size={16} color="#FFFFFF" />
+                      <Ionicons name="close-circle" size={16} color="#9E8D77" />
                     </TouchableOpacity>
-                    {customerCode ? (
-                      <TouchableOpacity
-                        style={styles.customerClearBtn}
-                        onPress={() => setCustomerCode('')}
-                        activeOpacity={0.7}
-                      >
-                        <Ionicons name="close-circle" size={16} color="#9E8D77" />
-                      </TouchableOpacity>
-                    ) : null}
-                  </View>
+                  ) : null}
                 </View>
-              )}
+              </View>
             </View>
 
-            {/* CONDITIONAL REPORT-SPECIFIC FILTERS: DOB vs DOA */}
-            {selectedReport === 'dob' && (
-              <View style={[styles.dateFilterRow, { borderBottomWidth: 1, borderBottomColor: '#F0E6CC', paddingBottom: 10, marginBottom: 12, marginTop: 12 }]}>
-                <Text style={[styles.fieldLabel, { marginRight: 15, alignSelf: 'center', marginBottom: 0 }]}>Date Filter:</Text>
-                <RadioButton
-                  label="Date of Birth"
-                  selected={customerDateType === 'Date of Birth'}
-                  onPress={() => setCustomerDateType('Date of Birth')}
-                />
-                <RadioButton
-                  label="Date of Anniversary"
-                  selected={customerDateType === 'Date of Anniversary'}
-                  onPress={() => setCustomerDateType('Date of Anniversary')}
+            {/* ROW 2: Customer Type, Nationality, Religion */}
+            <View style={[styles.inputRow, { marginTop: 14, zIndex: isCustTypeOpen || isNatOpen || isRelOpen ? 50 : 20 }]}>
+              {/* Customer Type */}
+              <View style={styles.filterCol}>
+                <ReportDropdown
+                  label="Customer Type"
+                  options={[
+                    { id: 'ALL', label: 'ALL TYPES' },
+                    { id: 'DIAMOND', label: 'DIAMOND' },
+                    { id: 'EMERALD', label: 'EMERALD' },
+                    { id: 'RUBY', label: 'RUBY' },
+                  ]}
+                  selectedId={customerType}
+                  onSelect={(id) => {
+                    setCustomerType(id);
+                    setIsCustTypeOpen(false);
+                  }}
+                  isOpen={isCustTypeOpen}
+                  onToggle={() => {
+                    closeAllDropdowns();
+                    setIsCustTypeOpen(!isCustTypeOpen);
+                  }}
+                  maxHeight={200}
                 />
               </View>
-            )}
 
-            {/* CUSTOMER REPORT FILTER OPTIONS: Customer Type, Nationality, Religion, NRIC, Contact */}
-            {(needsCustomerType || needsNationality || needsReligion || needsNricType || needsContactOption) && (
-              <View style={styles.filterSection}>
-                <View style={[styles.inputRow, { marginTop: 12, zIndex: 15 }]}>
-                  {/* Customer Type */}
-                  {needsCustomerType && (
-                    <View style={styles.filterCol}>
-                      <ReportDropdown
-                        label="Customer Type"
-                        options={[
-                          { id: 'ALL', label: 'ALL TYPES' },
-                          { id: 'DIAMOND', label: 'DIAMOND' },
-                          { id: 'EMERALD', label: 'EMERALD' },
-                          { id: 'RUBY', label: 'RUBY' },
-                        ]}
-                        selectedId={customerType}
-                        onSelect={(id) => {
-                          setCustomerType(id);
-                          setIsCustTypeOpen(false);
-                        }}
-                        isOpen={isCustTypeOpen}
-                        onToggle={() => {
-                          closeAllDropdowns();
-                          setIsCustTypeOpen(!isCustTypeOpen);
-                        }}
-                        maxHeight={200}
-                      />
-                    </View>
-                  )}
+              {/* Nationality */}
+              <View style={styles.filterCol}>
+                <ReportDropdown
+                  label="Nationality"
+                  options={nationalitiesList}
+                  selectedId={nationality}
+                  onSelect={(id) => {
+                    setNationality(id);
+                    setIsNatOpen(false);
+                  }}
+                  isOpen={isNatOpen}
+                  onToggle={() => {
+                    closeAllDropdowns();
+                    setIsNatOpen(!isNatOpen);
+                  }}
+                  maxHeight={220}
+                />
+              </View>
 
-                  {/* Nationality */}
-                  {needsNationality && (
-                    <View style={styles.filterCol}>
-                      <ReportDropdown
-                        label="Nationality"
-                        options={nationalitiesList}
-                        selectedId={nationality}
-                        onSelect={(id) => {
-                          setNationality(id);
-                          setIsNatOpen(false);
-                        }}
-                        isOpen={isNatOpen}
-                        onToggle={() => {
-                          closeAllDropdowns();
-                          setIsNatOpen(!isNatOpen);
-                        }}
-                        maxHeight={220}
-                      />
-                    </View>
-                  )}
+              {/* Religion */}
+              <View style={styles.filterCol}>
+                <ReportDropdown
+                  label="Religion"
+                  options={[
+                    { id: 'ALL', label: 'ALL RELIGIONS' },
+                    { id: 'HINDU', label: 'HINDU' },
+                    { id: 'MUSLIM', label: 'MUSLIM' },
+                    { id: 'CHRISTIAN', label: 'CHRISTIAN' },
+                    { id: 'CHINESE', label: 'CHINESE' },
+                  ]}
+                  selectedId={religion}
+                  onSelect={(id) => {
+                    setReligion(id);
+                    setIsRelOpen(false);
+                  }}
+                  isOpen={isRelOpen}
+                  onToggle={() => {
+                    closeAllDropdowns();
+                    setIsRelOpen(!isRelOpen);
+                  }}
+                  maxHeight={200}
+                />
+              </View>
+            </View>
 
-                  {/* Religion */}
-                  {needsReligion && (
-                    <View style={styles.filterCol}>
-                      <ReportDropdown
-                        label="Religion"
-                        options={[
-                          { id: 'ALL', label: 'ALL RELIGIONS' },
-                          { id: 'HINDU', label: 'HINDU' },
-                          { id: 'MUSLIM', label: 'MUSLIM' },
-                          { id: 'CHRISTIAN', label: 'CHRISTIAN' },
-                          { id: 'CHINESE', label: 'CHINESE' },
-                        ]}
-                        selectedId={religion}
-                        onSelect={(id) => {
-                          setReligion(id);
-                          setIsRelOpen(false);
-                        }}
-                        isOpen={isRelOpen}
-                        onToggle={() => {
-                          closeAllDropdowns();
-                          setIsRelOpen(!isRelOpen);
-                        }}
-                        maxHeight={200}
-                      />
-                    </View>
-                  )}
+            {/* ROW 3: Contact Option | NRIC Type | Date Filter (All in one row) */}
+            <View style={[styles.filterRadioGroupRow, { marginTop: 16 }]}>
+              {/* Column 1 (Left): Contact Option */}
+              <View style={styles.radioSubGroup}>
+                <Text style={[styles.fieldLabel, { marginBottom: 8 }]}>Contact Option:</Text>
+                <View style={styles.radioSubGroupItems}>
+                  <RadioButton
+                    label="ALL"
+                    selected={contactOption === 'ALL'}
+                    onPress={() => setContactOption('ALL')}
+                  />
+                  <RadioButton
+                    label="SMS"
+                    selected={contactOption === 'SMS'}
+                    onPress={() => setContactOption('SMS')}
+                  />
+                  <RadioButton
+                    label="Phone"
+                    selected={contactOption === 'Phone'}
+                    onPress={() => setContactOption('Phone')}
+                  />
+                  <RadioButton
+                    label="None"
+                    selected={contactOption === 'None'}
+                    onPress={() => setContactOption('None')}
+                  />
                 </View>
-
-                {/* NRIC & Contact Radio Options */}
-                {(needsNricType || needsContactOption) && (
-                  <View style={[styles.filterRadioGroupRow, { marginTop: 14 }]}>
-                    {/* NRIC Type */}
-                    {needsNricType && (
-                      <View style={styles.radioSubGroup}>
-                        <Text style={[styles.fieldLabel, { marginBottom: 6 }]}>NRIC Type:</Text>
-                        <View style={styles.radioSubGroupItems}>
-                          <RadioButton
-                            label="ALL"
-                            selected={nricType === 'ALL'}
-                            onPress={() => setNricType('ALL')}
-                          />
-                          <RadioButton
-                            label="SINGAPOREAN / SPR"
-                            selected={nricType === 'SINGAPOREAN/SPR'}
-                            onPress={() => setNricType('SINGAPOREAN/SPR')}
-                          />
-                          <RadioButton
-                            label="OTHERS"
-                            selected={nricType === 'OTHERS'}
-                            onPress={() => setNricType('OTHERS')}
-                          />
-                        </View>
-                      </View>
-                    )}
-
-                    {/* Contact Options */}
-                    {needsContactOption && (
-                      <View style={styles.radioSubGroup}>
-                        <Text style={[styles.fieldLabel, { marginBottom: 6 }]}>Contact Option:</Text>
-                        <View style={styles.radioSubGroupItems}>
-                          <RadioButton
-                            label="ALL"
-                            selected={contactOption === 'ALL'}
-                            onPress={() => setContactOption('ALL')}
-                          />
-                          <RadioButton
-                            label="SMS"
-                            selected={contactOption === 'SMS'}
-                            onPress={() => setContactOption('SMS')}
-                          />
-                          <RadioButton
-                            label="Phone"
-                            selected={contactOption === 'Phone'}
-                            onPress={() => setContactOption('Phone')}
-                          />
-                          <RadioButton
-                            label="None"
-                            selected={contactOption === 'None'}
-                            onPress={() => setContactOption('None')}
-                          />
-                        </View>
-                      </View>
-                    )}
-                  </View>
-                )}
               </View>
-            )}
+
+              {/* Column 2 (Middle): NRIC Type */}
+              <View style={[styles.radioSubGroup, styles.radioSubGroupWithBorder]}>
+                <Text style={[styles.fieldLabel, { marginBottom: 8 }]}>NRIC Type:</Text>
+                <View style={styles.radioSubGroupItems}>
+                  <RadioButton
+                    label="ALL"
+                    selected={nricType === 'ALL'}
+                    onPress={() => setNricType('ALL')}
+                  />
+                  <RadioButton
+                    label="SINGAPOREAN / SPR"
+                    selected={nricType === 'SINGAPOREAN/SPR'}
+                    onPress={() => setNricType('SINGAPOREAN/SPR')}
+                  />
+                  <RadioButton
+                    label="OTHERS"
+                    selected={nricType === 'OTHERS'}
+                    onPress={() => setNricType('OTHERS')}
+                  />
+                </View>
+              </View>
+
+              {/* Column 3 (Right): Date Filter */}
+              <View style={[styles.radioSubGroup, styles.radioSubGroupWithBorder]}>
+                <Text style={[styles.fieldLabel, { marginBottom: 8 }]}>Date Filter:</Text>
+                <View style={styles.radioSubGroupItems}>
+                  <RadioButton
+                    label="Date of Birth"
+                    selected={customerDateType === 'Date of Birth'}
+                    onPress={() => setCustomerDateType('Date of Birth')}
+                  />
+                  <RadioButton
+                    label="Date of Anniversary"
+                    selected={customerDateType === 'Date of Anniversary'}
+                    onPress={() => setCustomerDateType('Date of Anniversary')}
+                  />
+                </View>
+              </View>
+            </View>
 
             {/* Divider */}
             <View style={styles.divider} />
@@ -977,22 +873,22 @@ const styles = StyleSheet.create({
   reportCol: {
     flex: 1.5,
     position: 'relative',
-    zIndex: 20,
+    zIndex: 99999,
   },
   customerCodeCol: {
     flex: 1,
     minWidth: 160,
   },
   customerCodeInputWrapper: {
-    height: 36,
+    height: 38,
     borderWidth: 1,
     borderColor: '#D4C3A3',
     borderRadius: 6,
     backgroundColor: CARD_BG,
     flexDirection: 'row',
     alignItems: 'center',
-    paddingLeft: 10,
-    paddingRight: 4,
+    paddingLeft: 12,
+    paddingRight: 6,
   },
   customerCodeInput: {
     flex: 1,
@@ -1003,8 +899,8 @@ const styles = StyleSheet.create({
     padding: 0,
   },
   customerSearchBtn: {
-    width: 26,
-    height: 26,
+    width: 28,
+    height: 28,
     borderRadius: 4,
     backgroundColor: GOLD_DARK,
     justifyContent: 'center',
@@ -1038,12 +934,20 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     flexWrap: 'wrap',
     gap: 12,
+    marginTop: 16,
+  },
+  dateFilterLabel: {
+    fontSize: 12.5,
+    fontWeight: 'bold',
+    color: TEXT_DARK,
+    marginRight: 10,
+    fontFamily: 'Cambria',
   },
   radioBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingVertical: 6,
-    paddingHorizontal: 16,
+    paddingHorizontal: 14,
     borderRadius: 6,
     borderWidth: 1,
     borderColor: '#E2D3B3',
@@ -1085,9 +989,9 @@ const styles = StyleSheet.create({
   },
   filterSection: {
     borderTopWidth: 1,
-    borderTopColor: '#F5EFE6',
-    paddingTop: 12,
-    marginTop: 10,
+    borderTopColor: '#F0E6CC',
+    paddingTop: 14,
+    marginTop: 14,
     marginBottom: 6,
   },
   filterCol: {
@@ -1096,11 +1000,17 @@ const styles = StyleSheet.create({
   },
   filterRadioGroupRow: {
     flexDirection: Platform.OS === 'web' ? 'row' : 'column',
-    gap: 20,
     alignItems: Platform.OS === 'web' ? 'flex-start' : 'stretch',
+    gap: Platform.OS === 'web' ? 0 : 16,
   },
   radioSubGroup: {
     flex: 1,
+    paddingRight: Platform.OS === 'web' ? 12 : 0,
+  },
+  radioSubGroupWithBorder: {
+    borderLeftWidth: Platform.OS === 'web' ? 1 : 0,
+    borderLeftColor: '#F0E6CC',
+    paddingLeft: Platform.OS === 'web' ? 16 : 0,
   },
   radioSubGroupItems: {
     flexDirection: 'row',

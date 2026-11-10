@@ -4,6 +4,7 @@ const { poolPromise } = require("../db");
 
 // Load Unipro logo base64 once
 let cachedLogoBase64 = null;
+let cachedCompanyInfo = null;
 const getLogoBase64 = () => {
   if (cachedLogoBase64 !== null) return cachedLogoBase64;
   try {
@@ -205,6 +206,17 @@ const formatColumnHeader = (colName) => {
     Mobile: "MOBILE NO.",
     Phone: "PHONE NO.",
     TotalRewardPoints: "REWARD PTS.",
+    PreviousPoints: "PREV. PTS",
+    "Previous Points": "PREV. PTS",
+    AdjustmentPoints: "ADJ. PTS",
+    "Adjustment Points": "ADJ. PTS",
+    InvoiceNo: "INV. NO.",
+    "Invoice Number": "INV. NO.",
+    "Invoice No": "INV. NO.",
+    CreateUser: "CRT. USER",
+    "Create User": "CRT. USER",
+    CreateDate: "CRT. DATE",
+    "Create Date": "CRT. DATE",
     TotalRedeemedPoints: "REDEEMED PTS.",
     BalancePoints: "BAL. PTS.",
 
@@ -285,7 +297,7 @@ const getColumnAlignment = (colName) => {
   if (
     c === "date" || c === "invoicedate" || c === "orderdate" || c === "orderdatetime" ||
     c === "canceldate" || c === "year" || c === "month" || c === "hour" || c === "time" ||
-    c === "canceltime" || c === "fromdate" || c === "todate" || c === "eoddate"
+    c === "canceltime" || c === "fromdate" || c === "todate" || c === "eoddate" || c === "createdate" || c === "crtdate"
   ) {
     return "center";
   }
@@ -372,7 +384,7 @@ const formatNumber = (val, isCount = false, colKey = "") => {
 
 const formatVal = (val, format, key) => {
   if (val === null || val === undefined || val === "") return "";
-  if (format === "date") return formatDateDisp(val);
+  if (format === "date" || (key && (key.toLowerCase() === "createdate" || key.toLowerCase() === "crtdate"))) return formatDateDisp(val);
   if (format === "currency") return Number(val).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   if (format === "decimal2") return Number(val).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   if (format === "decimal3") return Number(val).toFixed(3);
@@ -410,7 +422,7 @@ async function generateReportHtml({
   orientation = "portrait",
 }) {
   // Query company dynamically from tblCompany if not supplied or incomplete
-  let comp = companyInfo || {};
+  let comp = companyInfo || cachedCompanyInfo || {};
   if (!comp.CompanyName || comp.CompanyName === "SMART GOLD" || !comp.Phone) {
     try {
       const p = pool || (await poolPromise);
@@ -424,6 +436,7 @@ async function generateReportHtml({
           Address: [r.Address1, r.Address2, r.City, r.Country].filter(Boolean).join(", "),
           Phone: r.Phone ? r.Phone.trim() : "",
         };
+        cachedCompanyInfo = comp;
       }
     } catch (e) {
       console.warn("Could not query tblCompany:", e.message);
@@ -502,7 +515,8 @@ async function generateReportHtml({
       ? `${Number(totals.totalBalancePoints).toLocaleString()} pts`
       : "-";
 
-  const isLandscape = orientation === "landscape";
+  // Auto-detect landscape for wide tables (8 or more columns) unless explicitly requested
+  const isLandscape = orientation === "landscape" || (!orientation && (columns || []).length >= 8) || (columns || []).length >= 8;
   const pageSizeStr = isLandscape ? "A4 landscape" : "A4 portrait";
   const pageSheetWidth = isLandscape ? "297mm" : "210mm";
   const pageSheetMinHeight = isLandscape ? "210mm" : "297mm";
@@ -511,11 +525,11 @@ async function generateReportHtml({
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>${title || "Report"}</title>
+  <title></title>
   <style>
     @page {
       size: ${pageSizeStr};
-      margin: 10mm;
+      margin: 0 !important;
     }
     * {
       box-sizing: border-box;
@@ -526,9 +540,9 @@ async function generateReportHtml({
       margin: 0;
       padding: 0;
       background: #fbf9f5;
-      font-family: Cambria, Georgia, "Times New Roman", serif;
+      font-family: Cambria, Georgia, "Times New Roman", serif !important;
       color: #3b2d17;
-      font-size: 10px;
+      font-size: 11px;
     }
     .page-sheet {
       width: ${pageSheetWidth};
@@ -542,13 +556,14 @@ async function generateReportHtml({
       position: relative;
       display: flex;
       flex-direction: column;
+      font-family: Cambria, Georgia, "Times New Roman", serif !important;
     }
     /* HEADER SECTION */
     .header-row {
       display: flex;
       justify-content: space-between;
       align-items: center;
-      margin-bottom: 6px;
+      margin-bottom: 8px;
       position: relative;
     }
     .header-left {
@@ -557,8 +572,8 @@ async function generateReportHtml({
       align-items: center;
     }
     .header-left img {
-      max-height: 48px;
-      max-width: 130px;
+      max-height: 52px;
+      max-width: 135px;
       object-fit: contain;
     }
     .header-center {
@@ -567,18 +582,18 @@ async function generateReportHtml({
       padding: 0 10px;
     }
     .company-title {
-      font-family: Cambria, Georgia, serif;
-      font-size: 26px;
+      font-family: Cambria, Georgia, "Times New Roman", serif !important;
+      font-size: 28px;
       font-weight: 700;
       color: #996515;
       letter-spacing: 2px;
       text-transform: uppercase;
       margin-bottom: 4px;
-      line-height: 1.1;
+      line-height: 1.15;
     }
     .company-address {
-      font-family: Cambria, Georgia, serif;
-      font-size: 11px;
+      font-family: Cambria, Georgia, "Times New Roman", serif !important;
+      font-size: 12px;
       color: #4a3b22;
       font-weight: 700;
       letter-spacing: 0.5px;
@@ -615,19 +630,19 @@ async function generateReportHtml({
       margin-bottom: 12px;
     }
     .report-main-title {
-      font-family: Cambria, Georgia, serif;
-      font-size: 18px;
+      font-family: Cambria, Georgia, "Times New Roman", serif !important;
+      font-size: 20px;
       font-weight: 700;
       color: #3b2d17;
       letter-spacing: 1px;
       text-transform: uppercase;
-      margin-bottom: 4px;
+      margin-bottom: 5px;
     }
     .report-period-line {
-      font-family: Cambria, Georgia, serif;
-      font-size: 11px;
+      font-family: Cambria, Georgia, "Times New Roman", serif !important;
+      font-size: 12px;
       color: #705832;
-      font-weight: 500;
+      font-weight: 600;
     }
     /* 4 STAT CARDS ROW */
     .stat-cards-row {
@@ -644,8 +659,8 @@ async function generateReportHtml({
       background: #ffffff;
     }
     .stat-label {
-      font-family: Cambria, Georgia, serif;
-      font-size: 9.5px;
+      font-family: Cambria, Georgia, "Times New Roman", serif !important;
+      font-size: 10.5px;
       font-weight: 700;
       color: #705832;
       letter-spacing: 0.5px;
@@ -653,8 +668,8 @@ async function generateReportHtml({
       margin-bottom: 3px;
     }
     .stat-value {
-      font-family: Cambria, Georgia, serif;
-      font-size: 14px;
+      font-family: Cambria, Georgia, "Times New Roman", serif !important;
+      font-size: 15px;
       font-weight: 700;
       color: #996515;
     }
@@ -668,7 +683,7 @@ async function generateReportHtml({
     table.report-table {
       width: 100% !important;
       border-collapse: collapse;
-      font-family: Cambria, Georgia, serif;
+      font-family: Cambria, Georgia, "Times New Roman", serif !important;
       font-size: 11px;
       border: 0.75px solid #d4a742;
       box-sizing: border-box;
@@ -677,24 +692,24 @@ async function generateReportHtml({
       background-color: #996515 !important;
       color: #ffffff !important;
       font-weight: 700 !important;
-      font-family: Cambria, Georgia, serif;
-      padding: 7px 6px;
+      font-family: Cambria, Georgia, "Times New Roman", serif !important;
+      padding: 8px 6px;
       letter-spacing: 0.3px;
       border: 0.75px solid #d4a742;
-      font-size: 9.5px;
-      line-height: 1.2;
+      font-size: 11px;
+      line-height: 1.25;
       text-align: center !important;
       box-sizing: border-box;
       white-space: nowrap !important;
       text-transform: uppercase !important;
     }
     table.report-table tbody td {
-      padding: 5px 6px;
+      padding: 6px 6px;
       color: #3b2d17;
-      font-family: Cambria, Georgia, serif;
+      font-family: Cambria, Georgia, "Times New Roman", serif !important;
       border: 0.75px solid #f0d9a0;
-      font-size: 9.5px;
-      line-height: 1.25;
+      font-size: 11px;
+      line-height: 1.3;
       text-align: center !important;
       box-sizing: border-box;
       white-space: nowrap;
@@ -711,13 +726,13 @@ async function generateReportHtml({
     table.report-table tbody tr.totals-row td {
       background-color: #fff8e7 !important;
       font-weight: 700 !important;
-      font-family: Cambria, Georgia, serif;
+      font-family: Cambria, Georgia, "Times New Roman", serif !important;
       color: #996515 !important;
       border: 0.75px solid #f0d9a0 !important;
       border-top: 0.75px solid #f0d9a0 !important;
       border-bottom: 0.75px solid #f0d9a0 !important;
-      padding: 6px 6px;
-      font-size: 10px;
+      padding: 7px 6px;
+      font-size: 11.5px;
       text-align: center !important;
     }
     /* FOOTER */
@@ -734,15 +749,15 @@ async function generateReportHtml({
       margin-bottom: 12px;
     }
     .footer-gen-text {
-      font-family: Cambria, Georgia, serif;
-      font-size: 10.5px;
+      font-family: Cambria, Georgia, "Times New Roman", serif !important;
+      font-size: 11.5px;
       color: #4a3b22;
       font-weight: 600;
-      margin-bottom: 3px;
+      margin-bottom: 4px;
     }
     .footer-powered {
-      font-family: Cambria, Georgia, serif;
-      font-size: 11px;
+      font-family: Cambria, Georgia, "Times New Roman", serif !important;
+      font-size: 12px;
       color: #996515;
       font-weight: 700;
     }
@@ -772,33 +787,56 @@ async function generateReportHtml({
     }
     @media print {
       @page {
-        margin: 10mm;
+        margin: 0 !important;
         size: ${pageSizeStr};
       }
-      body {
+      html, body {
         background: #fff !important;
         padding: 0 !important;
         margin: 0 !important;
+        height: auto !important;
+        min-height: 0 !important;
       }
       .print-toolbar {
         display: none !important;
       }
       .page-sheet {
+        display: block !important;
         width: 100% !important;
-        min-height: auto !important;
+        min-height: 0 !important;
+        height: auto !important;
         margin: 0 !important;
-        padding: 0 !important;
+        padding: 8mm 10mm !important;
         border: none !important;
         box-shadow: none !important;
+        box-sizing: border-box !important;
+      }
+      .table-container {
+        display: block !important;
+        overflow: visible !important;
+        width: 100% !important;
+        flex: none !important;
+        margin: 0 !important;
+        padding: 0 !important;
+      }
+      table.report-table {
+        width: 100% !important;
+        page-break-inside: auto;
       }
       tr {
         page-break-inside: avoid;
+        break-inside: avoid;
       }
       thead {
         display: table-header-group;
       }
       tfoot {
         display: table-footer-group;
+      }
+      .report-footer {
+        page-break-inside: avoid;
+        break-inside: avoid;
+        margin-top: 14px !important;
       }
     }
   </style>
@@ -878,6 +916,24 @@ async function generateReportHtml({
                 <col style="width: 32%;" />
                 <col style="width: 18%;" />
                 <col style="width: 16%;" />
+              `;
+            }
+
+            // Customer Points Adjustment (8 columns): CUST. CODE, CUST. NAME, CUST. TYPE, PREV. PTS, ADJ. PTS, INV. NO., CRT. USER, CRT. DATE
+            const isPointsAdj = cols.some(c => {
+              const k = (c.key || c.label || '').toLowerCase();
+              return k.includes('adjustmentpoints') || k.includes('adj. pts') || k.includes('adj pts');
+            });
+            if (isPointsAdj && cols.length === 8) {
+              return `
+                <col style="width: 14%;" />
+                <col style="width: 22%;" />
+                <col style="width: 10%;" />
+                <col style="width: 9%;" />
+                <col style="width: 9%;" />
+                <col style="width: 13%;" />
+                <col style="width: 10%;" />
+                <col style="width: 13%;" />
               `;
             }
             if (cols.length > 0) {
@@ -1079,40 +1135,171 @@ async function generateReportHtml({
           }
 
           ${
-            totals && Object.keys(totals).length > 0
-              ? `
-            <tr class="totals-row">
-              ${(columns || [])
-                .map((c, cIdx) => {
-                  const alignStyle = c.align ? `text-align: ${c.align} !important;` : '';
-                  if (cIdx === 0) return `<td style="${alignStyle}">TOTAL:</td>`;
-                  const k = (c.key || "").toLowerCase().replace(/[\s_\-\.]/g, "");
-                  if (k === "pcs" || k === "totalpcs" || k === "qty" || k === "totalqty") {
-                    return `<td style="${alignStyle}">${totals.totalPcs !== undefined ? Number(totals.totalPcs).toLocaleString() : totals.totalQty !== undefined ? Number(totals.totalQty).toLocaleString() : ""}</td>`;
+            (() => {
+              if (!totals || typeof totals !== "object" || Object.keys(totals).length === 0) return "";
+
+              // Helper: Strict check - determine if a column is non-additive/descriptive where TOTAL must NEVER appear
+              const isNonSummableCol = (colKey) => {
+                if (!colKey) return true;
+                const k = colKey.toLowerCase().replace(/[\s_\-\.]/g, "");
+                return (
+                  k.includes("cust") || k.includes("name") || k.includes("code") ||
+                  k.includes("desc") || k.includes("type") || k.includes("user") ||
+                  k.includes("date") || k.includes("time") || k.includes("invno") ||
+                  k.includes("billno") || k.includes("docno") || k.includes("orderno") ||
+                  k.includes("voucher") || k.includes("category") || k.includes("class") ||
+                  k.includes("address") || k.includes("phone") || k.includes("mobile") ||
+                  k.includes("email") || k.includes("nric") || k.includes("passport") ||
+                  k.includes("status") || k.includes("remark") || k.includes("tray") ||
+                  k.includes("location") || k.includes("religion") || k.includes("nationality") ||
+                  k.includes("serial") || k.includes("item") || k.includes("id") ||
+                  k.includes("rate") || k.includes("loss") || k.includes("goldloss") ||
+                  k.includes("percentage") || k.includes("pct") || k.includes("%") ||
+                  k.includes("ratio") || k.includes("margin") || k.includes("markup") ||
+                  k.includes("prefix") || k.includes("salestype") || k.includes("purchasetype")
+                );
+              };
+
+              // Helper: Check if a column key represents an additive numerical measure
+              const isAdditiveMetric = (colKey) => {
+                if (!colKey || isNonSummableCol(colKey)) return false;
+                const k = colKey.toLowerCase().replace(/[\s_\-\.]/g, "");
+                // Reference rates, percentages, losses, unit prices are non-additive
+                if (k.includes("rate") || k.includes("loss") || k.includes("pct") || k.includes("%")) return false;
+                return (
+                  k.includes("point") || k.includes("pts") || k.includes("qty") ||
+                  k.includes("pcs") || k.includes("wt") || k.includes("weight") ||
+                  k.includes("cost") || k.includes("amount") || k.includes("total") ||
+                  k.includes("sales") || k.includes("smc") ||
+                  k.includes("pmc") || k.includes("gst") || k.includes("tax") ||
+                  k.includes("discount") || k.includes("disc") || k.includes("sold") ||
+                  k.includes("balance") || k.includes("stock")
+                );
+              };
+
+              // Helper: Get numerical sum value for an additive column from totals object or data fallback
+              const getColTotalVal = (c) => {
+                const colKey = c.key || "";
+                if (isNonSummableCol(colKey) || !isAdditiveMetric(colKey)) return "";
+
+                const k = colKey.toLowerCase().replace(/[\s_\-\.]/g, "");
+
+                // Points & Adjustment Points
+                if (k === "adjustmentpoints" || k === "adjpts" || k === "adjpoints") {
+                  const pts = totals.totalAdjustmentPoints !== undefined ? totals.totalAdjustmentPoints : totals.adjustmentPoints;
+                  if (pts !== undefined) return Number(pts).toLocaleString();
+                }
+                if (k === "previouspoints" || k === "prevpts" || k === "prevpoints") {
+                  const pts = totals.totalPreviousPoints !== undefined ? totals.totalPreviousPoints : totals.previousPoints;
+                  if (pts !== undefined) return Number(pts).toLocaleString();
+                }
+                if (k === "totalpoints") {
+                  const pts = totals.totalPoints !== undefined ? totals.totalPoints : totals.TotalPoints;
+                  if (pts !== undefined) return Number(pts).toLocaleString();
+                }
+                if (k === "newtotalpoints") {
+                  const pts = totals.newTotalPoints !== undefined ? totals.newTotalPoints : totals.NewTotalPoints;
+                  if (pts !== undefined) return Number(pts).toLocaleString();
+                }
+                if (k === "rewardpoints" || k === "totalrewardpoints") {
+                  const pts = totals.totalRewardPoints !== undefined ? totals.totalRewardPoints : totals.rewardPoints;
+                  if (pts !== undefined) return Number(pts).toLocaleString();
+                }
+                if (k === "redeemedpoints" || k === "totalredeemedpoints" || k === "redeempoints") {
+                  const pts = totals.totalRedeemedPoints !== undefined ? totals.totalRedeemedPoints : totals.redeemedPoints;
+                  if (pts !== undefined) return Number(pts).toLocaleString();
+                }
+                if (k === "balancepoints") {
+                  const pts = totals.totalBalancePoints !== undefined ? totals.totalBalancePoints : totals.balancePoints;
+                  if (pts !== undefined) return Number(pts).toLocaleString();
+                }
+
+                // Pieces & Quantities
+                if (k === "pcs" || k === "totalpcs" || k === "qty" || k === "totalqty" || k === "sold" || k === "qtysold") {
+                  const q = totals.totalPcs !== undefined ? totals.totalPcs : totals.totalQty !== undefined ? totals.totalQty : totals.qty !== undefined ? totals.qty : totals.pcs;
+                  if (q !== undefined) return Number(q).toLocaleString();
+                }
+
+                // Weights
+                if (k.includes("weight") || k.includes("wt")) {
+                  const wt = totals.totalWeight !== undefined ? totals.totalWeight : totals.totalNetWeight !== undefined ? totals.totalNetWeight : totals.weight;
+                  if (wt !== undefined) return Number(wt).toFixed(3);
+                }
+
+                // Costs & Amounts
+                if (k === "cost" || k === "totalcost") {
+                  if (totals.totalCost !== undefined) return "$ " + Number(totals.totalCost).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                }
+                if (k === "smc" || k === "totalsmc") {
+                  const smc = totals.totalSMC !== undefined ? totals.totalSMC : totals.totalCost !== undefined ? totals.totalCost : totals.smc;
+                  if (smc !== undefined) return "$ " + Number(smc).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                }
+                if (k === "pmc" || k === "totalpmc") {
+                  if (totals.totalPmc !== undefined) return "$ " + Number(totals.totalPmc).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                }
+                if (k === "amount" || k === "totalamount" || k === "nettotal" || k === "totalsales" || k === "netamount" || k === "salesamount" || k === "netsales") {
+                  const amt = totals.totalAmount !== undefined ? totals.totalAmount : totals.totalSales !== undefined ? totals.totalSales : totals.netSales !== undefined ? totals.netSales : totals.salesAmount;
+                  if (amt !== undefined) return "$ " + Number(amt).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                }
+                if (k === "gst" || k === "totaltax" || k === "tax") {
+                  const g = totals.totalGST !== undefined ? totals.totalGST : totals.totalTax !== undefined ? totals.totalTax : totals.gst;
+                  if (g !== undefined) return "$ " + Number(g).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                }
+                if (k === "discount" || k === "totaldiscount" || k === "disc") {
+                  const d = totals.totalDiscount !== undefined ? totals.totalDiscount : totals.discount;
+                  if (d !== undefined) return "$ " + Number(d).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                }
+
+                // Direct key match in totals object (only if numerical)
+                if (totals[colKey] !== undefined) {
+                  const num = Number(totals[colKey]);
+                  if (!isNaN(num)) {
+                    return num.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
                   }
-                  if (k.includes("weight")) {
-                    return `<td style="${alignStyle}">${totals.totalWeight !== undefined ? Number(totals.totalWeight).toFixed(3) : totals.totalNetWeight !== undefined ? Number(totals.totalNetWeight).toFixed(3) : ""}</td>`;
+                }
+
+                // If not found in totals object, compute from data rows for additive numeric columns
+                if (Array.isArray(data) && data.length > 0) {
+                  const hasValues = data.some(row => row[colKey] !== null && row[colKey] !== undefined && row[colKey] !== "");
+                  if (hasValues) {
+                    const sum = data.reduce((acc, row) => acc + (Number(row[colKey]) || 0), 0);
+                    if (!isNaN(sum) && sum !== 0) {
+                      if (k.includes("amount") || k.includes("cost") || k.includes("price") || k.includes("sales")) {
+                        return "$ " + sum.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                      }
+                      if (k.includes("weight") || k.includes("wt")) {
+                        return sum.toFixed(3);
+                      }
+                      return sum.toLocaleString();
+                    }
                   }
-                  if (k === "cost" || k === "totalcost" || k === "totalsmc" || k === "smc") {
-                    return `<td style="${alignStyle}">$ ${totals.totalCost !== undefined ? Number(totals.totalCost).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : ""}</td>`;
-                  }
-                  if (k === "amount" || k === "totalamount" || k === "nettotal" || k === "totalsales") {
-                    const amt = totals.totalAmount !== undefined ? totals.totalAmount : totals.totalSales !== undefined ? totals.totalSales : totals.netSales;
-                    return `<td style="${alignStyle}">${amt !== undefined ? "$ " + Number(amt).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : ""}</td>`;
-                  }
-                  if (k === "pmc" || k === "totalpmc") {
-                    return `<td style="${alignStyle}">${totals.totalPmc !== undefined ? "$ " + Number(totals.totalPmc).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : ""}</td>`;
-                  }
-                  if (totals[c.key] !== undefined) {
-                    const num = Number(totals[c.key]);
-                    return `<td style="${alignStyle}">${!isNaN(num) ? num.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : totals[c.key]}</td>`;
-                  }
-                  return `<td style="${alignStyle}"></td>`;
-                })
-                .join("")}
-            </tr>
-          `
-              : ""
+                }
+
+                return "";
+              };
+
+              // Identify columns with valid additive totals
+              const numericTotals = (columns || []).map(c => getColTotalVal(c));
+              const hasValidTotal = numericTotals.some(v => v !== "" && v !== null && v !== undefined);
+
+              // Do NOT display a TOTAL row if there are no meaningful numeric totals!
+              if (!hasValidTotal) return "";
+
+              return `
+                <tr class="totals-row">
+                  ${(columns || [])
+                    .map((c, cIdx) => {
+                      const alignStyle = c.align ? `text-align: ${c.align} !important;` : '';
+                      if (cIdx === 0) {
+                        return `<td style="text-align: left !important; font-weight: 700;">TOTAL:</td>`;
+                      }
+                      const val = numericTotals[cIdx];
+                      return `<td style="${alignStyle}">${val}</td>`;
+                    })
+                    .join("")}
+                </tr>
+              `;
+            })()
           }
         </tbody>
       </table>

@@ -290,11 +290,6 @@ export default function ChangePrinterScreen() {
           </TouchableOpacity>
           <ThemedText style={styles.headerTitle}>Change Printer</ThemedText>
         </View>
-
-        <TouchableOpacity style={styles.newButton} onPress={openAddModal} activeOpacity={0.8}>
-          <Ionicons name="add" size={16} color="#FFFFFF" style={{ marginRight: 2 }} />
-          <ThemedText style={styles.newButtonText}>New</ThemedText>
-        </TouchableOpacity>
       </View>
 
       {/* MAIN CONTENT WRAPPER */}

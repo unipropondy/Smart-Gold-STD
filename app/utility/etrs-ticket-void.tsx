@@ -472,8 +472,8 @@ export default function ETRSTicketVoidScreen() {
               </View>
 
               {/* 9. Remarks * (Required for Void) */}
-              <View style={styles.formRow}>
-                <Text style={styles.label}>
+              <View style={[styles.formRow, styles.remarksRow]}>
+                <Text style={[styles.label, styles.remarksLabel]}>
                   Remarks <Text style={styles.requiredStar}>*</Text>
                 </Text>
                 <TextInput
@@ -769,8 +769,10 @@ const styles = StyleSheet.create({
     letterSpacing: 0.3,
   },
   cardBody: {
-    padding: 14,
-    gap: 10,
+    paddingHorizontal: 14,
+    paddingTop: 10,
+    paddingBottom: 14,
+    gap: 7,
     flex: 1,
     justifyContent: 'flex-start',
   },
@@ -791,7 +793,7 @@ const styles = StyleSheet.create({
   },
   input: {
     flex: 0.58,
-    height: 36,
+    height: 32,
     borderWidth: 1,
     borderColor: '#DFD5C3',
     borderRadius: 6,
@@ -811,10 +813,17 @@ const styles = StyleSheet.create({
     borderColor: '#EADBCA',
     color: '#A39682',
   },
+  remarksRow: {
+    alignItems: 'flex-start',
+  },
+  remarksLabel: {
+    paddingTop: 6,
+  },
   multilineInput: {
-    height: 48,
+    height: 44,
     textAlignVertical: 'top',
     paddingTop: 6,
+    paddingBottom: 6,
   },
   inputSearchWrapper: {
     flex: 0.58,
@@ -823,7 +832,7 @@ const styles = StyleSheet.create({
   },
   searchButton: {
     width: 38,
-    height: 36,
+    height: 32,
     backgroundColor: '#9E6D08',
     borderTopRightRadius: 6,
     borderBottomRightRadius: 6,
@@ -838,7 +847,7 @@ const styles = StyleSheet.create({
   },
   dateTripleBox: {
     flex: 1,
-    height: 36,
+    height: 32,
     borderWidth: 1,
     borderColor: '#DFD5C3',
     borderRadius: 6,
@@ -867,7 +876,7 @@ const styles = StyleSheet.create({
   rightInputIconBtn: {
     position: 'absolute',
     right: 8,
-    height: 36,
+    height: 32,
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -910,7 +919,7 @@ const styles = StyleSheet.create({
     color: '#3B2D17',
   },
   dropdownSelect: {
-    height: 36,
+    height: 32,
     borderWidth: 1,
     borderColor: '#DFD5C3',
     borderRadius: 6,

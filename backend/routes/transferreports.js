@@ -589,20 +589,58 @@ router.post("/report", async (req, res) => {
     const html = `
     <html>
       <head>
-        <title>Report - ${SelectOption}</title>
+        <title></title>
         <style>
-          body { font-family: 'Courier New', Courier, monospace; font-size: 12px; padding: 20px; }
-          .header { display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 20px;}
-          .title { font-weight: bold; font-size: 14px; margin-top: 20px; margin-bottom: 10px;}
+          @page { size: auto; margin: 0 !important; }
+          @media print {
+            @page { margin: 0 !important; size: auto; }
+            html, body { margin: 0 !important; padding: 0 !important; background: #fff !important; }
+          }
+          body {
+            font-family: 'Cambria', 'Georgia', serif;
+            font-size: 11px;
+            color: #2b1d0c;
+            background: #fff;
+            margin: 0;
+            padding: 8mm 10mm !important;
+            box-sizing: border-box !important;
+          }
+          .header { display: flex; justify-content: space-between; font-size: 11px; margin-bottom: 12px;}
+          .title {
+            font-family: 'Cambria', 'Georgia', serif;
+            font-weight: 700;
+            font-size: 15px;
+            letter-spacing: 0.5px;
+            text-transform: uppercase;
+            color: #2b1d0c;
+            margin-top: 10px;
+            margin-bottom: 10px;
+            text-align: center;
+          }
           table { width: 100%; border-collapse: collapse; margin-top: 10px;}
-          th { border-top: 2px solid black; border-bottom: 2px solid black; padding: 5px; text-align: left; font-size: 12px; white-space: nowrap !important; text-transform: uppercase !important;}
-          td { padding: 5px; text-align: left; font-size: 12px;}
+          th {
+            background-color: #996515 !important;
+            color: #ffffff !important;
+            font-family: 'Cambria', 'Georgia', serif;
+            font-size: 10.5px;
+            font-weight: 700;
+            letter-spacing: 0.5px;
+            text-transform: uppercase !important;
+            padding: 6px 8px;
+            text-align: left;
+            white-space: nowrap !important;
+            -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
+          }
+          td {
+            padding: 5px 8px;
+            text-align: left;
+            font-size: 10.5px;
+            border-bottom: 1px solid #f0e6cc;
+          }
+          tr:nth-child(even) td { background-color: #fffbf2; }
           .right { text-align: right; }
           .bold { font-weight: bold; }
-          @media print {
-            @page { margin: 10mm; }
-            body { padding: 0; }
-          }
         </style>
       </head>
       <body>

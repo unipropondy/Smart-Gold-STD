@@ -9,17 +9,21 @@ import { Stack, useRouter } from 'expo-router';
 import React, { useEffect, useState, useMemo } from 'react';
 import {
   ActivityIndicator,
+  FlatList,
+  Modal,
   Platform,
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
+  TouchableWithoutFeedback,
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import DateTimePicker from '@react-native-community/datetimepicker';
 
-// Royal Gold Design Palette (matching Customer Reports)
+// Royal Gold Design Palette
 const GOLD_ACCENT = '#B48218';
 const GOLD_DARK = '#9E6D08';
 const GOLD_BORDER = '#E8DCB8';
@@ -30,34 +34,31 @@ const TEXT_DARK = '#3B2D17';
 interface ReportOption {
   id: string;
   label: string;
-  supportsDetail?: boolean;
-  supportsSupplier?: boolean;
-  supportsClass?: boolean;
-  supportsCategory?: boolean;
 }
 
 const REPORT_OPTIONS: ReportOption[] = [
-  { id: 'stock_by_category', label: 'Inventory Stock By Category', supportsDetail: true, supportsClass: true, supportsCategory: true, supportsSupplier: true },
-  { id: 'stock_by_catalogue', label: 'Inventory Stock By Catalogue', supportsDetail: true, supportsCategory: true },
-  { id: 'stock_by_category_datewise', label: 'Inventory Stock By Category – Date Wise', supportsDetail: true, supportsClass: true, supportsCategory: true },
-  { id: 'stock_by_catalogue_datewise', label: 'Inventory Stock By Catalogue – Date Wise', supportsDetail: true, supportsCategory: true },
-  { id: 'movement_by_size', label: 'Inventory Movement by Size', supportsDetail: true, supportsClass: true, supportsCategory: true, supportsSupplier: true },
+  { id: 'stock_by_category', label: 'Inventory Stock By Category' },
+  { id: 'stock_by_catalogue', label: 'Inventory Stock By Catalogue' },
+  { id: 'stock_by_category_datewise', label: 'Inventory Stock By Category – Date Wise' },
+  { id: 'stock_by_catalogue_datewise', label: 'Inventory Stock By Catalogue – Date Wise' },
+  { id: 'movement_by_size', label: 'Inventory Movement by Size' },
   { id: 'stock_in_excel', label: 'Inventory Stock in Excel' },
   { id: 'stock_in_excel_datewise', label: 'Inventory Stock in Excel – Date Wise' },
-  { id: 'diamond_stock', label: 'Diamond Stock', supportsClass: true, supportsCategory: true, supportsSupplier: true },
+  { id: 'diamond_stock', label: 'Diamond Stock' },
   { id: 'deleted_inventory', label: 'Deleted Inventory' },
   { id: 'online_stock', label: 'Online Stock' },
-  { id: 'reorder_level', label: 'ReOrder Level', supportsCategory: true },
+  { id: 'reorder_level', label: 'ReOrder Level' },
   { id: 'accessories_stock', label: 'Accessories Stock' },
   { id: 'scrap_stock', label: 'Scrap Inventory Stock' },
-  { id: 'sold_inventory', label: 'Sold Inventory', supportsClass: true, supportsCategory: true, supportsSupplier: true },
-  { id: 'purchase_return', label: 'Purchase Return', supportsSupplier: true },
+  { id: 'sold_inventory', label: 'Sold Inventory' },
+  { id: 'purchase_return', label: 'Purchase Return' },
   { id: 'split_inventory', label: 'Split Inventory' },
   { id: 'merged_inventory', label: 'Merged Inventory' },
   { id: 'inventory_maintenance', label: 'Inventory Maintenance' },
 ];
 
 type ActionOption = 'Preview' | 'Print' | 'PDF' | 'Excel';
+type LovType = 'class' | 'category' | 'catalogue' | 'size' | 'classType';
 
 const RadioButton = ({
   label,
@@ -92,13 +93,6 @@ const formatDateLocal = (d: any) => {
   return `${year}-${month}-${day}`;
 };
 
-const formatDisp = (iso: string) => {
-  if (!iso) return '';
-  const parts = iso.split('-');
-  if (parts.length === 3) return `${parts[2]} - ${parts[1]} - ${parts[0]}`;
-  return iso;
-};
-
 const parseLocalDate = (dateStr: string) => {
   if (!dateStr) return new Date();
   const parts = dateStr.split('-');
@@ -115,63 +109,106 @@ export default function InventoryReportsScreen() {
 
   const [selectedReport, setSelectedReport] = useState<string>('stock_by_category');
   const [isReportDropdownOpen, setIsReportDropdownOpen] = useState(false);
-  const [actionOption, setActionOption] = useState<ActionOption>('Preview');
   const [reportType, setReportType] = useState<'Summary' | 'Detail'>('Summary');
 
-  // Filter values
-  const [locationCode, setLocationCode] = useState<string>('ALL');
-  const [supplierCode, setSupplierCode] = useState<string>('ALL');
-  const [classCode, setClassCode] = useState<string>('ALL');
-  const [categoryCode, setCategoryCode] = useState<string>('ALL');
-
-  // Dropdown open states
-  const [isLocOpen, setIsLocOpen] = useState(false);
-  const [isSupOpen, setIsSupOpen] = useState(false);
-  const [isClassOpen, setIsClassOpen] = useState(false);
-  const [isCatOpen, setIsCatOpen] = useState(false);
-
-  // Filter options lists
-  const [locations, setLocations] = useState<{ id: string; label: string }[]>([{ id: 'ALL', label: 'ALL - All Locations' }]);
-  const [suppliers, setSuppliers] = useState<{ id: string; label: string }[]>([{ id: 'ALL', label: 'ALL - All Suppliers' }]);
-  const [classes, setClasses] = useState<{ id: string; label: string }[]>([{ id: 'ALL', label: 'ALL - All Classes' }]);
-  const [categories, setCategories] = useState<{ id: string; label: string }[]>([{ id: 'ALL', label: 'ALL - All Categories' }]);
-
-  const closeAllDropdowns = () => {
-    setIsReportDropdownOpen(false);
-    setIsLocOpen(false);
-    setIsSupOpen(false);
-    setIsClassOpen(false);
-    setIsCatOpen(false);
-  };
-
-  useEffect(() => {
-    (async () => {
-      try {
-        const [locRes, supRes, clsRes, catRes] = await Promise.all([
-          fetch(`${API_BASE_URL}/inventoryreports/locations`).then(r => r.json()).catch(() => ({ data: [] })),
-          fetch(`${API_BASE_URL}/inventoryreports/suppliers`).then(r => r.json()).catch(() => ({ data: [] })),
-          fetch(`${API_BASE_URL}/inventoryreports/classes`).then(r => r.json()).catch(() => ({ data: [] })),
-          fetch(`${API_BASE_URL}/inventoryreports/categories`).then(r => r.json()).catch(() => ({ data: [] })),
-        ]);
-
-        if (locRes?.data) setLocations(locRes.data.map((x: any) => ({ id: x.LocationCode, label: x.LocationName || x.LocationCode })));
-        if (supRes?.data) setSuppliers(supRes.data.map((x: any) => ({ id: x.SupplierCode, label: x.SupplierName || x.SupplierCode })));
-        if (clsRes?.data) setClasses(clsRes.data.map((x: any) => ({ id: x.ClassCode, label: x.ClassName || x.ClassCode })));
-        if (catRes?.data) setCategories(catRes.data.map((x: any) => ({ id: x.CategoryCode, label: x.CategoryName || x.CategoryCode })));
-      } catch (e) {
-        console.warn('Failed loading inventory filters:', e);
-      }
-    })();
-  }, []);
-
-  const [fromDate, setFromDate] = useState('2025-01-01');
+  // Dates
+  const [fromDate, setFromDate] = useState(formatDateLocal(new Date()));
   const [toDate, setToDate] = useState(formatDateLocal(new Date()));
   const [isLoading, setIsLoading] = useState(false);
+
+  // Dropdown filter values
+  const [locationCode, setLocationCode] = useState<string>('');
+  const [supplierCode, setSupplierCode] = useState<string>('');
+  const [isLocOpen, setIsLocOpen] = useState(false);
+  const [isSupOpen, setIsSupOpen] = useState(false);
+
+  // Lookup text inputs
+  const [classCode, setClassCode] = useState<string>('');
+  const [categoryCode, setCategoryCode] = useState<string>('');
+  const [catalogueCode, setCatalogueCode] = useState<string>('');
+  const [sizeCode, setSizeCode] = useState<string>('');
+  const [classType, setClassType] = useState<string>('');
+  const [includeImage, setIncludeImage] = useState<boolean>(false);
+
+  // Bottom action radio buttons
+  const [actionOption, setActionOption] = useState<ActionOption>('Preview');
+
+  // Master data lists for lookups and dropdowns
+  const [locations, setLocations] = useState<{ id: string; label: string }[]>([
+    { id: '', label: '-- Select --' },
+  ]);
+  const [suppliers, setSuppliers] = useState<{ id: string; label: string }[]>([
+    { id: '', label: '-- Select --' },
+  ]);
+  const [classesList, setClassesList] = useState<{ code: string; name: string }[]>([]);
+  const [categoriesList, setCategoriesList] = useState<{ code: string; name: string }[]>([]);
+  const [cataloguesList, setCataloguesList] = useState<{ code: string; name: string }[]>([]);
+  const [sizesList, setSizesList] = useState<{ code: string; name: string }[]>([]);
+  const [classTypesList, setClassTypesList] = useState<{ code: string; name: string }[]>([]);
+
+  // Generic LOV Modal state
+  const [isLovModalVisible, setIsLovModalVisible] = useState(false);
+  const [lovType, setLovType] = useState<LovType>('class');
+  const [lovSearchQuery, setLovSearchQuery] = useState('');
 
   const [showDatePicker, setShowDatePicker] = useState<{ show: boolean; mode: 'from' | 'to' }>({
     show: false,
     mode: 'from',
   });
+
+  const closeAllDropdowns = () => {
+    setIsReportDropdownOpen(false);
+    setIsLocOpen(false);
+    setIsSupOpen(false);
+  };
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const [locRes, supRes, clsRes, catRes, catlgRes, szRes, ctRes] = await Promise.all([
+          fetch(`${API_BASE_URL}/inventoryreports/locations`).then((r) => r.json()).catch(() => ({ data: [] })),
+          fetch(`${API_BASE_URL}/inventoryreports/suppliers`).then((r) => r.json()).catch(() => ({ data: [] })),
+          fetch(`${API_BASE_URL}/inventoryreports/classes`).then((r) => r.json()).catch(() => ({ data: [] })),
+          fetch(`${API_BASE_URL}/inventoryreports/categories`).then((r) => r.json()).catch(() => ({ data: [] })),
+          fetch(`${API_BASE_URL}/inventoryreports/catalogues`).then((r) => r.json()).catch(() => ({ data: [] })),
+          fetch(`${API_BASE_URL}/inventoryreports/sizes`).then((r) => r.json()).catch(() => ({ data: [] })),
+          fetch(`${API_BASE_URL}/inventoryreports/class-types`).then((r) => r.json()).catch(() => ({ data: [] })),
+        ]);
+
+        if (locRes?.data) {
+          const locs = locRes.data.map((x: any) => ({
+            id: x.LocationCode,
+            label: x.LocationCode === 'ALL' ? '-- Select --' : `${x.LocationCode} - ${x.LocationName || x.LocationCode}`,
+          }));
+          setLocations([{ id: '', label: '-- Select --' }, ...locs.filter((l: any) => l.id !== 'ALL')]);
+        }
+        if (supRes?.data) {
+          const sups = supRes.data.map((x: any) => ({
+            id: x.SupplierCode,
+            label: x.SupplierCode === 'ALL' ? '-- Select --' : `${x.SupplierCode} - ${x.SupplierName || x.SupplierCode}`,
+          }));
+          setSuppliers([{ id: '', label: '-- Select --' }, ...sups.filter((s: any) => s.id !== 'ALL')]);
+        }
+        if (clsRes?.data) {
+          setClassesList(clsRes.data.map((x: any) => ({ code: x.ClassCode, name: x.ClassName || x.ClassCode })));
+        }
+        if (catRes?.data) {
+          setCategoriesList(catRes.data.map((x: any) => ({ code: x.CategoryCode, name: x.CategoryName || x.CategoryCode })));
+        }
+        if (catlgRes?.data) {
+          setCataloguesList(catlgRes.data.map((x: any) => ({ code: x.CatalogueCode, name: x.CatalogueName || x.CatalogueCode })));
+        }
+        if (szRes?.data) {
+          setSizesList(szRes.data.map((x: any) => ({ code: x.SizeCode, name: x.SizeType || x.SizeCode })));
+        }
+        if (ctRes?.data) {
+          setClassTypesList(ctRes.data.map((x: any) => ({ code: x.ClassType, name: x.ClassType })));
+        }
+      } catch (e) {
+        console.warn('Failed loading inventory filter data:', e);
+      }
+    })();
+  }, []);
 
   const showSuccess = (msg: string) => {
     setToastType('success');
@@ -201,6 +238,82 @@ export default function InventoryReportsScreen() {
     return REPORT_OPTIONS.find((r) => r.id === selectedReport);
   }, [selectedReport]);
 
+  const openLovModal = (type: LovType) => {
+    setLovType(type);
+    setLovSearchQuery('');
+    setIsLovModalVisible(true);
+  };
+
+  const lovModalConfig = useMemo(() => {
+    switch (lovType) {
+      case 'class':
+        return {
+          title: 'Select Class',
+          codeLabel: 'Class Code',
+          nameLabel: 'Class Name',
+          data: classesList,
+        };
+      case 'category':
+        return {
+          title: 'Select Category',
+          codeLabel: 'Category Code',
+          nameLabel: 'Category Name',
+          data: categoriesList,
+        };
+      case 'catalogue':
+        return {
+          title: 'Select Catalogue',
+          codeLabel: 'Catalogue Code',
+          nameLabel: 'Catalogue Name',
+          data: cataloguesList,
+        };
+      case 'size':
+        return {
+          title: 'Select Size',
+          codeLabel: 'Size Code',
+          nameLabel: 'Size Type / Description',
+          data: sizesList,
+        };
+      case 'classType':
+        return {
+          title: 'Select ClassType',
+          codeLabel: 'ClassType',
+          nameLabel: 'Description',
+          data: classTypesList,
+        };
+    }
+  }, [lovType, classesList, categoriesList, cataloguesList, sizesList, classTypesList]);
+
+  const filteredLovData = useMemo(() => {
+    const q = lovSearchQuery.trim().toLowerCase();
+    if (!q) return lovModalConfig.data;
+    return lovModalConfig.data.filter(
+      (item) =>
+        item.code.toLowerCase().includes(q) || (item.name && item.name.toLowerCase().includes(q))
+    );
+  }, [lovModalConfig, lovSearchQuery]);
+
+  const handleSelectLovItem = (item: { code: string; name: string }) => {
+    switch (lovType) {
+      case 'class':
+        setClassCode(item.code);
+        break;
+      case 'category':
+        setCategoryCode(item.code);
+        break;
+      case 'catalogue':
+        setCatalogueCode(item.code);
+        break;
+      case 'size':
+        setSizeCode(item.code);
+        break;
+      case 'classType':
+        setClassType(item.code);
+        break;
+    }
+    setIsLovModalVisible(false);
+  };
+
   const handleGetReport = async (overrideAction?: ActionOption) => {
     const currentAction = overrideAction || actionOption;
 
@@ -222,29 +335,24 @@ export default function InventoryReportsScreen() {
 
     setIsLoading(true);
 
-    let win: Window | null = null;
-    if (
-      Platform.OS === 'web' &&
-      typeof window !== 'undefined' &&
-      (currentAction === 'Preview' || currentAction === 'Print')
-    ) {
-      win = window.open('', '_blank');
-    }
-
     try {
       const res = await fetch(`${API_BASE_URL}/inventoryreports/generate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           reportId: selectedReport,
-          reportType: selectedReportObj?.supportsDetail ? reportType : 'Summary',
+          reportType: reportType,
           filters: {
             fromDate,
             toDate,
-            locationCode,
-            supplierCode,
-            classCode,
-            categoryCode,
+            locationCode: locationCode || undefined,
+            supplierCode: supplierCode || undefined,
+            classCode: classCode || undefined,
+            categoryCode: categoryCode || undefined,
+            catalogueCode: catalogueCode || undefined,
+            sizeCode: sizeCode || undefined,
+            classType: classType || undefined,
+            includeImage,
           },
         }),
       });
@@ -252,7 +360,6 @@ export default function InventoryReportsScreen() {
       const json = await res.json();
 
       if (!json.success || !json.data || json.data.length === 0) {
-        if (win) win.close();
         showError(json.message || 'No records found for the selected criteria.');
         setIsLoading(false);
         return;
@@ -261,139 +368,60 @@ export default function InventoryReportsScreen() {
       const repTitle = json.title || (selectedReportObj ? selectedReportObj.label : 'Inventory Report');
       const rawCols = json.columns || Object.keys(json.data[0]).map((k) => ({ key: k, label: k }));
       const columns = rawCols.map((c: any) => ({ ...c, label: formatColumnHeader(c.label || c.key) }));
-      const cleanName = repTitle.replace(/[^a-zA-Z0-9_-]/g, '_');
+      const repTotals = json.summary || {};
 
-      // 1. PDF DOWNLOAD ACTION
-      if (currentAction === 'PDF') {
-        const pdfRes = await fetch(`${API_BASE_URL}/inventoryreports/export-pdf`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
+      if (currentAction === 'Preview') {
+        await printHtmlReport(
+          {
+            endpoint: 'inventoryreports',
             title: repTitle,
             columns,
             data: json.data,
-            totals: json.totals || {},
+            totals: repTotals,
             fromDate,
             toDate,
-          }),
-        });
-
-        if (!pdfRes.ok) {
-          throw new Error('Failed to generate PDF document');
-        }
-
-        const pdfBlob = await pdfRes.blob();
-        if (Platform.OS === 'web' && typeof window !== 'undefined') {
-          const url = URL.createObjectURL(pdfBlob);
-          const link = document.createElement('a');
-          link.href = url;
-          link.setAttribute('download', `${cleanName}.pdf`);
-          document.body.appendChild(link);
-          link.click();
-          document.body.removeChild(link);
-          setTimeout(() => URL.revokeObjectURL(url), 1000);
-          showSuccess('PDF downloaded successfully!');
-        } else {
-          showSuccess('PDF report generated!');
-        }
-        setIsLoading(false);
-        return;
-      }
-
-      // 2. EXCEL DOWNLOAD ACTION
-      if (currentAction === 'Excel') {
-        const excelRes = await fetch(`${API_BASE_URL}/inventoryreports/export-excel`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
+          },
+          false
+        );
+        showSuccess('Report preview opened.');
+      } else if (currentAction === 'Print') {
+        await printHtmlReport(
+          {
+            endpoint: 'inventoryreports',
             title: repTitle,
             columns,
             data: json.data,
-            totals: json.totals || {},
+            totals: repTotals,
             fromDate,
             toDate,
-          }),
-        });
-
-        if (!excelRes.ok) {
-          throw new Error('Failed to generate Excel report');
-        }
-
-        const excelBlob = await excelRes.blob();
-        if (Platform.OS === 'web' && typeof window !== 'undefined') {
-          const url = URL.createObjectURL(excelBlob);
-          const link = document.createElement('a');
-          link.href = url;
-          link.setAttribute('download', `${cleanName}.xlsx`);
-          document.body.appendChild(link);
-          link.click();
-          document.body.removeChild(link);
-          setTimeout(() => URL.revokeObjectURL(url), 1000);
-          showSuccess('Excel file downloaded successfully!');
-        } else {
-          showSuccess('Excel report generated!');
-        }
-        setIsLoading(false);
-        return;
-      }
-
-      // 3. PREVIEW & PRINT ACTIONS (HTML)
-      const htmlRes = await fetch(`${API_BASE_URL}/inventoryreports/download-html`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+          },
+          true
+        );
+        showSuccess('Print dialog opened.');
+      } else if (currentAction === 'PDF') {
+        const ok = await downloadPdfReport({
+          endpoint: 'inventoryreports',
           title: repTitle,
           columns,
           data: json.data,
-          totals: json.totals || {},
+          totals: repTotals,
           fromDate,
           toDate,
-          showPrintButton: false,
-        }),
-      });
-
-      if (!htmlRes.ok) {
-        throw new Error('Failed to generate report HTML template');
-      }
-
-      let htmlContent = await htmlRes.text();
-
-      // Trigger print for Print option
-      if (currentAction === 'Print') {
-        htmlContent = htmlContent.replace(
-          '</body>',
-          '<script>window.addEventListener("load", function(){ setTimeout(function(){ window.print(); }, 500); });</script></body>'
-        );
-      }
-
-      if (Platform.OS === 'web' && typeof window !== 'undefined') {
-        if (win) {
-          win.document.open();
-          win.document.write(htmlContent);
-          win.document.close();
-        } else {
-          const blob = new Blob([htmlContent], { type: 'text/html;charset=utf-8;' });
-          const url = URL.createObjectURL(blob);
-          const newTab = window.open(url, '_blank');
-          if (!newTab) {
-            const link = document.createElement('a');
-            link.href = url;
-            link.setAttribute('download', `${repTitle}.html`);
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
-          }
-        }
-        if (currentAction === 'Print') {
-          showSuccess('Print dialog opened.');
-        } else {
-          showSuccess('Report preview opened.');
-        }
-      } else {
-        showSuccess('Report generated! (Use web to view/print)');
+        });
+        if (ok) showSuccess('PDF downloaded successfully!');
+      } else if (currentAction === 'Excel') {
+        const ok = await downloadExcelReport({
+          endpoint: 'inventoryreports',
+          title: repTitle,
+          columns,
+          data: json.data,
+          totals: repTotals,
+          fromDate,
+          toDate,
+        });
+        if (ok) showSuccess('Excel file downloaded successfully!');
       }
     } catch (err: any) {
-      if (win) win.close();
       console.error(err);
       showError('Failed to generate report: ' + (err.message || 'Error'));
     } finally {
@@ -415,8 +443,10 @@ export default function InventoryReportsScreen() {
           e.preventDefault();
           handleGetReport();
         } else if (e.key === 'Escape') {
-          if (isReportDropdownOpen) {
-            setIsReportDropdownOpen(false);
+          if (isLovModalVisible) {
+            setIsLovModalVisible(false);
+          } else if (isReportDropdownOpen || isLocOpen || isSupOpen) {
+            closeAllDropdowns();
           } else {
             router.back();
           }
@@ -425,7 +455,17 @@ export default function InventoryReportsScreen() {
       window.addEventListener('keydown', handleKeyDown);
       return () => window.removeEventListener('keydown', handleKeyDown);
     }
-  }, [selectedReport, fromDate, toDate, actionOption, isReportDropdownOpen, reportType]);
+  }, [
+    selectedReport,
+    fromDate,
+    toDate,
+    actionOption,
+    isReportDropdownOpen,
+    isLocOpen,
+    isSupOpen,
+    reportType,
+    isLovModalVisible,
+  ]);
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -458,10 +498,10 @@ export default function InventoryReportsScreen() {
       <ScrollView contentContainerStyle={styles.scrollContent}>
         <View style={styles.cardWrapper}>
           <View style={styles.goldCard}>
-            {/* Top row: Inventory Report, From Date, To Date */}
-            <View style={styles.inputRow}>
-              {/* Inventory Report */}
-              <View style={styles.reportCol}>
+            {/* ROW 1: Inventory Report | From Date | To Date */}
+            <View style={[styles.filterGridRow, { zIndex: 100 }]}>
+              {/* Col 1: Inventory Report */}
+              <View style={styles.gridCol}>
                 <ReportDropdown
                   label="Inventory Report"
                   options={REPORT_OPTIONS}
@@ -471,144 +511,219 @@ export default function InventoryReportsScreen() {
                     setIsReportDropdownOpen(false);
                   }}
                   isOpen={isReportDropdownOpen}
-                  onToggle={() => setIsReportDropdownOpen(!isReportDropdownOpen)}
+                  onToggle={() => {
+                    closeAllDropdowns();
+                    setIsReportDropdownOpen(!isReportDropdownOpen);
+                  }}
                   maxHeight={280}
                 />
               </View>
 
-              {/* From Date */}
-              <ReportDatePicker
-                label="From Date"
-                value={fromDate}
-                onChange={setFromDate}
-                isIsoOutput={true}
-                onOpenNative={() => setShowDatePicker({ show: true, mode: 'from' })}
-              />
+              {/* Col 2: From Date */}
+              <View style={styles.gridCol}>
+                <ReportDatePicker
+                  label="From Date"
+                  value={fromDate}
+                  onChange={setFromDate}
+                  isIsoOutput={true}
+                  onOpenNative={() => setShowDatePicker({ show: true, mode: 'from' })}
+                />
+              </View>
 
-              {/* To Date */}
-              <ReportDatePicker
-                label="To Date"
-                value={toDate}
-                onChange={setToDate}
-                isIsoOutput={true}
-                onOpenNative={() => setShowDatePicker({ show: true, mode: 'to' })}
+              {/* Col 3: To Date */}
+              <View style={styles.gridCol}>
+                <ReportDatePicker
+                  label="To Date"
+                  value={toDate}
+                  onChange={setToDate}
+                  isIsoOutput={true}
+                  onOpenNative={() => setShowDatePicker({ show: true, mode: 'to' })}
+                />
+              </View>
+            </View>
+
+            {/* ROW 2: Summary / Detail Radio Buttons */}
+            <View style={styles.reportTypeRow}>
+              <RadioButton
+                label="Summary"
+                selected={reportType === 'Summary'}
+                onPress={() => setReportType('Summary')}
+              />
+              <RadioButton
+                label="Detail"
+                selected={reportType === 'Detail'}
+                onPress={() => setReportType('Detail')}
               />
             </View>
 
-            {/* Optional Summary / Detail RadioButtons for reports that support Detail */}
-            {selectedReportObj?.supportsDetail && (
-              <View style={{ flexDirection: 'row', gap: 12, marginTop: 14 }}>
-                <RadioButton
-                  label="Summary"
-                  selected={reportType === 'Summary'}
-                  onPress={() => setReportType('Summary')}
-                />
-                <RadioButton
-                  label="Detail"
-                  selected={reportType === 'Detail'}
-                  onPress={() => setReportType('Detail')}
+            {/* ROW 3 (Filters Grid Row 1): Location Code | Supplier Code | Class [...] */}
+            <View style={[styles.filterGridRow, { zIndex: 90 }]}>
+              {/* Col 1: Location Code */}
+              <View style={styles.gridCol}>
+                <ReportDropdown
+                  label="Location Code"
+                  options={locations}
+                  selectedId={locationCode}
+                  onSelect={(id) => {
+                    setLocationCode(id);
+                    setIsLocOpen(false);
+                  }}
+                  isOpen={isLocOpen}
+                  onToggle={() => {
+                    closeAllDropdowns();
+                    setIsLocOpen(!isLocOpen);
+                  }}
+                  maxHeight={200}
                 />
               </View>
-            )}
 
-            {/* RESTORED INVENTORY FILTER OPTIONS MATCHING CUSTOMER REPORTS */}
-            {(selectedReportObj?.supportsSupplier ||
-              selectedReportObj?.supportsClass ||
-              selectedReportObj?.supportsCategory ||
-              selectedReport === 'stock_by_category') && (
-              <View style={styles.filterSection}>
-                <View style={[styles.inputRow, { marginTop: 12, zIndex: 15 }]}>
-                  {/* Location Filter */}
-                  <View style={styles.filterCol}>
-                    <ReportDropdown
-                      label="Location"
-                      options={locations}
-                      selectedId={locationCode}
-                      onSelect={(id) => {
-                        setLocationCode(id);
-                        setIsLocOpen(false);
-                      }}
-                      isOpen={isLocOpen}
-                      onToggle={() => {
-                        closeAllDropdowns();
-                        setIsLocOpen(!isLocOpen);
-                      }}
-                      maxHeight={200}
-                    />
-                  </View>
+              {/* Col 2: Supplier Code */}
+              <View style={styles.gridCol}>
+                <ReportDropdown
+                  label="Supplier Code"
+                  options={suppliers}
+                  selectedId={supplierCode}
+                  onSelect={(id) => {
+                    setSupplierCode(id);
+                    setIsSupOpen(false);
+                  }}
+                  isOpen={isSupOpen}
+                  onToggle={() => {
+                    closeAllDropdowns();
+                    setIsSupOpen(!isSupOpen);
+                  }}
+                  maxHeight={200}
+                />
+              </View>
 
-                  {/* Supplier Filter */}
-                  {selectedReportObj?.supportsSupplier && (
-                    <View style={styles.filterCol}>
-                      <ReportDropdown
-                        label="Supplier"
-                        options={suppliers}
-                        selectedId={supplierCode}
-                        onSelect={(id) => {
-                          setSupplierCode(id);
-                          setIsSupOpen(false);
-                        }}
-                        isOpen={isSupOpen}
-                        onToggle={() => {
-                          closeAllDropdowns();
-                          setIsSupOpen(!isSupOpen);
-                        }}
-                        maxHeight={200}
-                      />
-                    </View>
-                  )}
-
-                  {/* Class Filter */}
-                  {selectedReportObj?.supportsClass && (
-                    <View style={styles.filterCol}>
-                      <ReportDropdown
-                        label="Class"
-                        options={classes}
-                        selectedId={classCode}
-                        onSelect={(id) => {
-                          setClassCode(id);
-                          setIsClassOpen(false);
-                        }}
-                        isOpen={isClassOpen}
-                        onToggle={() => {
-                          closeAllDropdowns();
-                          setIsClassOpen(!isClassOpen);
-                        }}
-                        maxHeight={200}
-                      />
-                    </View>
-                  )}
+              {/* Col 3: Class */}
+              <View style={styles.gridCol}>
+                <Text style={styles.fieldLabel}>Class</Text>
+                <View style={styles.lookupInputWrapper}>
+                  <TextInput
+                    style={styles.lookupTextInput}
+                    value={classCode}
+                    onChangeText={setClassCode}
+                    placeholder=""
+                  />
+                  <TouchableOpacity
+                    style={styles.lookupBtn}
+                    onPress={() => openLovModal('class')}
+                    activeOpacity={0.8}
+                  >
+                    <Text style={styles.lookupBtnText}>...</Text>
+                  </TouchableOpacity>
                 </View>
-
-                {/* Secondary Row: Category Filter */}
-                {selectedReportObj?.supportsCategory && (
-                  <View style={[styles.inputRow, { marginTop: 12, zIndex: 14 }]}>
-                    <View style={styles.filterCol}>
-                      <ReportDropdown
-                        label="Category"
-                        options={categories}
-                        selectedId={categoryCode}
-                        onSelect={(id) => {
-                          setCategoryCode(id);
-                          setIsCatOpen(false);
-                        }}
-                        isOpen={isCatOpen}
-                        onToggle={() => {
-                          closeAllDropdowns();
-                          setIsCatOpen(!isCatOpen);
-                        }}
-                        maxHeight={200}
-                      />
-                    </View>
-                  </View>
-                )}
               </View>
-            )}
+            </View>
 
-            {/* Divider */}
+            {/* ROW 4 (Filters Grid Row 2): Category [...] | Catalogue [...] | Size [...] */}
+            <View style={[styles.filterGridRow, { zIndex: 80 }]}>
+              {/* Col 1: Category */}
+              <View style={styles.gridCol}>
+                <Text style={styles.fieldLabel}>Category</Text>
+                <View style={styles.lookupInputWrapper}>
+                  <TextInput
+                    style={styles.lookupTextInput}
+                    value={categoryCode}
+                    onChangeText={setCategoryCode}
+                    placeholder=""
+                  />
+                  <TouchableOpacity
+                    style={styles.lookupBtn}
+                    onPress={() => openLovModal('category')}
+                    activeOpacity={0.8}
+                  >
+                    <Text style={styles.lookupBtnText}>...</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+
+              {/* Col 2: Catalogue */}
+              <View style={styles.gridCol}>
+                <Text style={styles.fieldLabel}>Catalogue</Text>
+                <View style={styles.lookupInputWrapper}>
+                  <TextInput
+                    style={styles.lookupTextInput}
+                    value={catalogueCode}
+                    onChangeText={setCatalogueCode}
+                    placeholder=""
+                  />
+                  <TouchableOpacity
+                    style={styles.lookupBtn}
+                    onPress={() => openLovModal('catalogue')}
+                    activeOpacity={0.8}
+                  >
+                    <Text style={styles.lookupBtnText}>...</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+
+              {/* Col 3: Size */}
+              <View style={styles.gridCol}>
+                <Text style={styles.fieldLabel}>Size</Text>
+                <View style={styles.lookupInputWrapper}>
+                  <TextInput
+                    style={styles.lookupTextInput}
+                    value={sizeCode}
+                    onChangeText={setSizeCode}
+                    placeholder=""
+                  />
+                  <TouchableOpacity
+                    style={styles.lookupBtn}
+                    onPress={() => openLovModal('size')}
+                    activeOpacity={0.8}
+                  >
+                    <Text style={styles.lookupBtnText}>...</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </View>
+
+            {/* ROW 5 (Filters Grid Row 3): ClassType [...] | Image Checkbox | Empty Col */}
+            <View style={[styles.filterGridRow, { zIndex: 70 }]}>
+              {/* Col 1: ClassType */}
+              <View style={styles.gridCol}>
+                <Text style={styles.fieldLabel}>ClassType</Text>
+                <View style={styles.lookupInputWrapper}>
+                  <TextInput
+                    style={styles.lookupTextInput}
+                    value={classType}
+                    onChangeText={setClassType}
+                    placeholder=""
+                  />
+                  <TouchableOpacity
+                    style={styles.lookupBtn}
+                    onPress={() => openLovModal('classType')}
+                    activeOpacity={0.8}
+                  >
+                    <Text style={styles.lookupBtnText}>...</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+
+              {/* Col 2: Image Checkbox */}
+              <View style={[styles.gridCol, styles.checkboxColWrapper]}>
+                <TouchableOpacity
+                  style={styles.checkboxRow}
+                  onPress={() => setIncludeImage(!includeImage)}
+                  activeOpacity={0.7}
+                >
+                  <View style={[styles.checkboxBox, includeImage && styles.checkboxBoxChecked]}>
+                    {includeImage && <Ionicons name="checkmark" size={14} color="#FFFFFF" />}
+                  </View>
+                  <Text style={styles.checkboxLabel}>Image</Text>
+                </TouchableOpacity>
+              </View>
+
+              {/* Col 3: Empty placeholder to align columns perfectly */}
+              <View style={styles.gridCol} />
+            </View>
+
+            {/* DIVIDER */}
             <View style={styles.divider} />
 
-            {/* Actions: Preview, Print, PDF, Excel */}
+            {/* BOTTOM ACTIONS: Preview | Print | PDF | Excel */}
             <View style={styles.buttonRow}>
               <RadioButton
                 label="Preview"
@@ -644,6 +759,87 @@ export default function InventoryReportsScreen() {
           />
         )}
       </ScrollView>
+
+      {/* GENERIC LOV MODAL */}
+      <Modal
+        visible={isLovModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setIsLovModalVisible(false)}
+      >
+        <TouchableOpacity
+          style={styles.modalOverlay}
+          activeOpacity={1}
+          onPress={() => setIsLovModalVisible(false)}
+        >
+          <TouchableWithoutFeedback>
+            <View style={styles.lovModalContainer}>
+              <View style={styles.modalHeader}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  <View style={styles.headerIconBadgeSmall}>
+                    <Ionicons name="list-outline" size={16} color={GOLD_DARK} />
+                  </View>
+                  <Text style={styles.modalTitle}>{lovModalConfig.title}</Text>
+                </View>
+                <TouchableOpacity onPress={() => setIsLovModalVisible(false)} style={styles.modalCloseBtn}>
+                  <Ionicons name="close" size={20} color={TEXT_DARK} />
+                </TouchableOpacity>
+              </View>
+
+              <View style={{ padding: 12 }}>
+                <View style={styles.modalSearchBox}>
+                  <Ionicons name="search-outline" size={16} color="#8F816E" style={{ marginRight: 6 }} />
+                  <TextInput
+                    style={styles.modalSearchInput}
+                    value={lovSearchQuery}
+                    onChangeText={setLovSearchQuery}
+                    placeholder={`Search ${lovModalConfig.codeLabel} or ${lovModalConfig.nameLabel}...`}
+                    placeholderTextColor="#8F816E"
+                    autoFocus
+                  />
+                  {lovSearchQuery ? (
+                    <TouchableOpacity onPress={() => setLovSearchQuery('')}>
+                      <Ionicons name="close-circle" size={16} color="#8F816E" />
+                    </TouchableOpacity>
+                  ) : null}
+                </View>
+
+                <View style={styles.lovHeaderRow}>
+                  <Text style={[styles.lovHeaderText, { flex: 1.5 }]}>{lovModalConfig.codeLabel}</Text>
+                  <Text style={[styles.lovHeaderText, { flex: 2.5 }]}>{lovModalConfig.nameLabel}</Text>
+                </View>
+
+                <FlatList
+                  data={filteredLovData}
+                  keyExtractor={(item, index) => item.code + String(index)}
+                  style={{ maxHeight: 320 }}
+                  ListEmptyComponent={
+                    <View style={{ padding: 24, alignItems: 'center' }}>
+                      <Text style={{ fontSize: 13, color: '#8F7E66', fontFamily: 'Cambria' }}>
+                        No records found.
+                      </Text>
+                    </View>
+                  }
+                  renderItem={({ item, index }) => (
+                    <TouchableOpacity
+                      style={[styles.lovItemRow, index % 2 === 1 && { backgroundColor: '#FDFBF7' }]}
+                      onPress={() => handleSelectLovItem(item)}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={[styles.lovItemText, { flex: 1.5, fontWeight: 'bold', color: GOLD_DARK }]}>
+                        {item.code}
+                      </Text>
+                      <Text style={[styles.lovItemText, { flex: 2.5 }]}>
+                        {item.name || item.code}
+                      </Text>
+                    </TouchableOpacity>
+                  )}
+                />
+              </View>
+            </View>
+          </TouchableWithoutFeedback>
+        </TouchableOpacity>
+      </Modal>
 
       {/* Toast Notification */}
       {toastMessage ? (
@@ -730,26 +926,22 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     borderWidth: 1,
     borderColor: GOLD_BORDER,
-    padding: 16,
+    padding: 18,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.04,
     shadowRadius: 3,
     elevation: 2,
   },
-  inputRow: {
+  filterGridRow: {
     flexDirection: Platform.OS === 'web' ? 'row' : 'column',
     gap: 16,
-    alignItems: Platform.OS === 'web' ? 'flex-start' : 'stretch',
-    zIndex: 10,
+    alignItems: 'flex-start',
+    marginBottom: 14,
   },
-  reportCol: {
-    flex: 1.5,
-    position: 'relative',
-    zIndex: 20,
-  },
-  dateCol: {
+  gridCol: {
     flex: 1,
+    width: Platform.OS === 'web' ? undefined : '100%',
   },
   fieldLabel: {
     fontSize: 12,
@@ -758,106 +950,81 @@ const styles = StyleSheet.create({
     marginBottom: 6,
     fontFamily: 'Cambria',
   },
-  inputBox: {
+  reportTypeRow: {
+    flexDirection: 'row',
+    gap: 12,
+    marginTop: 2,
+    marginBottom: 16,
+  },
+  lookupInputWrapper: {
+    flexDirection: 'row',
+    alignItems: 'center',
     height: 36,
     borderWidth: 1,
     borderColor: '#D4C3A3',
     borderRadius: 6,
     backgroundColor: CARD_BG,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 12,
-  },
-  inputBoxActive: {
-    borderColor: GOLD_ACCENT,
-  },
-  dropdownText: {
-    fontSize: 12.5,
-    fontWeight: '500',
-    color: TEXT_DARK,
-    flex: 1,
-    marginRight: 6,
-    fontFamily: 'Cambria',
-  },
-  dropdownPlaceholder: {
-    color: '#9E8D77',
-  },
-  dropdownMenu: {
-    position: 'absolute',
-    top: 64,
-    left: 0,
-    right: 0,
-    backgroundColor: CARD_BG,
-    borderRadius: 6,
-    borderWidth: 1,
-    borderColor: '#D4C3A3',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.15,
-    shadowRadius: 8,
-    elevation: 9999,
-    zIndex: 99999,
-  },
-  menuItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: 9,
-    paddingHorizontal: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: '#F5EFE6',
-  },
-  menuItemSelected: {
-    backgroundColor: '#FFF4DA',
-  },
-  menuItemText: {
-    fontSize: 12.5,
-    color: TEXT_DARK,
-    fontFamily: 'Cambria',
-  },
-  menuItemTextSelected: {
-    color: GOLD_DARK,
-    fontWeight: 'bold',
-    fontFamily: 'Cambria',
-  },
-  webDateWrapper: {
-    height: 36,
-    borderWidth: 1,
-    borderColor: '#D4C3A3',
-    borderRadius: 6,
-    backgroundColor: CARD_BG,
-    flexDirection: 'row',
-    alignItems: 'center',
     overflow: 'hidden',
   },
-  webDateInput: {
+  lookupTextInput: {
     flex: 1,
     height: '100%',
-    border: 'none',
-    backgroundColor: 'transparent',
-    outline: 'none',
-    color: TEXT_DARK,
-    paddingLeft: 12,
-    paddingRight: 8,
+    paddingHorizontal: 10,
     fontSize: 12.5,
+    color: TEXT_DARK,
     fontFamily: 'Cambria',
-    cursor: 'pointer',
+    outlineStyle: 'none',
   } as any,
-  dateText: {
-    fontSize: 12.5,
+  lookupBtn: {
+    width: 36,
+    height: '100%',
+    backgroundColor: '#ECC975',
+    borderLeftWidth: 1,
+    borderLeftColor: '#D4A742',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  lookupBtnText: {
+    fontSize: 14,
+    fontWeight: 'bold',
+    color: TEXT_DARK,
+    marginTop: -4,
+  },
+  checkboxColWrapper: {
+    justifyContent: 'flex-start',
+    paddingTop: 24, // Aligns checkbox vertically with adjacent TextInput fields whose label is above them
+  },
+  checkboxRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    height: 36,
+  },
+  checkboxBox: {
+    width: 18,
+    height: 18,
+    borderRadius: 4,
+    borderWidth: 1.5,
+    borderColor: '#C5B597',
+    backgroundColor: CARD_BG,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 8,
+  },
+  checkboxBoxChecked: {
+    backgroundColor: GOLD_DARK,
+    borderColor: GOLD_DARK,
+  },
+  checkboxLabel: {
+    fontSize: 13,
+    fontWeight: 'bold',
     color: TEXT_DARK,
     fontFamily: 'Cambria',
-  },
-  dateIconBox: {
-    paddingRight: 10,
-    justifyContent: 'center',
-    alignItems: 'center',
   },
   divider: {
     height: 1,
-    backgroundColor: '#F5EFE6',
-    marginVertical: 16,
+    backgroundColor: '#F0E5D0',
+    marginTop: 6,
+    marginBottom: 16,
   },
   buttonRow: {
     flexDirection: 'row',
@@ -909,16 +1076,100 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     fontFamily: 'Cambria',
   },
-  filterSection: {
-    borderTopWidth: 1,
-    borderTopColor: '#F5EFE6',
-    paddingTop: 12,
-    marginTop: 10,
-    marginBottom: 6,
-  },
-  filterCol: {
+  modalOverlay: {
     flex: 1,
-    minWidth: 160,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 16,
+  },
+  lovModalContainer: {
+    width: '100%',
+    maxWidth: 550,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: GOLD_BORDER,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 10,
+    elevation: 8,
+    overflow: 'hidden',
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    backgroundColor: '#FBF9F5',
+    borderBottomWidth: 1,
+    borderBottomColor: GOLD_BORDER,
+  },
+  headerIconBadgeSmall: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: '#F5EFE6',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modalTitle: {
+    fontSize: 14,
+    fontWeight: 'bold',
+    color: TEXT_DARK,
+    fontFamily: 'Cambria',
+  },
+  modalCloseBtn: {
+    padding: 4,
+  },
+  modalSearchBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#D4C3A3',
+    borderRadius: 6,
+    paddingHorizontal: 10,
+    height: 36,
+    backgroundColor: '#FAF7F0',
+    marginBottom: 10,
+  },
+  modalSearchInput: {
+    flex: 1,
+    fontSize: 12.5,
+    color: TEXT_DARK,
+    fontFamily: 'Cambria',
+    outlineStyle: 'none',
+  } as any,
+  lovHeaderRow: {
+    flexDirection: 'row',
+    backgroundColor: '#F5EFE6',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 4,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E2D3B3',
+    marginBottom: 4,
+  },
+  lovHeaderText: {
+    fontSize: 12,
+    fontWeight: 'bold',
+    color: TEXT_DARK,
+    fontFamily: 'Cambria',
+  },
+  lovItemRow: {
+    flexDirection: 'row',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F5EFE6',
+    alignItems: 'center',
+  },
+  lovItemText: {
+    fontSize: 12.5,
+    color: TEXT_DARK,
+    fontFamily: 'Cambria',
   },
   toast: {
     position: 'absolute',

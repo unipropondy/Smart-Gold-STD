@@ -215,11 +215,6 @@ export default function TransferReportsScreen() {
   const handleGetReport = async () => {
     if (!validateForm()) return;
 
-    let win: Window | null = null;
-    if (Platform.OS === 'web') {
-      win = window.open('', '_blank');
-    }
-
     try {
       const payload = {
         ...formData,
@@ -233,17 +228,12 @@ export default function TransferReportsScreen() {
       const html = await response.text();
 
       if (Platform.OS === 'web') {
-        if (win) {
-          win.document.write(html);
-          win.document.close();
-        }
+        openPrintWindow(html, true);
+        showSuccess('Print dialog opened.');
       } else {
         showSuccess('Report generated! (Use web to view/print)');
       }
     } catch (err) {
-      if (win) {
-        win.close();
-      }
       showError('Failed to generate report');
       console.error(err);
     }

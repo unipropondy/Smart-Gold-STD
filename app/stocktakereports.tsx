@@ -3,7 +3,7 @@ import { downloadExcelReport, downloadPdfReport, printHtmlReport } from '@/utils
 import { formatColumnHeader } from '@/utils/formatColumnHeader';
 import { ReportDropdown } from '@/components/ReportDropdown';
 import { ReportDatePicker } from '@/components/ReportDatePicker';
-import { validateReportDateRange, getTodayDisp } from '@/utils/dateValidation';
+import { validateReportDateRange, getTodayDisp, getCurrentYearStartDisp } from '@/utils/dateValidation';
 import { Ionicons } from '@expo/vector-icons';
 import { Stack, useRouter } from 'expo-router';
 import React, { useEffect, useState, useMemo } from 'react';
@@ -68,7 +68,7 @@ export default function StockTakeReportsScreen() {
   const [isTrayDropdownOpen, setIsTrayDropdownOpen] = useState<boolean>(false);
 
   // Date filters (using standard DD/MM/YYYY matching Master Reports)
-  const [fromDate, setFromDate] = useState<string>('01/01/2025');
+  const [fromDate, setFromDate] = useState<string>(getTodayDisp('/'));
   const [toDate, setToDate] = useState<string>(getTodayDisp());
 
   // Native Date Picker State
@@ -151,6 +151,7 @@ export default function StockTakeReportsScreen() {
 
   // Execute Stock Take Report (Matches Master Reports Generate & Preview Flow)
   const handleGetReport = async (overrideAction?: ActionOption) => {
+    if (isLoading) return;
     const currentAction = overrideAction || actionOption;
 
     if (!fromDate || !toDate) {
@@ -199,15 +200,9 @@ export default function StockTakeReportsScreen() {
       const subtitleText = `TRAY ID : ${displayTray}`;
 
       if (currentAction === 'Preview') {
-        let win: Window | null = null;
-        if (Platform.OS === 'web' && typeof window !== 'undefined') {
-          win = window.open('', '_blank');
-        }
-
-        const htmlRes = await fetch(`${API_BASE_URL}/stocktake/download-html`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
+        await printHtmlReport(
+          {
+            endpoint: 'stocktake',
             title: reportTitle,
             subtitle: subtitleText,
             columns,
@@ -215,35 +210,14 @@ export default function StockTakeReportsScreen() {
             totals: reportTotals,
             fromDate,
             toDate,
-            showPrintButton: false,
-          }),
-        });
-
-        if (!htmlRes.ok) throw new Error('Failed to generate report HTML');
-        const htmlContent = await htmlRes.text();
-
-        if (Platform.OS === 'web' && typeof window !== 'undefined') {
-          if (win) {
-            win.document.open();
-            win.document.write(htmlContent);
-            win.document.close();
-          } else {
-            const blob = new Blob([htmlContent], { type: 'text/html;charset=utf-8;' });
-            const url = URL.createObjectURL(blob);
-            window.open(url, '_blank');
-          }
-        }
+          },
+          false
+        );
         showSuccess('Report preview opened.');
       } else if (currentAction === 'Print') {
-        let win: Window | null = null;
-        if (Platform.OS === 'web' && typeof window !== 'undefined') {
-          win = window.open('', '_blank');
-        }
-
-        const htmlRes = await fetch(`${API_BASE_URL}/stocktake/download-html`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
+        await printHtmlReport(
+          {
+            endpoint: 'stocktake',
             title: reportTitle,
             subtitle: subtitleText,
             columns,
@@ -251,40 +225,26 @@ export default function StockTakeReportsScreen() {
             totals: reportTotals,
             fromDate,
             toDate,
-            showPrintButton: false,
-          }),
-        });
-
-        if (!htmlRes.ok) throw new Error('Failed to generate report print template');
-        let htmlContent = await htmlRes.text();
-        htmlContent = htmlContent.replace(
-          '</body>',
-          '<script>window.addEventListener("load", function(){ setTimeout(function(){ window.print(); }, 500); });</script></body>'
+          },
+          true
         );
-
-        if (Platform.OS === 'web' && typeof window !== 'undefined') {
-          if (win) {
-            win.document.open();
-            win.document.write(htmlContent);
-            win.document.close();
-          } else {
-            const blob = new Blob([htmlContent], { type: 'text/html;charset=utf-8;' });
-            const url = URL.createObjectURL(blob);
-            window.open(url, '_blank');
-          }
-        }
         showSuccess('Print dialog opened.');
       } else if (currentAction === 'PDF') {
         const ok = await downloadPdfReport({
           endpoint: 'stocktake',
           title: reportTitle,
+          subtitle: subtitleText,
           columns,
           data: reportData,
           totals: reportTotals,
           fromDate,
           toDate,
         });
-        if (ok) showSuccess('PDF downloaded successfully!');
+        if (ok) {
+          showSuccess('PDF downloaded successfully!');
+        } else {
+          showError('Failed to generate PDF. Please try again.');
+        }
       } else if (currentAction === 'Excel') {
         const ok = await downloadExcelReport({
           endpoint: 'stocktake',

@@ -11,6 +11,7 @@ router.get("/fetch", async (req, res) => {
     if (!customerType) {
       return res.status(400).json({ success: false, message: "Customer Type is required." });
     }
+    
 
     let query = `
       SELECT CustomerCode, CustomerName, TotalRewardPoints 
