@@ -12,6 +12,8 @@ app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
+app.get('/', (req, res) => res.json({ status: 'ok', service: 'smartgold-api' }));
+
 // Database injection middleware with dynamic healthy pool retrieval
 app.use(async (req, res, next) => {
     try {
