@@ -3,7 +3,6 @@ import { Stack, useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   FlatList,
   Modal,
   StyleSheet,
@@ -35,17 +34,20 @@ export default function CountryScreen() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
-  const [successMsg, setSuccessMsg] = useState('');
-  const [errorMsg, setErrorMsg] = useState('');
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+  const [deleteConfirmCode, setDeleteConfirmCode] = useState<string | null>(null);
+
+  const showToast = (message: string, type: 'success' | 'error' = 'success') => {
+    setToast({ message, type });
+    setTimeout(() => setToast(null), 3000);
+  };
 
   const showSuccess = (msg: string) => {
-    setSuccessMsg(msg);
-    setTimeout(() => setSuccessMsg(''), 3000);
+    showToast(msg, 'success');
   };
 
   const showError = (msg: string) => {
-    setErrorMsg(msg);
-    setTimeout(() => setErrorMsg(''), 3000);
+    showToast(msg, 'error');
   };
 
   // Modal State
@@ -81,16 +83,52 @@ export default function CountryScreen() {
     fetchCountries();
   }, []);
 
+  // Field-level blur handlers matching fnScreenValidate in frmCountry.vb
+  const handleCountryCodeBlur = () => {
+    const trimmed = (countryCode || '').trim();
+    if (!trimmed) {
+      showError('Please enter Country Code !');
+    }
+  };
+
+  const handleCountryNameBlur = () => {
+    const trimmed = (countryName || '').trim();
+    if (!trimmed) {
+      showError('Please enter Country Name !');
+    }
+  };
+
+  const handleTypeBlur = () => {
+    const trimmed = (type || '').trim();
+    if (!trimmed) {
+      showError('Please enter Type !');
+    }
+  };
+
   const handleSave = async () => {
-    if (!countryCode || !countryCode.trim()) {
-      showError('Country Code is required');
+    const trimmedCode = (countryCode || '').trim();
+    const trimmedName = (countryName || '').trim();
+    const trimmedType = (type || '').trim();
+
+    if (!trimmedCode) {
+      showError('Please enter Country Code !');
+      return;
+    }
+
+    if (!trimmedName) {
+      showError('Please enter Country Name !');
+      return;
+    }
+
+    if (!trimmedType) {
+      showError('Please enter Type !');
       return;
     }
 
     const payload = {
-      CountryCode: countryCode.trim(),
-      CountryName: countryName.trim(),
-      Type: type.trim(),
+      CountryCode: trimmedCode,
+      CountryName: trimmedName,
+      Type: trimmedType,
     };
 
     setSaving(true);
@@ -104,15 +142,15 @@ export default function CountryScreen() {
 
       const json = await response.json();
       if (json.success) {
-        showSuccess(`Country ${isEditing ? 'updated' : 'added'} successfully`);
+        showSuccess(json.message || 'Saved Successfully!');
         setIsModalVisible(false);
         fetchCountries();
       } else {
-        showError(json.message || 'Failed to save');
+        showError(json.message || 'Error in Save/Update !');
       }
     } catch (error) {
       console.error('Save error:', error);
-      showError('Failed to save country');
+      showError('Error in Save/Update !');
     } finally {
       setSaving(false);
     }
@@ -127,7 +165,7 @@ export default function CountryScreen() {
         showSuccess('Country deleted successfully');
         fetchCountries();
       } else {
-        showError(json.message || 'Failed to delete');
+        showError(json.message || 'No such user!');
       }
     } catch (error) {
       console.error('Delete error:', error);
@@ -138,23 +176,14 @@ export default function CountryScreen() {
   };
 
   const handleDelete = (codeToDelete: string) => {
-    if (Platform.OS === 'web') {
-      if (window.confirm(`Are you sure you want to delete Country ${codeToDelete}?`)) {
-        executeDelete(codeToDelete);
-      }
-    } else {
-      Alert.alert('Confirm Delete', `Are you sure you want to delete Country ${codeToDelete}?`, [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Delete', style: 'destructive', onPress: () => executeDelete(codeToDelete) },
-      ]);
-    }
+    setDeleteConfirmCode(codeToDelete);
   };
 
   const openAddModal = () => {
     setIsEditing(false);
     setCountryCode('');
     setCountryName('');
-    setType('');
+    setType('GOLD');
     setIsModalVisible(true);
   };
 
@@ -162,7 +191,7 @@ export default function CountryScreen() {
     setIsEditing(true);
     setCountryCode(item.CountryCode);
     setCountryName(item.CountryName || '');
-    setType(item.Type || '');
+    setType(item.Type || 'GOLD');
     setIsModalVisible(true);
   };
 
@@ -193,11 +222,17 @@ export default function CountryScreen() {
   );
 
   const renderToast = () => {
-    if (!successMsg && !errorMsg) return null;
-    const isError = !!errorMsg;
+    if (!toast) return null;
+    const isError = toast.type === 'error';
     return (
       <View style={[styles.toast, { backgroundColor: isError ? '#F44336' : '#4CAF50' }]}>
-        <ThemedText style={styles.toastText}>{isError ? errorMsg : successMsg}</ThemedText>
+        <Ionicons
+          name={isError ? 'alert-circle' : 'checkmark-circle'}
+          size={16}
+          color="#FFF"
+          style={{ marginRight: 6 }}
+        />
+        <ThemedText style={styles.toastText}>{toast.message}</ThemedText>
       </View>
     );
   };
@@ -268,6 +303,7 @@ export default function CountryScreen() {
                     style={[styles.input, { color: textColor, borderColor, backgroundColor: isDark ? '#2A2A2A' : '#FFF' }, isEditing && { backgroundColor: isDark ? '#333' : '#F0F0F0', color: subtitleColor }]}
                     value={countryCode}
                     onChangeText={setCountryCode}
+                    onBlur={handleCountryCodeBlur}
                     editable={!isEditing}
                     placeholder="Enter Country Code"
                     placeholderTextColor={subtitleColor}
@@ -275,25 +311,54 @@ export default function CountryScreen() {
                 </View>
 
                 <View style={styles.inputGroup}>
-                  <ThemedText style={[styles.label, { color: subtitleColor }]}>Country Name</ThemedText>
+                  <ThemedText style={[styles.label, { color: subtitleColor }]}>Country Name *</ThemedText>
                   <TextInput
                     style={[styles.input, { color: textColor, borderColor, backgroundColor: isDark ? '#2A2A2A' : '#FFF' }]}
                     value={countryName}
                     onChangeText={setCountryName}
+                    onBlur={handleCountryNameBlur}
                     placeholder="Enter Country Name"
                     placeholderTextColor={subtitleColor}
                   />
                 </View>
 
                 <View style={styles.inputGroup}>
-                  <ThemedText style={[styles.label, { color: subtitleColor }]}>Type</ThemedText>
-                  <TextInput
-                    style={[styles.input, { color: textColor, borderColor, backgroundColor: isDark ? '#2A2A2A' : '#FFF' }]}
-                    value={type}
-                    onChangeText={setType}
-                    placeholder="Enter Type (e.g. GOLD, COIN)"
-                    placeholderTextColor={subtitleColor}
-                  />
+                  <ThemedText style={[styles.label, { color: subtitleColor }]}>Type *</ThemedText>
+                  {Platform.OS === 'web' ? (
+                    <View style={{ flex: 1, height: 42, borderWidth: 1, borderColor, borderRadius: 6, backgroundColor: isDark ? '#2A2A2A' : '#FFF', justifyContent: 'center' }}>
+                      {/* @ts-ignore */}
+                      <select
+                        value={type || 'GOLD'}
+                        onChange={(e: any) => setType(e.target.value)}
+                        style={{
+                          width: '100%',
+                          height: '100%',
+                          paddingLeft: 12,
+                          paddingRight: 12,
+                          fontSize: 14,
+                          backgroundColor: 'transparent',
+                          color: textColor,
+                          outline: 'none',
+                          border: 'none',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        <option value="GOLD" style={{ color: '#000' }}>GOLD</option>
+                        <option value="SILVER" style={{ color: '#000' }}>SILVER</option>
+                        <option value="PLATINUM" style={{ color: '#000' }}>PLATINUM</option>
+                        <option value="COIN" style={{ color: '#000' }}>COIN</option>
+                      </select>
+                    </View>
+                  ) : (
+                    <TextInput
+                      style={[styles.input, { color: textColor, borderColor, backgroundColor: isDark ? '#2A2A2A' : '#FFF' }]}
+                      value={type}
+                      onChangeText={setType}
+                      onBlur={handleTypeBlur}
+                      placeholder="Enter Type (e.g. GOLD, SILVER, PLATINUM, COIN)"
+                      placeholderTextColor={subtitleColor}
+                    />
+                  )}
                 </View>
 
               </View>
@@ -309,6 +374,46 @@ export default function CountryScreen() {
             </View>
           </TouchableWithoutFeedback>
         </TouchableOpacity>
+      </Modal>
+
+      {/* Delete Confirmation Modal */}
+      <Modal visible={!!deleteConfirmCode} animationType="fade" transparent={true}>
+        <TouchableWithoutFeedback onPress={() => setDeleteConfirmCode(null)}>
+          <View style={styles.modalOverlay}>
+            <TouchableWithoutFeedback>
+              <View style={[styles.modalContent, { backgroundColor: cardColor, borderColor, maxWidth: 420, padding: 24 }]}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 16 }}>
+                  <Ionicons name="trash-outline" size={24} color="#C62828" style={{ marginRight: 10 }} />
+                  <ThemedText style={{ fontSize: 18, fontWeight: 'bold', color: textColor }}>Delete Country</ThemedText>
+                </View>
+                <ThemedText style={{ color: textColor, fontSize: 14, marginBottom: 24, lineHeight: 22 }}>
+                  Do you want to Delete ?{' '}
+                  <ThemedText style={{ fontWeight: 'bold' }}>
+                    {deleteConfirmCode ? deleteConfirmCode.trim() : ''}
+                  </ThemedText>
+                </ThemedText>
+                <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 12 }}>
+                  <TouchableOpacity
+                    style={[styles.btn, styles.btnCancel]}
+                    onPress={() => setDeleteConfirmCode(null)}
+                  >
+                    <ThemedText style={{ color: '#666', fontWeight: '600' }}>Cancel</ThemedText>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.btn, { backgroundColor: '#C62828' }]}
+                    onPress={() => {
+                      const code = deleteConfirmCode;
+                      setDeleteConfirmCode(null);
+                      if (code) executeDelete(code);
+                    }}
+                  >
+                    <ThemedText style={{ color: '#FFF', fontWeight: '600' }}>Delete</ThemedText>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </TouchableWithoutFeedback>
+          </View>
+        </TouchableWithoutFeedback>
       </Modal>
 
     </SafeAreaView>

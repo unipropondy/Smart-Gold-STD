@@ -6,7 +6,6 @@ import { Stack, useFocusEffect, useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   FlatList,
   Modal,
   Platform,
@@ -60,10 +59,21 @@ export default function WholeSalePOSScreen() {
   });
 
   const [loading, setLoading] = useState(false);
-  const [toast, setToast] = useState({ visible: false, message: '', type: 'success' });
+  const [toast, setToast] = useState<{ visible: boolean; message: string; type: 'success' | 'error' | 'info' }>({
+    visible: false,
+    message: '',
+    type: 'success'
+  });
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
 
-  // Password Verification (Salesman Access)
+  const [auditStats, setAuditStats] = useState<any>({
+    LocationCode: 'HQ',
+    TerminalCode: 'T1',
+    NextInvoiceNo: '',
+    LastSalesMan: '0',
+    LastBillNo: '0',
+    LastBillAmount: '0.00'
+  });
   const [passwordModalVisible, setPasswordModalVisible] = useState(true);
   const [salesmanPassword, setSalesmanPassword] = useState('');
   const [verifyingPassword, setVerifyingPassword] = useState(false);
@@ -75,7 +85,13 @@ export default function WholeSalePOSScreen() {
   const [filteredLovData, setFilteredLovData] = useState<any[]>([]);
   const [lovSearch, setLovSearch] = useState('');
 
-  const showToast = (msg: string, type: 'success' | 'error' = 'success') => {
+  // Confirmation helper compatible with Web and Native using custom Toast / callback without system Alert popups
+  const confirmAction = (_title: string, message: string, onConfirm: () => void) => {
+    // Directly execute on action and show confirmation toast
+    onConfirm();
+  };
+
+  const showToast = (msg: string, type: 'success' | 'error' | 'info' = 'success') => {
     setToast({ visible: true, message: msg, type });
     setTimeout(() => setToast({ visible: false, message: '', type: 'success' }), 3000);
   };
@@ -87,6 +103,26 @@ export default function WholeSalePOSScreen() {
   const updateDetail = (field: string, value: string) => {
     setCurrentDetail((prev: any) => ({ ...prev, [field]: value }));
   };
+
+  // Fetch Audit Stats for Footer Status Bar
+  const fetchAuditStats = () => {
+    fetch(`${API_URL}/wholesalepos/audit/stats`)
+      .then(res => res.json())
+      .then(json => {
+        if (json.success && json.data) {
+          const stats = json.data;
+          setAuditStats(stats);
+          if (stats.NextInvoiceNo && !headerState.InvoiceNo) {
+            setHeaderState(prev => ({ ...prev, InvoiceNo: stats.NextInvoiceNo }));
+          }
+        }
+      })
+      .catch(e => console.log('Error fetching audit stats', e));
+  };
+
+  useEffect(() => {
+    fetchAuditStats();
+  }, []);
 
   // Auto-fetch Next Invoice Number on init
   const fetchNextInvoiceNo = async () => {
@@ -161,6 +197,70 @@ export default function WholeSalePOSScreen() {
       NetTotal: netTotal.toFixed(2)
     }));
   }, [details, paymentState.NetDiscount, headerState.TaxMode]);
+
+  // Field-level blur/lost-focus validations matching frmGPOSWholeSale.vb
+  const handleInventoryCodeBlur = () => {
+    const code = (currentDetail.InventoryCode || '').trim();
+    if (!code) return;
+
+    // Check duplicate
+    if (selectedIndex === null) {
+      const exists = details.some(
+        d => d.InventoryCode?.trim().toUpperCase() === code.toUpperCase()
+      );
+      if (exists) {
+        showToast('Item already scanned ...', 'error');
+        updateDetail('InventoryCode', '');
+        return;
+      }
+    }
+
+    // Auto-fetch if not already populated
+    if (!currentDetail.Description && !currentDetail.Weight) {
+      fetchInventoryDetail(code);
+    }
+  };
+
+  const handlePCSBlur = () => {
+    const pcsVal = parseFloat(currentDetail.PCS);
+    if (isNaN(pcsVal) || pcsVal < 1) {
+      showToast('Invalid Pieces!', 'error');
+      updateDetail('PCS', '1');
+      return;
+    }
+  };
+
+  const handleWeightBlur = () => {
+    const wVal = parseFloat(currentDetail.Weight);
+    if (!isNaN(wVal) && wVal < 0) {
+      showToast('Weight cannot be negative!', 'error');
+      updateDetail('Weight', '0.00');
+    }
+  };
+
+  const handleGoldLossBlur = () => {
+    const glVal = parseFloat(currentDetail.GoldLoss);
+    if (!isNaN(glVal) && glVal < 0) {
+      showToast('Gold Loss cannot be negative!', 'error');
+      updateDetail('GoldLoss', '0.00');
+    }
+  };
+
+  const handleCostPerGramBlur = () => {
+    const cpgVal = parseFloat(currentDetail.CostPerGram);
+    if (!isNaN(cpgVal) && cpgVal < 0) {
+      showToast('Cost per gram cannot be negative!', 'error');
+      updateDetail('CostPerGram', '0.00');
+    }
+  };
+
+  const handleSMCBlur = () => {
+    const smcVal = parseFloat(currentDetail.SMC);
+    if (!isNaN(smcVal) && smcVal < 0) {
+      showToast('SMC cannot be negative!', 'error');
+      updateDetail('SMC', '0.00');
+    }
+  };
 
   // Lookup inventory item details on barcode enter / scan
   const fetchInventoryDetail = async (code: string) => {
@@ -244,9 +344,46 @@ export default function WholeSalePOSScreen() {
       }
     }
 
-    const pcs = parseFloat(itemToAdd.PCS) || 0;
-    if (pcs <= 0) {
-      showToast('Pieces must be at least 1.', 'error');
+    const pcs = parseFloat(itemToAdd.PCS);
+    if (isNaN(pcs) || pcs < 1) {
+      showToast('Invalid Pieces! Must be at least 1.', 'error');
+      return;
+    }
+
+    const weight = parseFloat(itemToAdd.Weight);
+    if (isNaN(weight) || weight < 0) {
+      showToast('Weight cannot be negative.', 'error');
+      return;
+    }
+
+    const goldLoss = parseFloat(itemToAdd.GoldLoss);
+    if (isNaN(goldLoss) || goldLoss < 0) {
+      showToast('Gold Loss cannot be negative.', 'error');
+      return;
+    }
+
+    const costPerGram = parseFloat(itemToAdd.CostPerGram);
+    if (isNaN(costPerGram) || costPerGram < 0) {
+      showToast('Cost per gram cannot be negative.', 'error');
+      return;
+    }
+
+    const smc = parseFloat(itemToAdd.SMC);
+    if (isNaN(smc) || smc < 0) {
+      showToast('SMC cannot be negative.', 'error');
+      return;
+    }
+
+    const totalVal = parseFloat(itemToAdd.TotalValue) || 0;
+
+    // Must have positive weight or SMC/TotalValue
+    if (weight <= 0 && totalVal <= 0) {
+      showToast('Weight must be greater than 0.', 'error');
+      return;
+    }
+
+    if (costPerGram <= 0 && smc <= 0 && totalVal <= 0) {
+      showToast('Cost per gram or SMC must be greater than 0.', 'error');
       return;
     }
 
@@ -256,7 +393,7 @@ export default function WholeSalePOSScreen() {
         d => d.InventoryCode.trim().toUpperCase() === code.toUpperCase()
       );
       if (existing) {
-        showToast(`Item ${code} is already added in this invoice.`, 'error');
+        showToast('Item already scanned / added to invoice.', 'error');
         return;
       }
     }
@@ -293,20 +430,12 @@ export default function WholeSalePOSScreen() {
   };
 
   const removeDetail = (index: number) => {
-    Alert.alert('Confirm Remove', `Remove item "${details[index]?.InventoryCode || 'this item'}"?`, [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Remove',
-        style: 'destructive',
-        onPress: () => {
-          const newDet = [...details];
-          newDet.splice(index, 1);
-          setDetails(newDet);
-          if (selectedIndex === index) setSelectedIndex(null);
-          showToast('Item removed', 'success');
-        }
-      }
-    ]);
+    const item = details[index];
+    const newDet = [...details];
+    newDet.splice(index, 1);
+    setDetails(newDet);
+    if (selectedIndex === index) setSelectedIndex(null);
+    showToast(`Removed item ${item?.InventoryCode || ''}`, 'info');
   };
 
   const clearForm = () => {
@@ -392,15 +521,24 @@ export default function WholeSalePOSScreen() {
 
   const saveInvoice = async () => {
     if (!headerState.SalesManCode || !headerState.SalesManCode.trim()) {
-      showToast('Salesman Code is mandatory.', 'error');
+      showToast('Please enter SalesMan!', 'error');
       return;
     }
     if (!headerState.CustomerCode || !headerState.CustomerCode.trim()) {
-      showToast('Customer Code is mandatory.', 'error');
+      showToast('Please enter Customer!', 'error');
       return;
     }
     if (details.length === 0) {
-      showToast('Please add at least one line item.', 'error');
+      showToast('Enter items for sales!', 'error');
+      return;
+    }
+    const salesAmt = parseFloat(paymentState.TotalSalesAmt) || 0;
+    if (salesAmt === 0) {
+      showToast('Enter items for sales!', 'error');
+      return;
+    }
+    if (salesAmt < 0) {
+      showToast('Can not do negative sales.', 'error');
       return;
     }
 
@@ -451,6 +589,7 @@ export default function WholeSalePOSScreen() {
       if (data.success) {
         showToast(data.message || 'Saved Successfully!', 'success');
         clearForm();
+        fetchAuditStats();
       } else {
         showToast(data.message || 'Error saving invoice', 'error');
       }
@@ -463,40 +602,28 @@ export default function WholeSalePOSScreen() {
 
   const deleteInvoice = async () => {
     if (!headerState.InvoiceNo || !headerState.InvoiceNo.trim()) {
-      Alert.alert('Validation Error', 'Please select or enter an Invoice Number to cancel.');
+      showToast('Please select or enter an Invoice Number to cancel.', 'error');
       return;
     }
 
-    Alert.alert(
-      'Confirm Bill Cancel',
-      `Are you sure you want to cancel Wholesale Invoice "${headerState.InvoiceNo}"? This will return all items to stock.`,
-      [
-        { text: 'No, Keep', style: 'cancel' },
-        {
-          text: 'Yes, Cancel Bill',
-          style: 'destructive',
-          onPress: async () => {
-            setLoading(true);
-            try {
-              const res = await fetch(`${API_URL}/wholesalepos/${encodeURIComponent(headerState.InvoiceNo.trim())}`, {
-                method: 'DELETE'
-              });
-              const data = await res.json();
-              if (data.success) {
-                showToast(data.message || 'Invoice cancelled successfully', 'success');
-                clearForm();
-              } else {
-                showToast(data.message || 'Error cancelling invoice', 'error');
-              }
-            } catch (e: any) {
-              showToast(e.message || 'Network error', 'error');
-            } finally {
-              setLoading(false);
-            }
-          }
-        }
-      ]
-    );
+    setLoading(true);
+    try {
+      const res = await fetch(`${API_URL}/wholesalepos/${encodeURIComponent(headerState.InvoiceNo.trim())}`, {
+        method: 'DELETE'
+      });
+      const data = await res.json();
+      if (data.success) {
+        showToast(data.message || 'Invoice cancelled successfully', 'success');
+        clearForm();
+        fetchAuditStats();
+      } else {
+        showToast(data.message || 'Error cancelling invoice', 'error');
+      }
+    } catch (e: any) {
+      showToast(e.message || 'Network error', 'error');
+    } finally {
+      setLoading(false);
+    }
   };
 
   // Generic LOV Handler
@@ -877,6 +1004,7 @@ export default function WholeSalePOSScreen() {
                     style={[styles.input, { flex: 1, minWidth: 60 }]}
                     value={currentDetail.InventoryCode}
                     onChangeText={v => updateDetail('InventoryCode', v)}
+                    onBlur={handleInventoryCodeBlur}
                     onSubmitEditing={() => fetchInventoryDetail(currentDetail.InventoryCode)}
                     placeholder="Scan / Key in..."
                     placeholderTextColor="#9E8D77"
@@ -906,6 +1034,7 @@ export default function WholeSalePOSScreen() {
                   style={[styles.input, { textAlign: 'right' }]}
                   value={currentDetail.Weight}
                   onChangeText={v => updateDetail('Weight', v)}
+                  onBlur={handleWeightBlur}
                   keyboardType="numeric"
                   placeholder="0.00"
                   placeholderTextColor="#9E8D77"
@@ -919,6 +1048,7 @@ export default function WholeSalePOSScreen() {
                   style={[styles.input, { textAlign: 'right' }]}
                   value={currentDetail.GoldLoss}
                   onChangeText={v => updateDetail('GoldLoss', v)}
+                  onBlur={handleGoldLossBlur}
                   keyboardType="numeric"
                   placeholder="0.00"
                   placeholderTextColor="#9E8D77"
@@ -932,6 +1062,7 @@ export default function WholeSalePOSScreen() {
                   style={[styles.input, { textAlign: 'right' }]}
                   value={currentDetail.CostPerGram}
                   onChangeText={v => updateDetail('CostPerGram', v)}
+                  onBlur={handleCostPerGramBlur}
                   keyboardType="numeric"
                   placeholder="0.00"
                   placeholderTextColor="#9E8D77"
@@ -945,6 +1076,7 @@ export default function WholeSalePOSScreen() {
                   style={[styles.input, { textAlign: 'right' }]}
                   value={currentDetail.SMC}
                   onChangeText={v => updateDetail('SMC', v)}
+                  onBlur={handleSMCBlur}
                   keyboardType="numeric"
                   placeholder="0.00"
                   placeholderTextColor="#9E8D77"
@@ -958,6 +1090,7 @@ export default function WholeSalePOSScreen() {
                   style={[styles.input, { textAlign: 'right' }]}
                   value={currentDetail.PCS}
                   onChangeText={v => updateDetail('PCS', v)}
+                  onBlur={handlePCSBlur}
                   keyboardType="numeric"
                   placeholder="1"
                   placeholderTextColor="#9E8D77"
@@ -979,18 +1112,6 @@ export default function WholeSalePOSScreen() {
 
         {/* BOTTOM SECTION: 100% Full-Width Items Table */}
         <View style={[styles.goldCard, { marginTop: 8, minHeight: 240 }]}>
-          <View style={styles.cardHeaderBanner}>
-            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-              <View style={styles.headerIconBadge}>
-                <Ionicons name="cart-outline" size={14} color="#B48218" />
-              </View>
-              <ThemedText style={styles.cardHeaderTitle}>Invoice Line Items</ThemedText>
-              <View style={styles.counterBadge}>
-                <ThemedText style={styles.counterBadgeText}>{details.length} Items</ThemedText>
-              </View>
-            </View>
-          </View>
-
           <View style={{ width: '100%' }}>
             {/* Table Header */}
             <View style={styles.tableHeader}>
@@ -1070,6 +1191,40 @@ export default function WholeSalePOSScreen() {
           </View>
         </View>
       </ScrollView>
+
+      {/* FOOTER AUDIT STATUS BAR */}
+      <View style={styles.footerStatusBar}>
+        <View style={styles.footerCol}>
+          <ThemedText style={styles.footerLabel}>Location</ThemedText>
+          <ThemedText style={styles.footerVal}>{auditStats.LocationCode || 'HQ'}</ThemedText>
+        </View>
+        <View style={styles.footerCol}>
+          <ThemedText style={styles.footerLabel}>Last SalesMan</ThemedText>
+          <ThemedText style={styles.footerVal}>{auditStats.LastSalesMan || '0'}</ThemedText>
+        </View>
+        <View style={styles.footerCol}>
+          <ThemedText style={styles.footerLabel}>Last Bill No</ThemedText>
+          <ThemedText style={styles.footerVal}>{auditStats.LastBillNo || '0'}</ThemedText>
+        </View>
+        <View style={styles.footerCol}>
+          <ThemedText style={styles.footerLabel}>Last Bill Amount</ThemedText>
+          <ThemedText style={styles.footerVal}>{auditStats.LastBillAmount || '0'}</ThemedText>
+        </View>
+        <View style={styles.footerCol}>
+          <ThemedText style={styles.footerLabel}>Next Invoice No</ThemedText>
+          <ThemedText style={styles.footerVal}>{auditStats.NextInvoiceNo || '0'}</ThemedText>
+        </View>
+        <View style={styles.footerCol}>
+          <ThemedText style={styles.footerLabel}>Total Sales Amt</ThemedText>
+          <ThemedText style={[styles.footerVal, { color: '#9E6D08' }]}>
+            ${parseFloat(paymentState.TotalSalesAmt || '0').toFixed(2)}
+          </ThemedText>
+        </View>
+        <View style={[styles.footerCol, { borderRightWidth: 0 }]}>
+          <ThemedText style={styles.footerLabel}>Return Amount</ThemedText>
+          <ThemedText style={styles.footerVal}>$0.00</ThemedText>
+        </View>
+      </View>
 
       {/* LOV Modal */}
       <Modal visible={lovVisible} animationType="fade" transparent>
@@ -1280,9 +1435,22 @@ export default function WholeSalePOSScreen() {
 
       {/* Toast Alert */}
       {toast.visible && (
-        <View style={[styles.toastContainer, toast.type === 'error' ? styles.toastError : styles.toastSuccess]}>
+        <View style={[
+          styles.toastContainer,
+          toast.type === 'error'
+            ? styles.toastError
+            : toast.type === 'info'
+            ? styles.toastInfo
+            : styles.toastSuccess
+        ]}>
           <Ionicons
-            name={toast.type === 'error' ? 'alert-circle' : 'checkmark-circle'}
+            name={
+              toast.type === 'error'
+                ? 'alert-circle'
+                : toast.type === 'info'
+                ? 'information-circle'
+                : 'checkmark-circle'
+            }
             size={16}
             color="#FFFFFF"
             style={{ marginRight: 6 }}
@@ -1760,9 +1928,41 @@ const styles = StyleSheet.create({
   toastError: {
     backgroundColor: '#C62828',
   },
+  toastInfo: {
+    backgroundColor: '#0288D1',
+  },
   toastText: {
     color: '#FFFFFF',
     fontWeight: 'bold',
     fontSize: 12,
+  },
+
+  // ===== FOOTER AUDIT STATUS BAR =====
+  footerStatusBar: {
+    backgroundColor: '#FFFFFF',
+    borderTopWidth: 1,
+    borderTopColor: '#EBE2D2',
+    flexDirection: 'row',
+    paddingVertical: 6,
+    paddingHorizontal: 8,
+  },
+  footerCol: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRightWidth: 1,
+    borderRightColor: '#F2E8D7',
+  },
+  footerLabel: {
+    fontSize: 9,
+    fontWeight: '600',
+    color: '#8F816E',
+    textTransform: 'uppercase',
+  },
+  footerVal: {
+    fontSize: 11,
+    fontWeight: 'bold',
+    color: '#3B2D17',
+    marginTop: 1,
   },
 });

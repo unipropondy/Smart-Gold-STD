@@ -3,7 +3,6 @@ import { Stack, useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   FlatList,
   Modal,
   StyleSheet,
@@ -39,17 +38,20 @@ export default function TrayMasterScreen() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
-  const [successMsg, setSuccessMsg] = useState('');
-  const [errorMsg, setErrorMsg] = useState('');
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+
+  const showToast = (message: string, type: 'success' | 'error' = 'success') => {
+    setToast({ message, type });
+    setTimeout(() => setToast(null), 3500);
+  };
 
   const showSuccess = (msg: string) => {
-    setSuccessMsg(msg);
-    setTimeout(() => setSuccessMsg(''), 3000);
+    showToast(msg, 'success');
   };
 
   const showError = (msg: string) => {
-    setErrorMsg(msg);
-    setTimeout(() => setErrorMsg(''), 3000);
+    showToast(msg, 'error');
   };
 
   // Modal State
@@ -109,17 +111,86 @@ export default function TrayMasterScreen() {
     fetchSalesmen();
   }, []);
 
-  const handleSave = async () => {
+  // 1. txtTrayID blur validation
+  const handleTrayIDBlur = () => {
     if (!trayID || !trayID.trim()) {
-      showError('Tray ID is required');
+      showError('TrayID should not be blank.');
+    }
+  };
+
+  // 2. txtTrayName blur validation
+  const handleTrayNameBlur = () => {
+    if (!trayName || !trayName.trim()) {
+      showError('TrayName should not be blank.');
+    }
+  };
+
+  // 3. txtSalesmanID blur validation & auto-fill name
+  const handleSalesmanIDBlur = async () => {
+    const trimmed = (salesManID || '').trim();
+    if (!trimmed) {
+      showError('SalesmanID should not be blank.');
+      setSalesManName('');
+      return;
+    }
+
+    try {
+      const res = await fetch(`${API_URL}/validate-salesman/${encodeURIComponent(trimmed)}`);
+      const json = await res.json();
+      if (json.success && json.data) {
+        setSalesManName(json.data.SalesManName || '');
+      } else {
+        showError('Please enter valid SalesmanID.');
+        setSalesManID('');
+        setSalesManName('');
+      }
+    } catch (e) {
+      const matched = salesmen.find((s: any) => (s.SalesManCode || s.SalesManID || '').trim().toUpperCase() === trimmed.toUpperCase());
+      if (matched) {
+        setSalesManName(matched.SalesManName || '');
+      } else {
+        showError('Please enter valid SalesmanID.');
+        setSalesManID('');
+        setSalesManName('');
+      }
+    }
+  };
+
+  // 4. txtTrayGroup blur validation
+  const handleTrayGroupBlur = () => {
+    if (!trayGroup || !trayGroup.trim()) {
+      showError('TrayGroup should not be blank.');
+    }
+  };
+
+  const handleSave = async () => {
+    // Exact validations from ValidateMe in frmTray.vb (lines 415-447)
+    if (!trayID || !trayID.trim()) {
+      showError('TrayID should not be blank.');
+      return;
+    }
+    if (!trayName || !trayName.trim()) {
+      showError('TrayName should not be blank.');
+      return;
+    }
+    if (!salesManID || !salesManID.trim()) {
+      showError('SalesmanID should not be blank.');
+      return;
+    }
+    if (!salesManName || !salesManName.trim()) {
+      showError('SalesmanName should not be blank.');
+      return;
+    }
+    if (!trayGroup || !trayGroup.trim()) {
+      showError('TrayGroup should not be blank.');
       return;
     }
 
     const payload = {
-      TrayID: trayID.trim(),
+      TrayID: trayID.trim().toUpperCase(),
       TrayName: trayName.trim(),
-      TrayGroup: trayGroup.trim(),
-      SalesManID: salesManID.trim(),
+      TrayGroup: trayGroup.trim().toUpperCase(),
+      SalesManID: salesManID.trim().toUpperCase(),
       SalesManName: salesManName.trim(),
       IsCustomerTray: isCustomerTray ? 'Y' : 'N'
     };
@@ -135,11 +206,11 @@ export default function TrayMasterScreen() {
 
       const json = await response.json();
       if (json.success) {
-        showSuccess(`Tray ${isEditing ? 'updated' : 'added'} successfully`);
+        showSuccess(json.message || 'Tray detail saved sucssfully.');
         setIsModalVisible(false);
         fetchTrays();
       } else {
-        showError(json.message || 'Failed to save');
+        showError(json.message || 'Error in Save');
       }
     } catch (error) {
       console.error('Save error:', error);
@@ -155,10 +226,10 @@ export default function TrayMasterScreen() {
       const response = await fetch(`${API_URL}?id=${encodeURIComponent(id)}`, { method: 'DELETE' });
       const json = await response.json();
       if (json.success) {
-        showSuccess('Tray deleted successfully');
+        showSuccess(json.message || 'Tray detail deleted.');
         fetchTrays();
       } else {
-        showError(json.message || 'Failed to delete');
+        showError(json.message || 'Error in deleting Category detail.');
       }
     } catch (error) {
       console.error('Delete error:', error);
@@ -169,16 +240,7 @@ export default function TrayMasterScreen() {
   };
 
   const handleDelete = (id: string) => {
-    if (Platform.OS === 'web') {
-      if (window.confirm(`Are you sure you want to delete Tray ${id}?`)) {
-        executeDelete(id);
-      }
-    } else {
-      Alert.alert('Confirm Delete', `Are you sure you want to delete Tray ${id}?`, [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Delete', style: 'destructive', onPress: () => executeDelete(id) },
-      ]);
-    }
+    setDeleteConfirmId(id);
   };
 
   const openAddModal = () => {
@@ -240,11 +302,20 @@ export default function TrayMasterScreen() {
   );
 
   const renderToast = () => {
-    if (!successMsg && !errorMsg) return null;
-    const isError = !!errorMsg;
+    if (!toast) return null;
+    const isError = toast.type === 'error';
     return (
-      <View style={[styles.toast, { backgroundColor: isError ? '#F44336' : '#4CAF50' }]}>
-        <ThemedText style={styles.toastText}>{isError ? errorMsg : successMsg}</ThemedText>
+      <View
+        pointerEvents="none"
+        style={[styles.toast, isError ? styles.toastError : styles.toastSuccess]}
+      >
+        <Ionicons
+          name={isError ? 'alert-circle' : 'checkmark-circle'}
+          size={16}
+          color="#FFFFFF"
+          style={{ marginRight: 6 }}
+        />
+        <ThemedText style={styles.toastText}>{toast.message}</ThemedText>
       </View>
     );
   };
@@ -252,7 +323,7 @@ export default function TrayMasterScreen() {
   return (
     <SafeAreaView style={[styles.safeArea, { backgroundColor }]} edges={['top']}>
       <Stack.Screen options={{ headerShown: false }} />
-      {!(isModalVisible || isGroupLookupVisible || isSalesmanLookupVisible) && renderToast()}
+      {!isModalVisible && !deleteConfirmId && !isGroupLookupVisible && !isSalesmanLookupVisible && renderToast()}
       {/* Header */}
       <View style={[styles.header, { borderBottomColor: borderColor }]}>
         <View style={{ flexDirection: 'row', alignItems: 'center' }}>
@@ -298,9 +369,9 @@ export default function TrayMasterScreen() {
       {/* Modal */}
       <Modal visible={isModalVisible} transparent animationType="fade">
         <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setIsModalVisible(false)}>
+          {renderToast()}
           <TouchableWithoutFeedback>
             <View style={[styles.modalContent, { backgroundColor: cardColor, borderColor }]}>
-              {renderToast()}
               <View style={[styles.modalHeader, { borderBottomColor: borderColor }]}>
                 <ThemedText style={{ fontSize: 18, fontWeight: 'bold', color: textColor }}>
                   {isEditing ? 'Edit Tray' : 'Add New Tray'}
@@ -316,33 +387,38 @@ export default function TrayMasterScreen() {
                   <TextInput
                     style={[styles.input, { color: textColor, borderColor, backgroundColor: isDark ? '#2A2A2A' : '#FFF' }, isEditing && { backgroundColor: isDark ? '#333' : '#F0F0F0', color: subtitleColor }]}
                     value={trayID}
-                    onChangeText={setTrayID}
+                    onChangeText={(t) => setTrayID(t.toUpperCase())}
+                    onBlur={handleTrayIDBlur}
                     editable={!isEditing}
                     placeholder="Enter Tray ID"
                     placeholderTextColor={subtitleColor}
+                    autoCapitalize="characters"
                   />
                 </View>
 
                 <View style={styles.inputGroup}>
-                  <ThemedText style={[styles.label, { color: subtitleColor }]}>Tray Name</ThemedText>
+                  <ThemedText style={[styles.label, { color: subtitleColor }]}>Tray Name *</ThemedText>
                   <TextInput
                     style={[styles.input, { color: textColor, borderColor, backgroundColor: isDark ? '#2A2A2A' : '#FFF' }]}
                     value={trayName}
                     onChangeText={setTrayName}
+                    onBlur={handleTrayNameBlur}
                     placeholder="Tray Name"
                     placeholderTextColor={subtitleColor}
                   />
                 </View>
 
                 <View style={styles.inputGroup}>
-                  <ThemedText style={[styles.label, { color: subtitleColor }]}>Tray Group</ThemedText>
+                  <ThemedText style={[styles.label, { color: subtitleColor }]}>Tray Group *</ThemedText>
                   <View style={styles.lookupContainer}>
                     <TextInput
                       style={[styles.input, { color: textColor, borderColor, backgroundColor: isDark ? '#2A2A2A' : '#FFF' }]}
                       value={trayGroup}
-                      onChangeText={setTrayGroup}
+                      onChangeText={(t) => setTrayGroup(t.toUpperCase())}
+                      onBlur={handleTrayGroupBlur}
                       placeholder="Enter Tray Group"
                       placeholderTextColor={subtitleColor}
+                      autoCapitalize="characters"
                     />
                     <TouchableOpacity style={styles.lookupButton} onPress={() => setIsGroupLookupVisible(true)}>
                       <ThemedText style={{ color: textColor, fontWeight: 'bold' }}>...</ThemedText>
@@ -351,14 +427,16 @@ export default function TrayMasterScreen() {
                 </View>
 
                 <View style={styles.inputGroup}>
-                  <ThemedText style={[styles.label, { color: subtitleColor }]}>Salesman ID</ThemedText>
+                  <ThemedText style={[styles.label, { color: subtitleColor }]}>Salesman ID *</ThemedText>
                   <View style={styles.lookupContainer}>
                     <TextInput
                       style={[styles.input, { color: textColor, borderColor, backgroundColor: isDark ? '#2A2A2A' : '#FFF' }]}
                       value={salesManID}
-                      onChangeText={setSalesManID}
+                      onChangeText={(t) => setSalesManID(t.toUpperCase())}
+                      onBlur={handleSalesmanIDBlur}
                       placeholder="Enter Salesman ID"
                       placeholderTextColor={subtitleColor}
+                      autoCapitalize="characters"
                     />
                     <TouchableOpacity style={styles.lookupButton} onPress={() => setIsSalesmanLookupVisible(true)}>
                       <ThemedText style={{ color: textColor, fontWeight: 'bold' }}>...</ThemedText>
@@ -367,7 +445,7 @@ export default function TrayMasterScreen() {
                 </View>
 
                 <View style={styles.inputGroup}>
-                  <ThemedText style={[styles.label, { color: subtitleColor }]}>Salesman Name</ThemedText>
+                  <ThemedText style={[styles.label, { color: subtitleColor }]}>Salesman Name *</ThemedText>
                   <TextInput
                     style={[styles.input, { color: subtitleColor, borderColor, backgroundColor: isDark ? '#333' : '#F0F0F0' }]}
                     value={salesManName}
@@ -401,6 +479,7 @@ export default function TrayMasterScreen() {
             </View>
           </TouchableWithoutFeedback>
         </TouchableOpacity>
+        {renderToast()}
       </Modal>
 
       {/* Tray Group Lookup Modal */}
@@ -478,6 +557,46 @@ export default function TrayMasterScreen() {
             </View>
           </View>
         </View>
+      </Modal>
+
+      {/* Delete Confirmation Modal */}
+      <Modal visible={!!deleteConfirmId} animationType="fade" transparent={true}>
+        <TouchableWithoutFeedback onPress={() => setDeleteConfirmId(null)}>
+          <View style={styles.modalOverlay}>
+            <TouchableWithoutFeedback>
+              <View style={[styles.modalContent, { backgroundColor: cardColor, borderColor, maxWidth: 420, padding: 24 }]}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 16 }}>
+                  <Ionicons name="trash-outline" size={24} color="#C62828" style={{ marginRight: 10 }} />
+                  <ThemedText style={{ fontSize: 18, fontWeight: 'bold', color: textColor }}>Delete Tray</ThemedText>
+                </View>
+                <ThemedText style={{ color: textColor, fontSize: 14, marginBottom: 24, lineHeight: 22 }}>
+                  {`Do you want to delete `}
+                  <ThemedText style={{ fontWeight: 'bold' }}>{deleteConfirmId || ''}</ThemedText>
+                  {` Category?`}
+                </ThemedText>
+                <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 12 }}>
+                  <TouchableOpacity
+                    style={[styles.btn, styles.btnCancel]}
+                    onPress={() => setDeleteConfirmId(null)}
+                  >
+                    <ThemedText style={{ color: '#666', fontWeight: '600' }}>Cancel</ThemedText>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.btn, { backgroundColor: '#C62828' }]}
+                    onPress={() => {
+                      const id = deleteConfirmId;
+                      setDeleteConfirmId(null);
+                      if (id) executeDelete(id);
+                    }}
+                  >
+                    <ThemedText style={{ color: '#FFF', fontWeight: '600' }}>Delete</ThemedText>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </TouchableWithoutFeedback>
+          </View>
+        </TouchableWithoutFeedback>
+        {renderToast()}
       </Modal>
 
     </SafeAreaView>
@@ -593,22 +712,27 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: Platform.OS === 'web' ? 20 : 50,
     alignSelf: 'center',
-    minWidth: 250,
-    maxWidth: '90%',
-    padding: 15,
-    borderRadius: 8,
-    zIndex: 9999,
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 8,
+    zIndex: 999999,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.25,
     shadowRadius: 3.84,
-    elevation: 5,
+    elevation: 20,
+  },
+  toastSuccess: {
+    backgroundColor: '#2E7D32',
+  },
+  toastError: {
+    backgroundColor: '#C62828',
   },
   toastText: {
-    color: '#FFF',
-    fontSize: 14,
+    color: '#FFFFFF',
+    fontSize: 13,
     fontWeight: '600',
     textAlign: 'center',
   },

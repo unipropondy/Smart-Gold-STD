@@ -73,6 +73,56 @@ router.post("/", async (req, res) => {
       return res.status(400).json({ success: false, message: "PurchaseBillNo is required in header" });
     }
 
+    if (!header.SupplierCode || !header.SupplierCode.trim()) {
+      return res.status(400).json({ success: false, message: "Enter supplier code." });
+    }
+
+    // Verify SupplierCode exists in tblSupplier
+    const supCheck = await pool.request()
+      .input('SupplierCode', sql.VarChar, header.SupplierCode.trim())
+      .query("SELECT 1 FROM tblSupplier WHERE SupplierCode = @SupplierCode");
+    if (supCheck.recordset.length === 0) {
+      return res.status(400).json({ success: false, message: "Invalid supplier code!" });
+    }
+
+    const currencyCode = (header.Currency || header.CurrencyCode || '').trim();
+    if (!currencyCode) {
+      return res.status(400).json({ success: false, message: "Enter currency code." });
+    }
+
+    // Verify CurrencyCode exists in tblCurrency
+    const currCheck = await pool.request()
+      .input('CurrencyCode', sql.VarChar, currencyCode)
+      .query("SELECT 1 FROM tblCurrency WHERE CurrencyCode = @CurrencyCode");
+    if (currCheck.recordset.length === 0) {
+      return res.status(400).json({ success: false, message: "Set Default Currency in Currency Master" });
+    }
+
+    const currRate = parseFloat(header.Rate || header.CurrencyRate) || 0;
+    if (currRate <= 0) {
+      return res.status(400).json({ success: false, message: "Enter currency rate." });
+    }
+
+    const payable = header.PaymentType || (header.PayableGold ? 'G' : header.PayableCash ? 'C' : '');
+    if (!payable) {
+      return res.status(400).json({ success: false, message: "Select payment type." });
+    }
+
+    const tealPercent = parseFloat(header.TaelPercent) || 0;
+    if (tealPercent <= 0) {
+      return res.status(400).json({ success: false, message: "Enter TEAL Percent." });
+    }
+
+    const tealVal = parseFloat(header.TaelValue || header.TaelRate) || 0;
+    if (tealVal <= 0) {
+      return res.status(400).json({ success: false, message: "Enter teal." });
+    }
+
+    const costPerGram = parseFloat(header.TaelCostPerGram || header.CostPerGram) || 0;
+    if (costPerGram <= 0) {
+      return res.status(400).json({ success: false, message: "Enter cost per gram." });
+    }
+
     const sysUser = userId || "SYSTEM";
     const curDate = new Date();
     const purchaseBillNo = header.PurchaseBillNo.trim();
@@ -493,6 +543,25 @@ router.delete("/:purchaseBillNo/item/:inventoryCode", async (req, res) => {
       try { await transaction.rollback(); } catch (_) {}
     }
     console.error("🔥 DELETE INVENTORY ITEM ERROR:", err);
+    return res.status(500).json({ success: false, message: "Server Error", error: err.message });
+  }
+});
+
+// ================= GET GOLD LOSS BY WEIGHT (fncGetGoldLossByWeight) =================
+router.get("/goldloss/:weight", async (req, res) => {
+  try {
+    const weight = parseFloat(req.params.weight) || 0;
+    const pool = req.pool;
+    const result = await pool.request()
+      .input("Weight", sql.Decimal(18, 4), weight)
+      .query(`SELECT GoldLoss FROM tblGoldLoss WHERE @Weight BETWEEN FromWeight AND ToWeight`);
+
+    if (result.recordset.length > 0) {
+      return res.json({ success: true, goldLoss: result.recordset[0].GoldLoss });
+    }
+    return res.json({ success: true, goldLoss: 0 });
+  } catch (err) {
+    console.error("🔥 GET GOLD LOSS ERROR:", err);
     return res.status(500).json({ success: false, message: "Server Error", error: err.message });
   }
 });

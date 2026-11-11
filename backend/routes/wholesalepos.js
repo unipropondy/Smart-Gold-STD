@@ -558,4 +558,117 @@ router.delete("/:id", async (req, res) => {
   }
 });
 
+// ================= GET AUDIT FOOTER STATS =================
+router.get("/audit/stats", async (req, res) => {
+  try {
+    const pool = await getPool(req);
+
+    let locationCode = 'HQ';
+    let rawNextInvoiceNo = '';
+
+    // 1. Fetch LocationCode and NextInvoice / NextInvoiceNo from tblCompany
+    try {
+      const compRes = await pool.request().query(`
+        SELECT TOP 1 LocationCode, NextInvoice, NextInvoiceNo, NextSalesNo FROM tblCompany
+      `);
+      if (compRes.recordset.length > 0) {
+        const comp = compRes.recordset[0];
+        if (comp.LocationCode) locationCode = String(comp.LocationCode).trim();
+        rawNextInvoiceNo = comp.NextInvoice || comp.NextInvoiceNo || comp.NextSalesNo || '';
+      }
+    } catch (ce) {}
+
+    // 2. If not found in tblCompany, check tblInvoiceNo
+    if (!rawNextInvoiceNo) {
+      try {
+        const nextInvResult = await pool.request().query(`
+          SELECT TOP 1 LocationCode, NextInvoice FROM tblInvoiceNo WHERE Terminal = 'T1' OR LocationCode = '${locationCode}'
+        `);
+        if (nextInvResult.recordset.length > 0 && nextInvResult.recordset[0].NextInvoice) {
+          if (nextInvResult.recordset[0].LocationCode) {
+            locationCode = String(nextInvResult.recordset[0].LocationCode).trim();
+          }
+          rawNextInvoiceNo = nextInvResult.recordset[0].NextInvoice;
+        }
+      } catch (e) {}
+    }
+
+    // Query the last created wholesale bill from tblSalesHeader
+    let lastBill = {};
+    try {
+      const lastBillResult = await pool.request().query(`
+        SELECT TOP 1 A.InvoiceNo, A.NetTotal, A.SalesManCode, B.SalesManName 
+        FROM tblSalesHeader A 
+        LEFT JOIN tblSalesMan B ON A.SalesManCode = B.SalesManCode 
+        WHERE A.SalesType = 'Wholesale'
+        ORDER BY A.CreateDate DESC
+      `);
+      if (lastBillResult.recordset.length > 0) {
+        lastBill = lastBillResult.recordset[0];
+      }
+    } catch (lbe) {
+      try {
+        const fallbackRes = await pool.request().query(`
+          SELECT TOP 1 InvoiceNo, SalesManCode, NetTotal 
+          FROM tblSalesHeader 
+          WHERE SalesType = 'Wholesale'
+          ORDER BY CreateDate DESC
+        `);
+        if (fallbackRes.recordset.length > 0) {
+          lastBill = fallbackRes.recordset[0];
+        }
+      } catch (fe) {}
+    }
+
+    // Format LastBillNo with LocationCode (e.g., HQ01000143)
+    let formattedLastBillNo = '';
+    if (lastBill && lastBill.InvoiceNo) {
+      const rawBill = String(lastBill.InvoiceNo).trim();
+      if (rawBill.startsWith(locationCode)) {
+        const numPart = rawBill.slice(locationCode.length).replace(/\D/g, '');
+        formattedLastBillNo = `${locationCode}${numPart.padStart(8, '0')}`;
+      } else {
+        const numPart = rawBill.replace(/\D/g, '');
+        formattedLastBillNo = `${locationCode}${(numPart || '0').padStart(8, '0')}`;
+      }
+    }
+
+    // Next invoice number logic
+    let formattedNextInvoiceNo = '';
+    if (rawNextInvoiceNo) {
+      const strVal = String(rawNextInvoiceNo).trim();
+      if (strVal.startsWith(locationCode)) {
+        const numPart = strVal.slice(locationCode.length).replace(/\D/g, '');
+        formattedNextInvoiceNo = `${locationCode}${numPart.padStart(8, '0')}`;
+      } else {
+        const numPart = strVal.replace(/\D/g, '');
+        formattedNextInvoiceNo = `${locationCode}${(numPart || '1').padStart(8, '0')}`;
+      }
+    }
+
+    if (formattedLastBillNo) {
+      if (!formattedNextInvoiceNo || formattedNextInvoiceNo === formattedLastBillNo) {
+        const lastNum = parseInt(formattedLastBillNo.slice(locationCode.length).replace(/\D/g, ''), 10) || 0;
+        formattedNextInvoiceNo = `${locationCode}${String(lastNum + 1).padStart(8, '0')}`;
+      }
+    } else if (!formattedNextInvoiceNo) {
+      formattedNextInvoiceNo = `${locationCode}00000001`;
+    }
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        LocationCode: locationCode,
+        TerminalCode: 'T1',
+        NextInvoiceNo: formattedNextInvoiceNo,
+        LastSalesMan: lastBill.SalesManName || lastBill.SalesManCode || '0',
+        LastBillNo: formattedLastBillNo || lastBill.InvoiceNo || '0',
+        LastBillAmount: lastBill.NetTotal !== undefined && lastBill.NetTotal !== null ? Number(lastBill.NetTotal).toFixed(2) : '0.00'
+      }
+    });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: err.message });
+  }
+});
+
 module.exports = router;

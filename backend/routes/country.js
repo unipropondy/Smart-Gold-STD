@@ -46,13 +46,25 @@ router.post("/", async (req, res) => {
     await ensureTableExists(pool);
     const { CountryCode, CountryName, Type } = req.body;
 
-    if (!CountryCode) {
-      return res.status(400).json({ success: false, message: "Country Code is required." });
+    const trimmedCode = (CountryCode || '').trim();
+    const trimmedName = (CountryName || '').trim();
+    const trimmedType = (Type || '').trim();
+
+    if (!trimmedCode) {
+      return res.status(400).json({ success: false, message: "Please enter Country Code !" });
+    }
+
+    if (!trimmedName) {
+      return res.status(400).json({ success: false, message: "Please enter Country Name !" });
+    }
+
+    if (!trimmedType) {
+      return res.status(400).json({ success: false, message: "Please enter Type !" });
     }
 
     // Check if exists
     const checkResult = await pool.request()
-      .input('CountryCode', sql.VarChar, CountryCode)
+      .input('CountryCode', sql.VarChar, trimmedCode)
       .query("SELECT CountryCode FROM tblCountry WHERE CountryCode = @CountryCode");
     
     if (checkResult.recordset.length > 0) {
@@ -70,15 +82,15 @@ router.post("/", async (req, res) => {
     `;
 
     await pool.request()
-      .input('CountryCode', sql.VarChar, CountryCode.substring(0, 50))
-      .input('CountryName', sql.VarChar, CountryName ? CountryName.substring(0, 100) : '')
-      .input('Type', sql.VarChar, Type ? Type.substring(0, 50) : '')
+      .input('CountryCode', sql.VarChar, trimmedCode.substring(0, 50))
+      .input('CountryName', sql.VarChar, trimmedName ? trimmedName.substring(0, 100) : '')
+      .input('Type', sql.VarChar, trimmedType ? trimmedType.substring(0, 50) : '')
       .query(insertQuery);
 
-    res.json({ success: true, message: "Country created successfully." });
+    res.json({ success: true, message: "Saved Successfully!" });
   } catch (err) {
     console.error("Insert Country Error:", err);
-    res.status(500).json({ success: false, message: "Failed to create country", error: err.message });
+    res.status(500).json({ success: false, message: "Error in Save/Update !", error: err.message });
   }
 });
 
@@ -88,7 +100,21 @@ router.put("/", async (req, res) => {
     const pool = req.pool;
     const { CountryCode, CountryName, Type } = req.body;
     
-    if (!CountryCode) return res.status(400).json({ success: false, message: "Country Code is required" });
+    const trimmedCode = (CountryCode || '').trim();
+    const trimmedName = (CountryName || '').trim();
+    const trimmedType = (Type || '').trim();
+
+    if (!trimmedCode) {
+      return res.status(400).json({ success: false, message: "Please enter Country Code !" });
+    }
+
+    if (!trimmedName) {
+      return res.status(400).json({ success: false, message: "Please enter Country Name !" });
+    }
+
+    if (!trimmedType) {
+      return res.status(400).json({ success: false, message: "Please enter Type !" });
+    }
 
     const updateQuery = `
       UPDATE tblCountry SET 
@@ -100,19 +126,19 @@ router.put("/", async (req, res) => {
     `;
 
     const result = await pool.request()
-      .input('CountryCode', sql.VarChar, CountryCode)
-      .input('CountryName', sql.VarChar, CountryName ? CountryName.substring(0, 100) : '')
-      .input('Type', sql.VarChar, Type ? Type.substring(0, 50) : '')
+      .input('CountryCode', sql.VarChar, trimmedCode)
+      .input('CountryName', sql.VarChar, trimmedName ? trimmedName.substring(0, 100) : '')
+      .input('Type', sql.VarChar, trimmedType ? trimmedType.substring(0, 50) : '')
       .query(updateQuery);
 
     if (result.rowsAffected[0] === 0) {
-      return res.status(404).json({ success: false, message: "Country not found." });
+      return res.status(404).json({ success: false, message: "No such user!" });
     }
 
-    res.json({ success: true, message: "Country updated successfully." });
+    res.json({ success: true, message: "Saved Successfully!" });
   } catch (err) {
     console.error("Update Country Error:", err);
-    res.status(500).json({ success: false, message: "Failed to update country", error: err.message });
+    res.status(500).json({ success: false, message: "Error in Save/Update !", error: err.message });
   }
 });
 

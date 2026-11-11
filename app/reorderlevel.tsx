@@ -3,7 +3,6 @@ import { Stack, useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   FlatList,
   Modal,
   StyleSheet,
@@ -39,22 +38,26 @@ export default function ReOrderLevelScreen() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
-  const [successMsg, setSuccessMsg] = useState('');
-  const [errorMsg, setErrorMsg] = useState('');
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+  const [deleteConfirmItem, setDeleteConfirmItem] = useState<any | null>(null);
+
+  const showToast = (message: string, type: 'success' | 'error' = 'success') => {
+    setToast({ message, type });
+    setTimeout(() => setToast(null), 3000);
+  };
 
   const showSuccess = (msg: string) => {
-    setSuccessMsg(msg);
-    setTimeout(() => setSuccessMsg(''), 3000);
+    showToast(msg, 'success');
   };
 
   const showError = (msg: string) => {
-    setErrorMsg(msg);
-    setTimeout(() => setErrorMsg(''), 3000);
+    showToast(msg, 'error');
   };
 
   // Modal State
   const [isModalVisible, setIsModalVisible] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
+  const [originalKeys, setOriginalKeys] = useState<{ locationCode: string; categoryCode: string; catalogueCode: string } | null>(null);
 
   // Form State
   const [locationCode, setLocationCode] = useState('');
@@ -129,22 +132,96 @@ export default function ReOrderLevelScreen() {
     fetchLookups();
   }, []);
 
+  // Field-level blur handlers matching subValidateMe in frmReOrderLevelMaster.vb
+  const handleCatalogueCodeBlur = () => {
+    const trimmed = (catalogueCode || '').trim();
+    if (!trimmed) {
+      showError('CatalogueCode should not be blank.');
+    }
+  };
+
+  const handleFromWeightBlur = () => {
+    const trimmed = (weight || '').trim();
+    if (!trimmed) {
+      showError('Weight should not be blank.');
+    }
+  };
+
+  const handleToWeightBlur = () => {
+    const trimmed = (toWeight || '').trim();
+    if (!trimmed) {
+      showError('Weight should not be blank.');
+    }
+  };
+
+  const handleCategoryCodeBlur = () => {
+    const trimmed = (categoryCode || '').trim();
+    if (!trimmed) {
+      showError('CategoryCode should not be blank.');
+    }
+  };
+
+  const handleSizeCodeBlur = () => {
+    const trimmed = (sizeCode || '').trim();
+    if (trimmed && sizes.length > 0) {
+      const match = sizes.find((s: any) => (s.SizeCode || '').trim().toUpperCase() === trimmed.toUpperCase());
+      if (!match) {
+        showError('Invalid Size Code!');
+        setSizeCode('');
+      }
+    }
+  };
+
+  const handleToSizeCodeBlur = () => {
+    const trimmed = (toSizeCode || '').trim();
+    if (trimmed && sizes.length > 0) {
+      const match = sizes.find((s: any) => (s.SizeCode || '').trim().toUpperCase() === trimmed.toUpperCase());
+      if (!match) {
+        showError('Invalid Size Code!');
+        setToSizeCode('');
+      }
+    }
+  };
+
   const handleSave = async () => {
-    if (!locationCode || !locationCode.trim() || !categoryCode || !categoryCode.trim() || !catalogueCode || !catalogueCode.trim()) {
-      showError('Location, Category, and Catalogue are required');
+    const trimmedCatalogue = (catalogueCode || '').trim();
+    const trimmedFromWeight = (weight || '').trim();
+    const trimmedToWeight = (toWeight || '').trim();
+    const trimmedCategory = (categoryCode || '').trim();
+
+    if (!trimmedCatalogue) {
+      showError('CatalogueCode should not be blank.');
+      return;
+    }
+
+    if (!trimmedFromWeight) {
+      showError('Weight should not be blank.');
+      return;
+    }
+
+    if (!trimmedToWeight) {
+      showError('Weight should not be blank.');
+      return;
+    }
+
+    if (!trimmedCategory) {
+      showError('CategoryCode should not be blank.');
       return;
     }
 
     const payload = {
-      LocationCode: locationCode.trim(),
-      CategoryCode: categoryCode.trim(),
-      CatalogueCode: catalogueCode.trim(),
-      Weight: weight,
-      ToWeight: toWeight,
-      SizeCode: sizeCode.trim(),
-      ToSizeCode: toSizeCode.trim(),
-      ReOrderLevel: reOrderLevel,
-      Remarks: remarks.trim(),
+      OriginalLocationCode: isEditing && originalKeys ? originalKeys.locationCode : undefined,
+      OriginalCategoryCode: isEditing && originalKeys ? originalKeys.categoryCode : undefined,
+      OriginalCatalogueCode: isEditing && originalKeys ? originalKeys.catalogueCode : undefined,
+      LocationCode: (locationCode || '').trim(),
+      CategoryCode: trimmedCategory,
+      CatalogueCode: trimmedCatalogue,
+      Weight: trimmedFromWeight,
+      ToWeight: trimmedToWeight,
+      SizeCode: (sizeCode || '').trim(),
+      ToSizeCode: (toSizeCode || '').trim(),
+      ReOrderLevel: (reOrderLevel || '').trim(),
+      Remarks: (remarks || '').trim(),
     };
 
     setSaving(true);
@@ -158,15 +235,15 @@ export default function ReOrderLevelScreen() {
 
       const json = await response.json();
       if (json.success) {
-        showSuccess(`ReOrder Level ${isEditing ? 'updated' : 'added'} successfully`);
+        showSuccess(json.message || 'ReOrder detail saved sucssfully.');
         setIsModalVisible(false);
         fetchData();
       } else {
-        showError(json.message || 'Failed to save');
+        showError(json.message || 'Error in Save');
       }
     } catch (error) {
       console.error('Save error:', error);
-      showError('Failed to save ReOrder Level');
+      showError('Error in Save');
     } finally {
       setSaving(false);
     }
@@ -176,38 +253,30 @@ export default function ReOrderLevelScreen() {
     const id = `${item.LocationCode}-${item.CategoryCode}-${item.CatalogueCode}`;
     setDeletingId(id);
     try {
-      const qs = `?LocationCode=${encodeURIComponent(item.LocationCode)}&CategoryCode=${encodeURIComponent(item.CategoryCode)}&CatalogueCode=${encodeURIComponent(item.CatalogueCode)}`;
+      const qs = `?LocationCode=${encodeURIComponent(item.LocationCode || '')}&CategoryCode=${encodeURIComponent(item.CategoryCode || '')}&CatalogueCode=${encodeURIComponent(item.CatalogueCode || '')}`;
       const response = await fetch(`${API_URL}${qs}`, { method: 'DELETE' });
       const json = await response.json();
       if (json.success) {
-        showSuccess('Record deleted successfully');
+        showSuccess(json.message || 'Catalogue detail deleted.');
         fetchData();
       } else {
-        showError(json.message || 'Failed to delete');
+        showError(json.message || 'Error in deleting Catalogue detail.');
       }
     } catch (error) {
       console.error('Delete error:', error);
-      showError('Failed to delete record');
+      showError('Error in deleting Catalogue detail.');
     } finally {
       setDeletingId(null);
     }
   };
 
   const handleDelete = (item: any) => {
-    if (Platform.OS === 'web') {
-      if (window.confirm('Are you sure you want to delete this record?')) {
-        executeDelete(item);
-      }
-    } else {
-      Alert.alert('Confirm Delete', 'Are you sure you want to delete this record?', [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Delete', style: 'destructive', onPress: () => executeDelete(item) },
-      ]);
-    }
+    setDeleteConfirmItem(item);
   };
 
   const openAddModal = () => {
     setIsEditing(false);
+    setOriginalKeys(null);
     setLocationCode('');
     setCategoryCode('');
     setCatalogueCode('');
@@ -222,6 +291,11 @@ export default function ReOrderLevelScreen() {
 
   const openEditModal = (item: any) => {
     setIsEditing(true);
+    setOriginalKeys({
+      locationCode: (item.LocationCode || '').trim(),
+      categoryCode: (item.CategoryCode || '').trim(),
+      catalogueCode: (item.CatalogueCode || '').trim(),
+    });
     setLocationCode(item.LocationCode || '');
     setCategoryCode(item.CategoryCode || '');
     setCatalogueCode(item.CatalogueCode || '');
@@ -314,11 +388,17 @@ export default function ReOrderLevelScreen() {
   });
 
   const renderToast = () => {
-    if (!successMsg && !errorMsg) return null;
-    const isError = !!errorMsg;
+    if (!toast) return null;
+    const isError = toast.type === 'error';
     return (
       <View style={[styles.toast, { backgroundColor: isError ? '#F44336' : '#4CAF50' }]}>
-        <ThemedText style={styles.toastText}>{isError ? errorMsg : successMsg}</ThemedText>
+        <Ionicons
+          name={isError ? 'alert-circle' : 'checkmark-circle'}
+          size={16}
+          color="#FFF"
+          style={{ marginRight: 6 }}
+        />
+        <ThemedText style={styles.toastText}>{toast.message}</ThemedText>
       </View>
     );
   };
@@ -389,18 +469,15 @@ export default function ReOrderLevelScreen() {
                   <ThemedText style={[styles.label, { color: subtitleColor }]}>Location Code *</ThemedText>
                   <View style={styles.lookupContainer}>
                     <TextInput
-                      style={[styles.input, { color: textColor, borderColor, backgroundColor: isDark ? '#2A2A2A' : '#FFF' }, isEditing && { opacity: 0.7 }]}
+                      style={[styles.input, { color: textColor, borderColor, backgroundColor: isDark ? '#2A2A2A' : '#FFF' }]}
                       value={locationCode}
                       onChangeText={setLocationCode}
-                      editable={!isEditing}
                       placeholder="Location"
                       placeholderTextColor={subtitleColor}
                     />
-                    {!isEditing && (
-                      <TouchableOpacity style={styles.lookupButton} onPress={() => setLookupType('location')}>
-                        <ThemedText style={{ color: textColor, fontWeight: 'bold' }}>...</ThemedText>
-                      </TouchableOpacity>
-                    )}
+                    <TouchableOpacity style={styles.lookupButton} onPress={() => setLookupType('location')}>
+                      <ThemedText style={{ color: textColor, fontWeight: 'bold' }}>...</ThemedText>
+                    </TouchableOpacity>
                   </View>
                 </View>
 
@@ -409,18 +486,16 @@ export default function ReOrderLevelScreen() {
                   <ThemedText style={[styles.label, { color: subtitleColor }]}>Category Code *</ThemedText>
                   <View style={styles.lookupContainer}>
                     <TextInput
-                      style={[styles.input, { color: textColor, borderColor, backgroundColor: isDark ? '#2A2A2A' : '#FFF' }, isEditing && { opacity: 0.7 }]}
+                      style={[styles.input, { color: textColor, borderColor, backgroundColor: isDark ? '#2A2A2A' : '#FFF' }]}
                       value={categoryCode}
                       onChangeText={setCategoryCode}
-                      editable={!isEditing}
+                      onBlur={handleCategoryCodeBlur}
                       placeholder="Category"
                       placeholderTextColor={subtitleColor}
                     />
-                    {!isEditing && (
-                      <TouchableOpacity style={styles.lookupButton} onPress={() => setLookupType('category')}>
-                        <ThemedText style={{ color: textColor, fontWeight: 'bold' }}>...</ThemedText>
-                      </TouchableOpacity>
-                    )}
+                    <TouchableOpacity style={styles.lookupButton} onPress={() => setLookupType('category')}>
+                      <ThemedText style={{ color: textColor, fontWeight: 'bold' }}>...</ThemedText>
+                    </TouchableOpacity>
                   </View>
                 </View>
 
@@ -429,39 +504,39 @@ export default function ReOrderLevelScreen() {
                   <ThemedText style={[styles.label, { color: subtitleColor }]}>Catalogue Code *</ThemedText>
                   <View style={styles.lookupContainer}>
                     <TextInput
-                      style={[styles.input, { color: textColor, borderColor, backgroundColor: isDark ? '#2A2A2A' : '#FFF' }, isEditing && { opacity: 0.7 }]}
+                      style={[styles.input, { color: textColor, borderColor, backgroundColor: isDark ? '#2A2A2A' : '#FFF' }]}
                       value={catalogueCode}
                       onChangeText={setCatalogueCode}
-                      editable={!isEditing}
+                      onBlur={handleCatalogueCodeBlur}
                       placeholder="Catalogue"
                       placeholderTextColor={subtitleColor}
                     />
-                    {!isEditing && (
-                      <TouchableOpacity style={styles.lookupButton} onPress={() => setLookupType('catalogue')}>
-                        <ThemedText style={{ color: textColor, fontWeight: 'bold' }}>...</ThemedText>
-                      </TouchableOpacity>
-                    )}
+                    <TouchableOpacity style={styles.lookupButton} onPress={() => setLookupType('catalogue')}>
+                      <ThemedText style={{ color: textColor, fontWeight: 'bold' }}>...</ThemedText>
+                    </TouchableOpacity>
                   </View>
                 </View>
 
                 {/* Weights */}
                 <View style={styles.inputGroup}>
-                  <ThemedText style={[styles.label, { color: subtitleColor }]}>From Weight</ThemedText>
+                  <ThemedText style={[styles.label, { color: subtitleColor }]}>From Weight *</ThemedText>
                   <TextInput
                     style={[styles.input, { color: textColor, borderColor, backgroundColor: isDark ? '#2A2A2A' : '#FFF' }]}
                     value={weight}
                     onChangeText={setWeight}
+                    onBlur={handleFromWeightBlur}
                     keyboardType="numeric"
                     placeholder="0.000"
                     placeholderTextColor={subtitleColor}
                   />
                 </View>
                 <View style={styles.inputGroup}>
-                  <ThemedText style={[styles.label, { color: subtitleColor }]}>To Weight</ThemedText>
+                  <ThemedText style={[styles.label, { color: subtitleColor }]}>To Weight *</ThemedText>
                   <TextInput
                     style={[styles.input, { color: textColor, borderColor, backgroundColor: isDark ? '#2A2A2A' : '#FFF' }]}
                     value={toWeight}
                     onChangeText={setToWeight}
+                    onBlur={handleToWeightBlur}
                     keyboardType="numeric"
                     placeholder="0.000"
                     placeholderTextColor={subtitleColor}
@@ -476,6 +551,7 @@ export default function ReOrderLevelScreen() {
                       style={[styles.input, { color: textColor, borderColor, backgroundColor: isDark ? '#2A2A2A' : '#FFF' }]}
                       value={sizeCode}
                       onChangeText={setSizeCode}
+                      onBlur={handleSizeCodeBlur}
                       placeholder="Size"
                       placeholderTextColor={subtitleColor}
                     />
@@ -492,6 +568,7 @@ export default function ReOrderLevelScreen() {
                       style={[styles.input, { color: textColor, borderColor, backgroundColor: isDark ? '#2A2A2A' : '#FFF' }]}
                       value={toSizeCode}
                       onChangeText={setToSizeCode}
+                      onBlur={handleToSizeCodeBlur}
                       placeholder="To Size"
                       placeholderTextColor={subtitleColor}
                     />
@@ -572,6 +649,47 @@ export default function ReOrderLevelScreen() {
             />
           </View>
         </View>
+      </Modal>
+
+      {/* Delete Confirmation Modal */}
+      <Modal visible={!!deleteConfirmItem} animationType="fade" transparent={true}>
+        <TouchableWithoutFeedback onPress={() => setDeleteConfirmItem(null)}>
+          <View style={styles.modalOverlay}>
+            <TouchableWithoutFeedback>
+              <View style={[styles.modalContent, { backgroundColor: cardColor, borderColor, maxWidth: 420, padding: 24 }]}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 16 }}>
+                  <Ionicons name="trash-outline" size={24} color="#C62828" style={{ marginRight: 10 }} />
+                  <ThemedText style={{ fontSize: 18, fontWeight: 'bold', color: textColor }}>Delete ReOrder Level</ThemedText>
+                </View>
+                <ThemedText style={{ color: textColor, fontSize: 14, marginBottom: 24, lineHeight: 22 }}>
+                  Do you want to delete{' '}
+                  <ThemedText style={{ fontWeight: 'bold' }}>
+                    {deleteConfirmItem?.CategoryCode ? deleteConfirmItem.CategoryCode.trim() : ''}
+                  </ThemedText>
+                  {' Catalogue?'}
+                </ThemedText>
+                <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 12 }}>
+                  <TouchableOpacity
+                    style={[styles.btn, styles.btnCancel]}
+                    onPress={() => setDeleteConfirmItem(null)}
+                  >
+                    <ThemedText style={{ color: '#666', fontWeight: '600' }}>Cancel</ThemedText>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.btn, { backgroundColor: '#C62828' }]}
+                    onPress={() => {
+                      const item = deleteConfirmItem;
+                      setDeleteConfirmItem(null);
+                      if (item) executeDelete(item);
+                    }}
+                  >
+                    <ThemedText style={{ color: '#FFF', fontWeight: '600' }}>Delete</ThemedText>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </TouchableWithoutFeedback>
+          </View>
+        </TouchableWithoutFeedback>
       </Modal>
 
     </SafeAreaView>

@@ -1,21 +1,21 @@
 import { ThemedText } from '@/components/themed-text';
 import { API_BASE_URL } from '@/constants/api';
-import { useThemeColors } from '@/hooks/useThemeColors';
 import { useThemeContext } from '@/contexts/ThemeContext';
+import { useThemeColors } from '@/hooks/useThemeColors';
 import { Ionicons } from '@expo/vector-icons';
 import { Stack, useRouter } from 'expo-router';
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  FlatList,
+  Modal,
   Platform,
   ScrollView,
   StyleSheet,
   TextInput,
   TouchableOpacity,
-  View,
-  Modal,
-  FlatList,
   TouchableWithoutFeedback,
+  View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -289,7 +289,7 @@ export default function JobSheetCostingScreen() {
         </View>
         <View style={{ flexDirection: 'row', gap: 8 }}>
           <TouchableOpacity style={styles.topActionBtn} onPress={() => handleClear(true)}>
-            <ThemedText style={{ color: '#5C4A28', fontSize: 12, fontWeight: 'bold' }}>Clear (F6)</ThemedText>
+            <ThemedText style={{ color: '#5C4A28', fontSize: 12, fontWeight: 'bold' }}>Clear</ThemedText>
           </TouchableOpacity>
           <TouchableOpacity
             style={[styles.topActionBtn, { backgroundColor: '#F9F2E2', borderColor: '#B8903B' }]}
@@ -297,7 +297,7 @@ export default function JobSheetCostingScreen() {
             disabled={saving}
           >
             <ThemedText style={{ color: '#9E6D08', fontSize: 12, fontWeight: 'bold' }}>
-              {saving ? "Saving..." : "Save (F7)"}
+              {saving ? "Saving..." : "Save"}
             </ThemedText>
           </TouchableOpacity>
         </View>

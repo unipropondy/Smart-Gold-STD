@@ -70,17 +70,44 @@ router.post("/", async (req, res) => {
         Remarks, SortOrder, ShowInReport, AllowSalesReturn 
     } = req.body;
 
-    if (!SalesManCode || !SalesManName) {
-      return res.status(400).json({ success: false, message: "SalesMan Code and Name are required." });
+    const trimmedCode = (SalesManCode || '').trim();
+    const trimmedName = (SalesManName || '').trim();
+    const trimmedGroup = (SalesManGroup || '').trim();
+    const nSortOrder = parseInt(SortOrder) || 0;
+
+    if (!trimmedCode) {
+      return res.status(400).json({ success: false, message: "SaleManCode should not be blank." });
     }
 
-    // Check if exists
+    if (!trimmedName) {
+      return res.status(400).json({ success: false, message: "SalesManName should not be blank." });
+    }
+
+    if (!trimmedGroup) {
+      return res.status(400).json({ success: false, message: "SalesManGroup should not be blank." });
+    }
+
+    if (nSortOrder === 0) {
+      return res.status(400).json({ success: false, message: "Sort Order Can Not Be Zero." });
+    }
+
+    // Check if SalesManCode already exists
     const checkResult = await pool.request()
-      .input('SalesManCode', sql.VarChar, SalesManCode)
-      .query("SELECT SalesManCode FROM tblSalesMan WHERE SalesManCode = @SalesManCode");
+      .input('SalesManCode', sql.VarChar, trimmedCode)
+      .query("SELECT SalesManCode FROM tblSalesMan WHERE UPPER(RTRIM(LTRIM(SalesManCode))) = UPPER(@SalesManCode)");
     
     if (checkResult.recordset.length > 0) {
       return res.status(400).json({ success: false, message: "SalesManCode already exists." });
+    }
+
+    // Check if SortOrder already exists (matching subSortOrderExists in frmSalesman.vb)
+    const checkSort = await pool.request()
+      .input('SalesManCode', sql.VarChar, trimmedCode)
+      .input('SortOrder', sql.Int, nSortOrder)
+      .query("SELECT SalesManCode FROM tblSalesMan WHERE UPPER(RTRIM(LTRIM(SalesManCode))) != UPPER(@SalesManCode) AND SortOrder = @SortOrder");
+
+    if (checkSort.recordset.length > 0) {
+      return res.status(400).json({ success: false, message: "Sort Order Already Exists." });
     }
 
     const insertQuery = `
@@ -94,20 +121,20 @@ router.post("/", async (req, res) => {
     `;
 
     await pool.request()
-      .input('SalesManCode', sql.VarChar, SalesManCode.substring(0, 50))
-      .input('SalesManName', sql.VarChar, SalesManName.substring(0, 100))
-      .input('Password', sql.VarChar, Password ? Password.substring(0, 100) : '')
-      .input('SalesManGroup', sql.VarChar, SalesManGroup ? SalesManGroup.substring(0, 50) : '')
-      .input('Remarks', sql.VarChar, Remarks ? Remarks.substring(0, 255) : '')
-      .input('SortOrder', sql.Int, parseInt(SortOrder) || 0)
+      .input('SalesManCode', sql.VarChar, trimmedCode.substring(0, 50))
+      .input('SalesManName', sql.VarChar, trimmedName.substring(0, 100))
+      .input('Password', sql.VarChar, Password ? Password.trim().substring(0, 100) : '')
+      .input('SalesManGroup', sql.VarChar, trimmedGroup.substring(0, 50))
+      .input('Remarks', sql.VarChar, Remarks ? Remarks.trim().substring(0, 255) : '')
+      .input('SortOrder', sql.Int, nSortOrder)
       .input('ShowInReport', sql.Int, ShowInReport ? 1 : 0)
       .input('AllowSalesReturn', sql.Int, AllowSalesReturn ? 1 : 0)
       .query(insertQuery);
 
-    res.json({ success: true, message: "Salesman created successfully." });
+    res.json({ success: true, message: "SalesMan detail saved sucssfully." });
   } catch (err) {
     console.error("Insert Salesman Error:", err);
-    res.status(500).json({ success: false, message: "Failed to create salesman", error: err.message });
+    res.status(500).json({ success: false, message: "Error in Save", error: err.message });
   }
 });
 
@@ -120,7 +147,36 @@ router.put("/", async (req, res) => {
         Remarks, SortOrder, ShowInReport, AllowSalesReturn 
     } = req.body;
     
-    if (!SalesManCode) return res.status(400).json({ success: false, message: "SalesMan Code is required" });
+    const trimmedCode = (SalesManCode || '').trim();
+    const trimmedName = (SalesManName || '').trim();
+    const trimmedGroup = (SalesManGroup || '').trim();
+    const nSortOrder = parseInt(SortOrder) || 0;
+
+    if (!trimmedCode) {
+      return res.status(400).json({ success: false, message: "SaleManCode should not be blank." });
+    }
+
+    if (!trimmedName) {
+      return res.status(400).json({ success: false, message: "SalesManName should not be blank." });
+    }
+
+    if (!trimmedGroup) {
+      return res.status(400).json({ success: false, message: "SalesManGroup should not be blank." });
+    }
+
+    if (nSortOrder === 0) {
+      return res.status(400).json({ success: false, message: "Sort Order Can Not Be Zero." });
+    }
+
+    // Check if SortOrder already exists on another salesman
+    const checkSort = await pool.request()
+      .input('SalesManCode', sql.VarChar, trimmedCode)
+      .input('SortOrder', sql.Int, nSortOrder)
+      .query("SELECT SalesManCode FROM tblSalesMan WHERE UPPER(RTRIM(LTRIM(SalesManCode))) != UPPER(@SalesManCode) AND SortOrder = @SortOrder");
+
+    if (checkSort.recordset.length > 0) {
+      return res.status(400).json({ success: false, message: "Sort Order Already Exists." });
+    }
 
     const updateQuery = `
       UPDATE tblSalesMan SET 
@@ -133,16 +189,16 @@ router.put("/", async (req, res) => {
         AllowSalesReturn = @AllowSalesReturn,
         ModifyUser = 'sys',
         ModifyDate = GETDATE()
-      WHERE SalesManCode = @SalesManCode
+      WHERE UPPER(RTRIM(LTRIM(SalesManCode))) = UPPER(@SalesManCode)
     `;
 
     const result = await pool.request()
-      .input('SalesManCode', sql.VarChar, SalesManCode)
-      .input('SalesManName', sql.VarChar, SalesManName ? SalesManName.substring(0, 100) : '')
-      .input('Password', sql.VarChar, Password ? Password.substring(0, 100) : '')
-      .input('SalesManGroup', sql.VarChar, SalesManGroup ? SalesManGroup.substring(0, 50) : '')
-      .input('Remarks', sql.VarChar, Remarks || '')
-      .input('SortOrder', sql.Int, parseInt(SortOrder) || 0)
+      .input('SalesManCode', sql.VarChar, trimmedCode)
+      .input('SalesManName', sql.VarChar, trimmedName ? trimmedName.substring(0, 100) : '')
+      .input('Password', sql.VarChar, Password ? Password.trim().substring(0, 100) : '')
+      .input('SalesManGroup', sql.VarChar, trimmedGroup ? trimmedGroup.substring(0, 50) : '')
+      .input('Remarks', sql.VarChar, Remarks ? Remarks.trim().substring(0, 255) : '')
+      .input('SortOrder', sql.Int, nSortOrder)
       .input('ShowInReport', sql.Int, ShowInReport ? 1 : 0)
       .input('AllowSalesReturn', sql.Int, AllowSalesReturn ? 1 : 0)
       .query(updateQuery);
@@ -151,10 +207,10 @@ router.put("/", async (req, res) => {
       return res.status(404).json({ success: false, message: "Salesman not found." });
     }
 
-    res.json({ success: true, message: "Salesman updated successfully." });
+    res.json({ success: true, message: "SalesMan detail saved sucssfully." });
   } catch (err) {
     console.error("Update Salesman Error:", err);
-    res.status(500).json({ success: false, message: "Failed to update salesman", error: err.message });
+    res.status(500).json({ success: false, message: "Error in Save", error: err.message });
   }
 });
 
@@ -163,22 +219,28 @@ router.delete("/", async (req, res) => {
   try {
     const pool = req.pool;
     const { id } = req.query;
-    console.log(`[DELETE] SalesMan Code requested: '${id}'`);
 
-    const deleteQuery = "DELETE FROM tblSalesMan WHERE SalesManCode = @SalesManCode";
+    if (!id || !id.trim()) {
+      return res.status(400).json({ success: false, message: "SalesMan Code is required." });
+    }
+
+    const trimmedCode = id.trim();
+    console.log(`[DELETE] SalesMan Code requested: '${trimmedCode}'`);
+
+    const deleteQuery = "DELETE FROM tblSalesMan WHERE UPPER(RTRIM(LTRIM(SalesManCode))) = UPPER(@SalesManCode)";
     const result = await pool.request()
-      .input('SalesManCode', sql.VarChar, id)
+      .input('SalesManCode', sql.VarChar, trimmedCode)
       .query(deleteQuery);
 
     console.log(`[DELETE] rowsAffected:`, result.rowsAffected);
     if (result.rowsAffected[0] === 0) {
-      return res.status(404).json({ success: false, message: "Salesman not found." });
+      return res.status(404).json({ success: false, message: "Error in deleting Salesman detail." });
     }
 
-    res.json({ success: true, message: "Salesman deleted successfully." });
+    res.json({ success: true, message: "SalesMan detail deleted." });
   } catch (err) {
     console.error("Delete Salesman Error:", err);
-    res.status(500).json({ success: false, message: "Failed to delete salesman", error: err.message });
+    res.status(500).json({ success: false, message: "Error in deleting Salesman detail.", error: err.message });
   }
 });
 

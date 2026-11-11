@@ -75,6 +75,7 @@ export default function SupplierScreen() {
   const [purchaseDetails, setPurchaseDetails] = useState<any[]>([]);
   const [selectedJobSheetNo, setSelectedJobSheetNo] = useState('');
   const [toast, setToast] = useState<{ message: string, type: 'success' | 'error' } | null>(null);
+  const [deleteConfirmCode, setDeleteConfirmCode] = useState<string | null>(null);
 
   const showToast = (message: string, type: 'success' | 'error' = 'success') => {
     setToast({ message, type });
@@ -149,15 +150,77 @@ export default function SupplierScreen() {
     fetchSuppliers();
   }, []);
 
+  const handleSupplierCodeBlur = async () => {
+    const trimmed = supplierCode.trim();
+    if (!trimmed) {
+      showToast('Please enter Supplier Code !', 'error');
+      return;
+    }
+    // Auto-load supplier details if not in editing mode
+    if (!isEditing) {
+      try {
+        const response = await fetch(`${API_URL}?code=${encodeURIComponent(trimmed)}&t=${Date.now()}`);
+        const json = await response.json();
+        if (json.success && json.data) {
+          selectSupplier(json.data);
+        }
+      } catch (e) {
+        console.error(e);
+      }
+    }
+  };
+
+  const handleSupplierNameBlur = () => {
+    if (!supplierName.trim()) {
+      showToast('Please enter Supplier Name !', 'error');
+    }
+  };
+
+  const handleAddress1Blur = () => {
+    if (!address1.trim()) {
+      showToast('Please enter Address !', 'error');
+    }
+  };
+
+  const handleTermsBlur = () => {
+    if (!terms.trim()) {
+      showToast('Terms should not be blank', 'error');
+    }
+  };
+
   const handleSave = async () => {
+    // Screen validation matching fnScreenValidate in frmSupplierMnt.vb
     if (!supplierCode || !supplierCode.trim()) {
-      showToast('Supplier Code is required', 'error');
+      showToast('Please enter Supplier Code !', 'error');
+      return;
+    }
+
+    if (!supplierName || !supplierName.trim()) {
+      showToast('Please enter Supplier Name !', 'error');
+      return;
+    }
+
+    if (!address1 || !address1.trim()) {
+      showToast('Please enter Address !', 'error');
+      return;
+    }
+
+    if (passportNo && passportNo.trim()) {
+      if (!dob || !dob.trim() || isNaN(new Date(dob.trim()).getTime())) {
+        showToast('Enter valid Date of Birth', 'error');
+        return;
+      }
+    }
+
+    // Terms validation matching frmSupplierMnt.vb: If (txtTerms.Text.Trim) <> "" Then
+    if (!terms || !terms.trim()) {
+      showToast('Terms should not be blank', 'error');
       return;
     }
 
     const payload = {
-      SupplierCode: supplierCode.trim(),
-      SupplierName: supplierName.trim(),
+      SupplierCode: supplierCode.trim().toUpperCase(),
+      SupplierName: supplierName.trim().toUpperCase(),
       Address1: address1.trim(),
       Address2: address2.trim(),
       Address3: address3.trim(),
@@ -191,51 +254,46 @@ export default function SupplierScreen() {
 
       const json = await response.json();
       if (json.success) {
-        showToast(`Supplier ${isEditing ? 'updated' : 'added'} successfully`, 'success');
+        showToast(json.message || 'Saved Successfully!', 'success');
+        handleClear();
         fetchSuppliers();
       } else {
-        showToast(json.message || 'Failed to save', 'error');
+        showToast(json.message || 'Error in Save/Update !', 'error');
       }
     } catch (error) {
       console.error('Save error:', error);
-      showToast('Failed to save supplier', 'error');
+      showToast('Error in Save/Update !', 'error');
     } finally {
       setSaving(false);
     }
   };
 
   const handleDelete = () => {
-    if (!supplierCode) return;
-    Alert.alert(
-      'Confirm Delete',
-      'Are you sure you want to delete this supplier?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: async () => {
-            setDeleting(true);
-            try {
-              const response = await fetch(`${API_URL}?id=${encodeURIComponent(supplierCode)}`, { method: 'DELETE' });
-              const json = await response.json();
-              if (json.success) {
-                showToast('Supplier deleted successfully', 'success');
-                handleClear();
-                fetchSuppliers();
-              } else {
-                showToast(json.message || 'Failed to delete', 'error');
-              }
-            } catch (error) {
-              console.error('Delete error:', error);
-              showToast('Failed to delete supplier', 'error');
-            } finally {
-              setDeleting(false);
-            }
-          },
-        },
-      ]
-    );
+    if (!supplierCode || !supplierCode.trim()) {
+      showToast('No Supplier to delete! ', 'error');
+      return;
+    }
+    setDeleteConfirmCode(supplierCode.trim());
+  };
+
+  const executeDelete = async (code: string) => {
+    setDeleting(true);
+    try {
+      const response = await fetch(`${API_URL}?id=${encodeURIComponent(code)}`, { method: 'DELETE' });
+      const json = await response.json();
+      if (json.success) {
+        showToast(json.message || 'Supplier deleted successfully', 'success');
+        handleClear();
+        fetchSuppliers();
+      } else {
+        showToast(json.message || 'Failed to delete', 'error');
+      }
+    } catch (error) {
+      console.error('Delete error:', error);
+      showToast('Failed to delete supplier', 'error');
+    } finally {
+      setDeleting(false);
+    }
   };
 
   const handleClear = () => {
@@ -414,9 +472,16 @@ export default function SupplierScreen() {
 
             <View style={{ padding: 12 }}>
               <View style={styles.row}>
-                <ThemedText style={styles.label}>Supplier Code</ThemedText>
+                <ThemedText style={styles.label}>Supplier Code *</ThemedText>
                 <View style={{ width: 160, flexDirection: 'row' }}>
-                  <TextInput style={[styles.input, { flex: 1, backgroundColor: cardColor, borderColor: borderColor, color: textColor }]} value={supplierCode} onChangeText={setSupplierCode} editable={!isEditing} />
+                  <TextInput
+                    style={[styles.input, { flex: 1, backgroundColor: cardColor, borderColor: borderColor, color: textColor }]}
+                    value={supplierCode}
+                    onChangeText={setSupplierCode}
+                    onBlur={handleSupplierCodeBlur}
+                    editable={!isEditing}
+                    autoCapitalize="characters"
+                  />
                   <TouchableOpacity style={[styles.lookupBtn, { backgroundColor: GOLD_COLOR, borderColor: GOLD_COLOR }]} onPress={() => setIsModalVisible(true)}>
                     <Ionicons name="search" size={12} color="#FFFFFF" />
                   </TouchableOpacity>
@@ -428,8 +493,14 @@ export default function SupplierScreen() {
               </View>
 
               <View style={styles.row}>
-                <ThemedText style={styles.label}>Supplier Name</ThemedText>
-                <TextInput style={[styles.input, { width: 160, backgroundColor: backgroundColor, borderColor: borderColor, color: textColor }]} value={supplierName} onChangeText={setSupplierName} />
+                <ThemedText style={styles.label}>Supplier Name *</ThemedText>
+                <TextInput
+                  style={[styles.input, { width: 160, backgroundColor: backgroundColor, borderColor: borderColor, color: textColor }]}
+                  value={supplierName}
+                  onChangeText={setSupplierName}
+                  onBlur={handleSupplierNameBlur}
+                  autoCapitalize="characters"
+                />
                 <ThemedText style={[styles.label, { width: 80, marginLeft: 32 }]}>Web Page</ThemedText>
                 <TextInput style={[styles.input, { flex: 1, minWidth: 150, backgroundColor: backgroundColor, borderColor: borderColor, color: textColor }]} value={url} onChangeText={setUrl} autoCapitalize="none" />
                 <ThemedText style={[styles.label, { width: 100, marginLeft: 20 }]}>GL Account 2</ThemedText>
@@ -437,12 +508,22 @@ export default function SupplierScreen() {
               </View>
 
               <View style={styles.row}>
-                <ThemedText style={styles.label}>Address</ThemedText>
-                <TextInput style={[styles.input, { width: 160, backgroundColor: backgroundColor, borderColor: borderColor, color: textColor }]} value={address1} onChangeText={setAddress1} />
+                <ThemedText style={styles.label}>Address *</ThemedText>
+                <TextInput
+                  style={[styles.input, { width: 160, backgroundColor: backgroundColor, borderColor: borderColor, color: textColor }]}
+                  value={address1}
+                  onChangeText={setAddress1}
+                  onBlur={handleAddress1Blur}
+                />
                 <ThemedText style={[styles.label, { width: 80, marginLeft: 32 }]}>Phone 1</ThemedText>
                 <TextInput style={[styles.input, { flex: 1, minWidth: 150, backgroundColor: backgroundColor, borderColor: borderColor, color: textColor }]} value={phone1} onChangeText={setPhone1} keyboardType="phone-pad" />
-                <ThemedText style={[styles.label, { width: 100, marginLeft: 20 }]}>Terms</ThemedText>
-                <TextInput style={[styles.input, { width: 220, backgroundColor: backgroundColor, borderColor: borderColor, color: textColor }]} value={terms} onChangeText={setTerms} />
+                <ThemedText style={[styles.label, { width: 100, marginLeft: 20 }]}>Terms *</ThemedText>
+                <TextInput
+                  style={[styles.input, { width: 220, backgroundColor: backgroundColor, borderColor: borderColor, color: textColor }]}
+                  value={terms}
+                  onChangeText={setTerms}
+                  onBlur={handleTermsBlur}
+                />
               </View>
 
               <View style={styles.row}>
@@ -685,8 +766,49 @@ export default function SupplierScreen() {
         </TouchableWithoutFeedback>
       </Modal>
 
+      {/* Delete Confirmation Modal */}
+      <Modal visible={!!deleteConfirmCode} animationType="fade" transparent={true} onRequestClose={() => setDeleteConfirmCode(null)}>
+        <TouchableWithoutFeedback onPress={() => setDeleteConfirmCode(null)}>
+          <View style={styles.modalOverlay}>
+            <TouchableWithoutFeedback>
+              <View style={[styles.modalContainer, { backgroundColor: cardColor, borderColor, maxWidth: 420, padding: 24 }]}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 16 }}>
+                  <Ionicons name="trash-outline" size={24} color="#C62828" style={{ marginRight: 10 }} />
+                  <ThemedText style={{ fontSize: 18, fontWeight: 'bold', color: textColor }}>Delete Supplier</ThemedText>
+                </View>
+                <ThemedText style={{ color: textColor, fontSize: 14, marginBottom: 24, lineHeight: 22 }}>
+                  {`Do you want to Delete ?`}
+                  <ThemedText style={{ fontWeight: 'bold' }}>{deleteConfirmCode || ''}</ThemedText>
+                </ThemedText>
+                <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 12 }}>
+                  <TouchableOpacity
+                    style={[styles.actionBtn, { backgroundColor: 'transparent', borderColor: '#CCC' }]}
+                    onPress={() => setDeleteConfirmCode(null)}
+                  >
+                    <ThemedText style={{ color: '#666', fontWeight: '600' }}>Cancel</ThemedText>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.actionBtn, { backgroundColor: '#C62828', borderColor: '#C62828' }]}
+                    onPress={() => {
+                      const code = deleteConfirmCode;
+                      setDeleteConfirmCode(null);
+                      if (code) executeDelete(code);
+                    }}
+                  >
+                    <ThemedText style={{ color: '#FFF', fontWeight: '600' }}>Delete</ThemedText>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </TouchableWithoutFeedback>
+          </View>
+        </TouchableWithoutFeedback>
+      </Modal>
+
       {toast && (
-        <View style={[styles.toast, { backgroundColor: toast.type === 'success' ? '#10B981' : '#EF4444' }]}>
+        <View
+          pointerEvents="none"
+          style={[styles.toast, { backgroundColor: toast.type === 'success' ? '#2E7D32' : '#C62828' }]}
+        >
           <Ionicons
             name={toast.type === 'success' ? 'checkmark-circle' : 'alert-circle'}
             size={18}
@@ -863,20 +985,18 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: Platform.OS === 'web' ? 20 : 50,
     alignSelf: 'center',
-    minWidth: 250,
-    maxWidth: '90%',
-    paddingVertical: 12,
+    paddingVertical: 10,
     paddingHorizontal: 16,
-    borderRadius: 24,
-    zIndex: 9999,
+    borderRadius: 8,
+    zIndex: 999999,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 3 },
+    shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.25,
-    shadowRadius: 4,
-    elevation: 6,
+    shadowRadius: 3.84,
+    elevation: 20,
   },
   toastText: {
     color: '#FFF',

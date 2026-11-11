@@ -2,14 +2,46 @@ const express = require("express");
 const router = express.Router();
 const { sql } = require("../db");
 
-// GET all suppliers
+// GET all suppliers or supplier by code
 router.get("/", async (req, res) => {
   try {
     const pool = req.pool;
+    const { code } = req.query;
+
+    if (code) {
+      const result = await pool.request()
+        .input('SupplierCode', sql.VarChar, code.trim())
+        .query("SELECT * FROM tblSupplier WHERE SupplierCode = @SupplierCode");
+      if (result.recordset.length > 0) {
+        return res.json({ success: true, data: result.recordset[0] });
+      } else {
+        return res.status(404).json({ success: false, message: "Invalid supplier code!" });
+      }
+    }
+
     const result = await pool.request().query("SELECT * FROM tblSupplier ORDER BY SupplierCode ASC");
     res.json({ success: true, data: result.recordset });
   } catch (err) {
     console.error("Fetch Supplier Error:", err);
+    res.status(500).json({ success: false, message: "Server error", error: err.message });
+  }
+});
+
+// GET supplier by supplier code (/api/supplier/:code)
+router.get("/by-code/:code", async (req, res) => {
+  try {
+    const pool = req.pool;
+    const { code } = req.params;
+    const result = await pool.request()
+      .input('SupplierCode', sql.VarChar, (code || '').trim())
+      .query("SELECT * FROM tblSupplier WHERE SupplierCode = @SupplierCode");
+    if (result.recordset.length > 0) {
+      return res.json({ success: true, data: result.recordset[0] });
+    } else {
+      return res.status(404).json({ success: false, message: "Invalid supplier code!" });
+    }
+  } catch (err) {
+    console.error("Fetch Supplier By Code Error:", err);
     res.status(500).json({ success: false, message: "Server error", error: err.message });
   }
 });
@@ -24,13 +56,34 @@ router.post("/", async (req, res) => {
         GLAccount1, GLAccount2, Remarks, GSTType, NRICNo, Gender, PassportNo, DOB 
     } = req.body;
 
-    if (!SupplierCode) {
-      return res.status(400).json({ success: false, message: "Supplier Code is required." });
+    if (!SupplierCode || !SupplierCode.trim()) {
+      return res.status(400).json({ success: false, message: "Please enter Supplier Code !" });
+    }
+
+    if (!SupplierName || !SupplierName.trim()) {
+      return res.status(400).json({ success: false, message: "Please enter Supplier Name !" });
+    }
+
+    if (!Address1 || !Address1.trim()) {
+      return res.status(400).json({ success: false, message: "Please enter Address !" });
+    }
+
+    if (PassportNo && PassportNo.trim()) {
+      if (DOB) {
+        const d = new Date(DOB);
+        if (isNaN(d.getTime())) {
+          return res.status(400).json({ success: false, message: "Enter valid Date of Birth" });
+        }
+      }
+    }
+
+    if (!Terms || !Terms.trim()) {
+      return res.status(400).json({ success: false, message: "Terms should not be blank" });
     }
 
     // Check if exists
     const checkResult = await pool.request()
-      .input('SupplierCode', sql.VarChar, SupplierCode)
+      .input('SupplierCode', sql.VarChar, SupplierCode.trim())
       .query("SELECT SupplierCode FROM tblSupplier WHERE SupplierCode = @SupplierCode");
     
     if (checkResult.recordset.length > 0) {
@@ -52,29 +105,29 @@ router.post("/", async (req, res) => {
     `;
 
     const request = pool.request()
-      .input('SupplierCode', sql.VarChar, SupplierCode)
-      .input('SupplierName', sql.VarChar, SupplierName || '')
-      .input('Address1', sql.VarChar, Address1 || '')
-      .input('Address2', sql.VarChar, Address2 || '')
-      .input('Address3', sql.VarChar, Address3 || '')
-      .input('Address4', sql.VarChar, Address4 || '')
-      .input('Phone1', sql.VarChar, Phone1 || '')
-      .input('Phone2', sql.VarChar, Phone2 || '')
-      .input('Mobile', sql.VarChar, Mobile || '')
-      .input('Fax', sql.VarChar, Fax || '')
-      .input('eMail', sql.VarChar, eMail || '')
-      .input('Url', sql.VarChar, Url || '')
-      .input('Terms', sql.VarChar, Terms || '')
-      .input('AccountType', sql.VarChar, AccountType || '')
-      .input('GLAccount1', sql.VarChar, GLAccount1 || '')
-      .input('GLAccount2', sql.VarChar, GLAccount2 || '')
-      .input('Remarks', sql.VarChar, Remarks || '')
-      .input('GSTType', sql.VarChar, GSTType || '')
-      .input('NRICNo', sql.VarChar, NRICNo || '')
-      .input('Gender', sql.VarChar, Gender || '')
-      .input('PassportNo', sql.VarChar, PassportNo || '');
+      .input('SupplierCode', sql.VarChar, SupplierCode.trim())
+      .input('SupplierName', sql.VarChar, (SupplierName || '').trim())
+      .input('Address1', sql.VarChar, (Address1 || '').trim())
+      .input('Address2', sql.VarChar, (Address2 || '').trim())
+      .input('Address3', sql.VarChar, (Address3 || '').trim())
+      .input('Address4', sql.VarChar, (Address4 || '').trim())
+      .input('Phone1', sql.VarChar, (Phone1 || '').trim())
+      .input('Phone2', sql.VarChar, (Phone2 || '').trim())
+      .input('Mobile', sql.VarChar, (Mobile || '').trim())
+      .input('Fax', sql.VarChar, (Fax || '').trim())
+      .input('eMail', sql.VarChar, (eMail || '').trim())
+      .input('Url', sql.VarChar, (Url || '').trim())
+      .input('Terms', sql.VarChar, (Terms || '').trim())
+      .input('AccountType', sql.VarChar, (AccountType || '').trim())
+      .input('GLAccount1', sql.VarChar, (GLAccount1 || '').trim())
+      .input('GLAccount2', sql.VarChar, (GLAccount2 || '').trim())
+      .input('Remarks', sql.VarChar, (Remarks || '').trim())
+      .input('GSTType', sql.VarChar, (GSTType || '').trim())
+      .input('NRICNo', sql.VarChar, (NRICNo || '').trim())
+      .input('Gender', sql.VarChar, (Gender || '').trim())
+      .input('PassportNo', sql.VarChar, (PassportNo || '').trim());
 
-    if (DOB) {
+    if (DOB && DOB.trim()) {
         request.input('DOB', sql.DateTime, new Date(DOB));
     } else {
         request.input('DOB', sql.DateTime, null);
@@ -82,10 +135,10 @@ router.post("/", async (req, res) => {
 
     await request.query(insertQuery);
 
-    res.json({ success: true, message: "Supplier created successfully." });
+    res.json({ success: true, message: "Saved Successfully!" });
   } catch (err) {
     console.error("Insert Supplier Error:", err);
-    res.status(500).json({ success: false, message: "Failed to create supplier", error: err.message });
+    res.status(500).json({ success: false, message: "Error in Save/Update !", error: err.message });
   }
 });
 
@@ -99,7 +152,30 @@ router.put("/", async (req, res) => {
         GLAccount1, GLAccount2, Remarks, GSTType, NRICNo, Gender, PassportNo, DOB 
     } = req.body;
     
-    if (!SupplierCode) return res.status(400).json({ success: false, message: "Supplier Code is required" });
+    if (!SupplierCode || !SupplierCode.trim()) {
+      return res.status(400).json({ success: false, message: "Please enter Supplier Code !" });
+    }
+
+    if (!SupplierName || !SupplierName.trim()) {
+      return res.status(400).json({ success: false, message: "Please enter Supplier Name !" });
+    }
+
+    if (!Address1 || !Address1.trim()) {
+      return res.status(400).json({ success: false, message: "Please enter Address !" });
+    }
+
+    if (PassportNo && PassportNo.trim()) {
+      if (DOB) {
+        const d = new Date(DOB);
+        if (isNaN(d.getTime())) {
+          return res.status(400).json({ success: false, message: "Enter valid Date of Birth" });
+        }
+      }
+    }
+
+    if (!Terms || !Terms.trim()) {
+      return res.status(400).json({ success: false, message: "Terms should not be blank" });
+    }
 
     const updateQuery = `
       UPDATE tblSupplier SET 
@@ -130,29 +206,29 @@ router.put("/", async (req, res) => {
     `;
 
     const request = pool.request()
-      .input('SupplierCode', sql.VarChar, SupplierCode)
-      .input('SupplierName', sql.VarChar, SupplierName || '')
-      .input('Address1', sql.VarChar, Address1 || '')
-      .input('Address2', sql.VarChar, Address2 || '')
-      .input('Address3', sql.VarChar, Address3 || '')
-      .input('Address4', sql.VarChar, Address4 || '')
-      .input('Phone1', sql.VarChar, Phone1 || '')
-      .input('Phone2', sql.VarChar, Phone2 || '')
-      .input('Mobile', sql.VarChar, Mobile || '')
-      .input('Fax', sql.VarChar, Fax || '')
-      .input('eMail', sql.VarChar, eMail || '')
-      .input('Url', sql.VarChar, Url || '')
-      .input('Terms', sql.VarChar, Terms || '')
-      .input('AccountType', sql.VarChar, AccountType || '')
-      .input('GLAccount1', sql.VarChar, GLAccount1 || '')
-      .input('GLAccount2', sql.VarChar, GLAccount2 || '')
-      .input('Remarks', sql.VarChar, Remarks || '')
-      .input('GSTType', sql.VarChar, GSTType || '')
-      .input('NRICNo', sql.VarChar, NRICNo || '')
-      .input('Gender', sql.VarChar, Gender || '')
-      .input('PassportNo', sql.VarChar, PassportNo || '');
+      .input('SupplierCode', sql.VarChar, SupplierCode.trim())
+      .input('SupplierName', sql.VarChar, (SupplierName || '').trim())
+      .input('Address1', sql.VarChar, (Address1 || '').trim())
+      .input('Address2', sql.VarChar, (Address2 || '').trim())
+      .input('Address3', sql.VarChar, (Address3 || '').trim())
+      .input('Address4', sql.VarChar, (Address4 || '').trim())
+      .input('Phone1', sql.VarChar, (Phone1 || '').trim())
+      .input('Phone2', sql.VarChar, (Phone2 || '').trim())
+      .input('Mobile', sql.VarChar, (Mobile || '').trim())
+      .input('Fax', sql.VarChar, (Fax || '').trim())
+      .input('eMail', sql.VarChar, (eMail || '').trim())
+      .input('Url', sql.VarChar, (Url || '').trim())
+      .input('Terms', sql.VarChar, (Terms || '').trim())
+      .input('AccountType', sql.VarChar, (AccountType || '').trim())
+      .input('GLAccount1', sql.VarChar, (GLAccount1 || '').trim())
+      .input('GLAccount2', sql.VarChar, (GLAccount2 || '').trim())
+      .input('Remarks', sql.VarChar, (Remarks || '').trim())
+      .input('GSTType', sql.VarChar, (GSTType || '').trim())
+      .input('NRICNo', sql.VarChar, (NRICNo || '').trim())
+      .input('Gender', sql.VarChar, (Gender || '').trim())
+      .input('PassportNo', sql.VarChar, (PassportNo || '').trim());
       
-    if (DOB) {
+    if (DOB && DOB.trim()) {
         request.input('DOB', sql.DateTime, new Date(DOB));
     } else {
         request.input('DOB', sql.DateTime, null);
@@ -161,13 +237,13 @@ router.put("/", async (req, res) => {
     const result = await request.query(updateQuery);
 
     if (result.rowsAffected[0] === 0) {
-      return res.status(404).json({ success: false, message: "Supplier not found." });
+      return res.status(404).json({ success: false, message: "No such user!" });
     }
 
-    res.json({ success: true, message: "Supplier updated successfully." });
+    res.json({ success: true, message: "Saved Successfully!" });
   } catch (err) {
     console.error("Update Supplier Error:", err);
-    res.status(500).json({ success: false, message: "Failed to update supplier", error: err.message });
+    res.status(500).json({ success: false, message: "Error in Save/Update !", error: err.message });
   }
 });
 
@@ -177,16 +253,32 @@ router.delete("/", async (req, res) => {
     const pool = req.pool;
     const { id } = req.query;
 
-    if (!id) return res.status(400).json({ success: false, message: "Supplier Code required" });
+    if (!id || !id.trim()) {
+      return res.status(400).json({ success: false, message: "No Supplier to delete! " });
+    }
+
+    const supplierCode = id.trim();
+
+    // Check if supplier has transactions (matches fncGetSupplierTran: "Select * from tblInventory where SupplierCode=...")
+    const tranCheck = await pool.request()
+      .input('SupplierCode', sql.VarChar, supplierCode)
+      .query("SELECT TOP 1 1 FROM tblInventory WHERE SupplierCode = @SupplierCode");
+
+    if (tranCheck.recordset.length > 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Can Not Delete Supplier , Beacuse This Supplier Is Having Some Transaction"
+      });
+    }
 
     const deleteQuery = "DELETE FROM tblSupplier WHERE SupplierCode = @SupplierCode";
     
     const result = await pool.request()
-      .input('SupplierCode', sql.VarChar, id)
+      .input('SupplierCode', sql.VarChar, supplierCode)
       .query(deleteQuery);
 
     if (result.rowsAffected[0] === 0) {
-      return res.status(404).json({ success: false, message: "Supplier not found" });
+      return res.status(404).json({ success: false, message: "No such user!" });
     }
 
     res.json({ success: true, message: "Supplier deleted successfully." });

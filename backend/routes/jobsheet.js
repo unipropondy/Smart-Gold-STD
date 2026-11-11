@@ -156,14 +156,28 @@ router.get("/:jobSheetNo", async (req, res) => {
     const inventoryResult = await pool.request()
       .input("JobSheetNo", sql.VarChar, jobSheetNo)
       .query(`
-        SELECT * FROM tblInventory WHERE JobSheetNo = @JobSheetNo
+        SELECT a.*, b.PCS, b.TotalCost, b.MC, b.PurchaseType, b.GoldLoss, b.Weight AS PurchaseWeight, b.CostPerGram AS PurchaseCostPerGram
+        FROM tblInventory a
+        INNER JOIN tblPurchase b ON a.JobSheetNo = b.JobSheetNo AND a.InventoryCode = b.InventoryCode
+        WHERE a.JobSheetNo = @JobSheetNo
+        ORDER BY a.InventoryCode ASC
       `);
+
+    // If no direct purchase joined rows exist, fallback to tblInventory by JobSheetNo
+    let purchaseDetails = inventoryResult.recordset;
+    if (purchaseDetails.length === 0) {
+      const invFallback = await pool.request()
+        .input("JobSheetNo", sql.VarChar, jobSheetNo)
+        .query(`SELECT * FROM tblInventory WHERE JobSheetNo = @JobSheetNo ORDER BY InventoryCode ASC`);
+      purchaseDetails = invFallback.recordset;
+    }
 
     return res.status(200).json({
       success: true,
       header: headerResult.recordset[0],
       details: processedDetails,
-      inventory: inventoryResult.recordset
+      purchaseDetails: purchaseDetails,
+      inventory: purchaseDetails
     });
   } catch (err) {
     console.error("🔥 GET JOBSHEET ERROR:", err);
@@ -197,6 +211,55 @@ router.post("/", async (req, res) => {
 
     if (!header || !header.JobSheetNo) {
       return res.status(400).json({ success: false, message: "JobSheetNo is required in header" });
+    }
+
+    if (!header.SupplierCode || !header.SupplierCode.trim()) {
+      return res.status(400).json({ success: false, message: "Enter supplier code." });
+    }
+
+    // Verify SupplierCode exists in tblSupplier
+    const supCheck = await pool.request()
+      .input('SupplierCode', sql.VarChar, header.SupplierCode.trim())
+      .query("SELECT 1 FROM tblSupplier WHERE SupplierCode = @SupplierCode");
+    if (supCheck.recordset.length === 0) {
+      return res.status(400).json({ success: false, message: "Invalid supplier code!" });
+    }
+
+    const currencyCode = (header.CurrencyCode || '').trim();
+    if (!currencyCode) {
+      return res.status(400).json({ success: false, message: "Enter currency code." });
+    }
+
+    // Verify CurrencyCode exists in tblCurrency
+    const currCheck = await pool.request()
+      .input('CurrencyCode', sql.VarChar, currencyCode)
+      .query("SELECT 1 FROM tblCurrency WHERE CurrencyCode = @CurrencyCode");
+    if (currCheck.recordset.length === 0) {
+      return res.status(400).json({ success: false, message: "Set Default Currency in Currency Master" });
+    }
+
+    const currRate = parseFloat(header.CurrencyRate) || 0;
+    if (currRate <= 0) {
+      return res.status(400).json({ success: false, message: "Enter currency rate." });
+    }
+
+    if (!header.PaymentType || !['G', 'C', 'B'].includes(header.PaymentType.substring(0, 1))) {
+      return res.status(400).json({ success: false, message: "Select payment type." });
+    }
+
+    const tealPercent = parseFloat(header.TaelPercent) || 0;
+    if (tealPercent <= 0) {
+      return res.status(400).json({ success: false, message: "Enter TEAL Percent." });
+    }
+
+    const tealRate = parseFloat(header.TaelRate) || 0;
+    if (tealRate <= 0) {
+      return res.status(400).json({ success: false, message: "Enter teal." });
+    }
+
+    const costPerGram = parseFloat(header.CostPerGram) || 0;
+    if (costPerGram <= 0) {
+      return res.status(400).json({ success: false, message: "Enter cost per gram." });
     }
 
     const { JobSheetNo } = header;

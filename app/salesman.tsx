@@ -37,6 +37,7 @@ export default function SalesmanScreen() {
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
+  const [deleteConfirmCode, setDeleteConfirmCode] = useState<string | null>(null);
 
   const showSuccess = (msg: string) => {
     setSuccessMsg(msg);
@@ -102,19 +103,78 @@ export default function SalesmanScreen() {
     fetchGroups();
   }, []);
 
+  const handleSalesManCodeBlur = () => {
+    const trimmed = (salesManCode || '').trim();
+    if (!trimmed) {
+      showError('SaleManCode should not be blank.');
+    }
+  };
+
+  const handleSalesManNameBlur = () => {
+    const trimmed = (salesManName || '').trim();
+    if (!trimmed) {
+      showError('SalesManName should not be blank.');
+    }
+  };
+
+  const handleSalesManGroupBlur = () => {
+    const trimmed = (salesManGroup || '').trim();
+    if (!trimmed) {
+      showError('SalesManGroup should not be blank.');
+    }
+  };
+
+  const handleSortOrderBlur = () => {
+    const n = parseInt(sortOrder) || 0;
+    if (n === 0) {
+      showError('Sort Order Can Not Be Zero.');
+    }
+  };
+
   const handleSave = async () => {
-    if (!salesManCode || !salesManCode.trim() || !salesManName || !salesManName.trim()) {
-      showError('SalesMan Code and Name are required');
+    // Validation matching ValidateMe() in frmSalesman.vb
+    const trimmedCode = (salesManCode || '').trim();
+    const trimmedName = (salesManName || '').trim();
+    const trimmedGroup = (salesManGroup || '').trim();
+    const nSortOrder = parseInt(sortOrder) || 0;
+
+    if (!trimmedCode) {
+      showError('SaleManCode should not be blank.');
+      return;
+    }
+
+    if (!trimmedName) {
+      showError('SalesManName should not be blank.');
+      return;
+    }
+
+    if (!trimmedGroup) {
+      showError('SalesManGroup should not be blank.');
+      return;
+    }
+
+    if (nSortOrder === 0) {
+      showError('Sort Order Can Not Be Zero.');
+      return;
+    }
+
+    // Check sort order conflict locally before saving
+    const existingConflict = data.find((s: any) =>
+      (s.SalesManCode || '').trim().toUpperCase() !== trimmedCode.toUpperCase() &&
+      (parseInt(s.SortOrder) || 0) === nSortOrder
+    );
+    if (existingConflict) {
+      showError('Sort Order Already Exists.');
       return;
     }
 
     const payload = {
-      SalesManCode: salesManCode.trim(),
-      SalesManName: salesManName.trim(),
+      SalesManCode: trimmedCode.toUpperCase(),
+      SalesManName: trimmedName,
       Password: password.trim(),
-      SalesManGroup: salesManGroup.trim(),
+      SalesManGroup: trimmedGroup,
       Remarks: remarks.trim(),
-      SortOrder: parseInt(sortOrder) || 0,
+      SortOrder: nSortOrder,
       ShowInReport: showInReport,
       AllowSalesReturn: allowSalesReturn,
     };
@@ -130,15 +190,15 @@ export default function SalesmanScreen() {
 
       const json = await response.json();
       if (json.success) {
-        showSuccess(`Salesman ${isEditing ? 'updated' : 'added'} successfully`);
+        showSuccess(json.message || 'SalesMan detail saved sucssfully.');
         setIsModalVisible(false);
         fetchSalesmen();
       } else {
-        showError(json.message || 'Failed to save');
+        showError(json.message || 'Error in Save');
       }
     } catch (error) {
       console.error('Save error:', error);
-      showError('Failed to save salesman');
+      showError('Error in Save');
     } finally {
       setSaving(false);
     }
@@ -150,30 +210,21 @@ export default function SalesmanScreen() {
       const response = await fetch(`${API_URL}?id=${encodeURIComponent(code)}`, { method: 'DELETE' });
       const json = await response.json();
       if (json.success) {
-        showSuccess('Salesman deleted successfully');
+        showSuccess(json.message || 'SalesMan detail deleted.');
         fetchSalesmen();
       } else {
-        showError(json.message || 'Failed to delete');
+        showError(json.message || 'Error in deleting Salesman detail.');
       }
     } catch (error) {
       console.error('Delete error:', error);
-      showError('Failed to delete salesman');
+      showError('Error in deleting Salesman detail.');
     } finally {
       setDeletingId(null);
     }
   };
 
   const handleDelete = (code: string) => {
-    if (Platform.OS === 'web') {
-      if (window.confirm(`Are you sure you want to delete Salesman ${code}?`)) {
-        executeDelete(code);
-      }
-    } else {
-      Alert.alert('Confirm Delete', `Are you sure you want to delete Salesman ${code}?`, [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Delete', style: 'destructive', onPress: () => executeDelete(code) },
-      ]);
-    }
+    setDeleteConfirmCode(code);
   };
 
   const openAddModal = () => {
@@ -235,7 +286,16 @@ export default function SalesmanScreen() {
     if (!successMsg && !errorMsg) return null;
     const isError = !!errorMsg;
     return (
-      <View style={[styles.toast, { backgroundColor: isError ? '#F44336' : '#4CAF50' }]}>
+      <View
+        pointerEvents="none"
+        style={[styles.toast, isError ? styles.toastError : styles.toastSuccess]}
+      >
+        <Ionicons
+          name={isError ? 'alert-circle' : 'checkmark-circle'}
+          size={16}
+          color="#FFFFFF"
+          style={{ marginRight: 6 }}
+        />
         <ThemedText style={styles.toastText}>{isError ? errorMsg : successMsg}</ThemedText>
       </View>
     );
@@ -244,7 +304,7 @@ export default function SalesmanScreen() {
   return (
     <SafeAreaView style={[styles.safeArea, { backgroundColor }]} edges={['top']}>
       <Stack.Screen options={{ headerShown: false }} />
-      {!(isModalVisible || isGroupLookupVisible) && renderToast()}
+      {!(isModalVisible || isGroupLookupVisible || deleteConfirmCode) && renderToast()}
       {/* Header */}
       <View style={[styles.header, { borderBottomColor: borderColor }]}>
         <View style={{ flexDirection: 'row', alignItems: 'center' }}>
@@ -311,8 +371,10 @@ export default function SalesmanScreen() {
                     <TextInput
                       style={[styles.input, { color: textColor, borderColor, backgroundColor: isDark ? '#2A2A2A' : '#FFF' }, isEditing && { backgroundColor: isDark ? '#333' : '#F0F0F0', color: subtitleColor }]}
                       value={salesManCode}
-                      onChangeText={setSalesManCode}
+                      onChangeText={(t) => setSalesManCode(t.toUpperCase())}
+                      onBlur={handleSalesManCodeBlur}
                       editable={!isEditing}
+                      autoCapitalize="characters"
                       placeholder="Enter Salesman Code"
                       placeholderTextColor={subtitleColor}
                     />
@@ -324,6 +386,7 @@ export default function SalesmanScreen() {
                       style={[styles.input, { color: textColor, borderColor, backgroundColor: isDark ? '#2A2A2A' : '#FFF' }]}
                       value={salesManName}
                       onChangeText={setSalesManName}
+                      onBlur={handleSalesManNameBlur}
                       placeholder="Enter Salesman Name"
                       placeholderTextColor={subtitleColor}
                     />
@@ -342,12 +405,13 @@ export default function SalesmanScreen() {
                   </View>
 
                   <View style={styles.inputGroup}>
-                    <ThemedText style={[styles.label, { color: subtitleColor }]}>SalesMan Group</ThemedText>
+                    <ThemedText style={[styles.label, { color: subtitleColor }]}>SalesMan Group *</ThemedText>
                     <View style={styles.lookupContainer}>
                       <TextInput
                         style={[styles.input, { color: textColor, borderColor, backgroundColor: isDark ? '#2A2A2A' : '#FFF' }]}
                         value={salesManGroup}
                         onChangeText={setSalesManGroup}
+                        onBlur={handleSalesManGroupBlur}
                         placeholder="Enter Group (e.g. ADMIN)"
                         placeholderTextColor={subtitleColor}
                       />
@@ -369,11 +433,12 @@ export default function SalesmanScreen() {
                   </View>
                   
                   <View style={styles.inputGroup}>
-                    <ThemedText style={[styles.label, { color: subtitleColor }]}>Sort Order</ThemedText>
+                    <ThemedText style={[styles.label, { color: subtitleColor }]}>Sort Order *</ThemedText>
                     <TextInput
                       style={[styles.input, { color: textColor, borderColor, backgroundColor: isDark ? '#2A2A2A' : '#FFF' }]}
                       value={sortOrder}
                       onChangeText={setSortOrder}
+                      onBlur={handleSortOrderBlur}
                       keyboardType="numeric"
                       placeholder="Sort Order"
                       placeholderTextColor={subtitleColor}
@@ -460,6 +525,46 @@ export default function SalesmanScreen() {
             />
           </View>
         </View>
+      </Modal>
+
+      {/* Delete Confirmation Modal */}
+      <Modal visible={!!deleteConfirmCode} animationType="fade" transparent={true}>
+        <TouchableWithoutFeedback onPress={() => setDeleteConfirmCode(null)}>
+          <View style={styles.modalOverlay}>
+            <TouchableWithoutFeedback>
+              <View style={[styles.modalContent, { backgroundColor: cardColor, borderColor, maxWidth: 420, padding: 24 }]}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 16 }}>
+                  <Ionicons name="trash-outline" size={24} color="#C62828" style={{ marginRight: 10 }} />
+                  <ThemedText style={{ fontSize: 18, fontWeight: 'bold', color: textColor }}>Delete Salesman</ThemedText>
+                </View>
+                <ThemedText style={{ color: textColor, fontSize: 14, marginBottom: 24, lineHeight: 22 }}>
+                  {`Do you want to delete `}
+                  <ThemedText style={{ fontWeight: 'bold' }}>{deleteConfirmCode || ''}</ThemedText>
+                  {` SalesMan?`}
+                </ThemedText>
+                <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 12 }}>
+                  <TouchableOpacity
+                    style={[styles.btn, styles.btnCancel]}
+                    onPress={() => setDeleteConfirmCode(null)}
+                  >
+                    <ThemedText style={{ color: '#666', fontWeight: '600' }}>Cancel</ThemedText>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.btn, { backgroundColor: '#C62828' }]}
+                    onPress={() => {
+                      const code = deleteConfirmCode;
+                      setDeleteConfirmCode(null);
+                      if (code) executeDelete(code);
+                    }}
+                  >
+                    <ThemedText style={{ color: '#FFF', fontWeight: '600' }}>Delete</ThemedText>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </TouchableWithoutFeedback>
+          </View>
+        </TouchableWithoutFeedback>
+        {renderToast()}
       </Modal>
 
     </SafeAreaView>
@@ -592,22 +697,27 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: Platform.OS === 'web' ? 20 : 50,
     alignSelf: 'center',
-    minWidth: 250,
-    maxWidth: '90%',
-    padding: 15,
-    borderRadius: 8,
-    zIndex: 9999,
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 8,
+    zIndex: 999999,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.25,
     shadowRadius: 3.84,
-    elevation: 5,
+    elevation: 20,
+  },
+  toastSuccess: {
+    backgroundColor: '#2E7D32',
+  },
+  toastError: {
+    backgroundColor: '#C62828',
   },
   toastText: {
-    color: '#FFF',
-    fontSize: 14,
+    color: '#FFFFFF',
+    fontSize: 13,
     fontWeight: '600',
     textAlign: 'center',
   },

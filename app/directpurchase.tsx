@@ -2,7 +2,8 @@ import { ThemedText } from '@/components/themed-text';
 import { useThemeContext } from '@/contexts/ThemeContext';
 import { useThemeColors } from '@/hooks/useThemeColors';
 import { Ionicons } from '@expo/vector-icons';
-import { Stack, useRouter } from 'expo-router';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -19,8 +20,54 @@ import {
 } from 'react-native';
 
 import { API_BASE_URL } from '@/constants/api';
+import { downloadExcelReport, downloadPdfReport, printHtmlReport } from '@/utils/reportExportClient';
 
 const API_URL = `${API_BASE_URL}`;
+
+const getLoggedInUser = async () => {
+  let uid = '';
+  let uname = '';
+
+  // Check web localStorage / sessionStorage first
+  if (Platform.OS === 'web' && typeof window !== 'undefined') {
+    try {
+      uid = window.localStorage.getItem('userId') || window.localStorage.getItem('userCode') || '';
+      uname = window.localStorage.getItem('userName') || '';
+      if (!uid) {
+        const uStr = window.localStorage.getItem('user');
+        if (uStr) {
+          const uObj = JSON.parse(uStr);
+          uid = uObj.userCode || uObj.userId || uObj.userName || '';
+          uname = uObj.userName || '';
+        }
+      }
+      if (!uid) {
+        uid = window.sessionStorage.getItem('userId') || window.sessionStorage.getItem('userCode') || '';
+        uname = window.sessionStorage.getItem('userName') || '';
+      }
+    } catch (_) { }
+  }
+
+  // Check AsyncStorage
+  if (!uid) {
+    try {
+      uid = (await AsyncStorage.getItem('@user_id')) || '';
+      if (!uname) {
+        uname = (await AsyncStorage.getItem('@user_name')) || '';
+      }
+      if (!uid) {
+        const uStr = await AsyncStorage.getItem('@logged_user');
+        if (uStr) {
+          const uObj = JSON.parse(uStr);
+          uid = uObj.userCode || uObj.userId || uObj.userName || '';
+          uname = uObj.userName || '';
+        }
+      }
+    } catch (_) { }
+  }
+
+  return { userId: uid, userName: uname };
+};
 
 const getInitialHeaderState = () => ({
   JobSheetNo: '',
@@ -43,11 +90,13 @@ const getInitialHeaderState = () => ({
   Remarks: '',
   BillClose: 'N',
   TranType: 'DP',
+  PurchaseType: 'W',
+  PurchaseMCType: 'PerGram',
   TotalWeight24K: '0.000',
   TEAL: '0.00',
   TEALPercent: '',
   Payable: 'Cash',
-  FixUnFix: 'Fix',
+  FixUnFix: 'UnFix',
   Ordered: false,
   OrderNo: '',
 });
@@ -67,6 +116,7 @@ const getInitialDetailState = () => ({
   Weight: '',
   NetWeight: '',
   SizeCode: '',
+  SizeFactor: false,
   GoldLoss: '',
   CostPerGram: '',
   PMC: '',
@@ -259,23 +309,29 @@ const calculateTealFromCostPerGram = (
 };
 
 const validateInventoryLine = (item: any, header: any, salesPCS: boolean = false) => {
-  if (!item.InventoryCode?.trim()) {
+  if (!String(item.InventoryCode ?? '').trim()) {
     return { isValid: false, message: 'Inventory Code Cannot be Blank ....' };
   }
-  if (!item.CatalogueCode?.trim()) {
+  if (!String(item.CatalogueCode ?? '').trim()) {
     return { isValid: false, message: 'Catalogue Code Cannot be Blank ....' };
   }
-  if (!item.CategoryCode?.trim()) {
+  if (!String(item.CategoryCode ?? '').trim()) {
     return { isValid: false, message: 'Category Code Cannot be Blank ....' };
   }
-  if (!item.TrayId?.trim()) {
+  if (!String(item.TrayId ?? '').trim()) {
     return { isValid: false, message: 'Tray Id Cannot be Blank ....' };
   }
-  if (!item.InventoryDescription?.trim() && !item.Description?.trim()) {
+  if (item.SizeFactor && !String(item.SizeCode ?? '').trim()) {
+    return { isValid: false, message: 'SizeCode Cannot be Empty' };
+  }
+  if (!String(item.InventoryDescription ?? '').trim() && !String(item.Description ?? '').trim()) {
     return { isValid: false, message: 'Description Cannot be Blank ....' };
   }
 
   const weight = parseFloat(item.Weight) || 0;
+  if (weight < 0) {
+    return { isValid: false, message: 'Invalid weight!' };
+  }
   if (weight <= 0 && !salesPCS && item.PurchaseMCType !== 'PerPCS') {
     return { isValid: false, message: 'Invalid weight!' };
   }
@@ -293,29 +349,29 @@ const validateInventoryLine = (item: any, header: any, salesPCS: boolean = false
 
   // IPM checks if IPM active
   if (item.IPM) {
-    if (!item.IPMType?.trim()) {
+    if (!String(item.IPMType ?? '').trim()) {
       return { isValid: false, message: 'Type Cannot be Blank ....' };
     }
-    if (!item.IPMBarNo?.trim()) {
+    if (!String(item.IPMBarNo ?? '').trim()) {
       return { isValid: false, message: 'BarNo Cannot be Blank ....' };
     }
-    if (!item.IPMPurity?.trim()) {
+    if (!String(item.IPMPurity ?? '').trim()) {
       return { isValid: false, message: 'Purity Cannot be Blank ....' };
     }
-    if (!item.IPMGSTType?.trim()) {
+    if (!String(item.IPMGSTType ?? '').trim()) {
       return { isValid: false, message: 'GST Type Cannot be Blank ....' };
     }
-    if (!item.IPMRefiner?.trim()) {
+    if (!String(item.IPMRefiner ?? '').trim()) {
       return { isValid: false, message: 'Refiner Cannot be Blank ....' };
     }
-    if (!item.IPMCountry?.trim()) {
+    if (!String(item.IPMCountry ?? '').trim()) {
       return { isValid: false, message: 'Country Cannot be Blank ....' };
     }
   }
 
   // Ordered inventory code check
-  if (header.Ordered && header.OrderNo?.trim()) {
-    if (!item.TradeInInventoryCode?.trim() && !item.OrderInventoryCode?.trim()) {
+  if (header.Ordered && String(header.OrderNo ?? '').trim()) {
+    if (!String(item.TradeInInventoryCode ?? '').trim() && !String(item.OrderInventoryCode ?? '').trim()) {
       return { isValid: false, message: 'Please select the order inventory code.' };
     }
   }
@@ -324,21 +380,36 @@ const validateInventoryLine = (item: any, header: any, salesPCS: boolean = false
 };
 
 const validatePurchaseSave = (header: any, details: any[]) => {
-  if (!header.SupplierCode?.trim()) {
+  if (!String(header.InvoiceNo ?? '').trim()) {
+    return { isValid: false, message: 'Enter invoice no.' };
+  }
+  if (!String(header.SupplierCode ?? '').trim()) {
     return { isValid: false, message: 'Enter supplier code.' };
   }
   if (!header.InvoiceDate || isNaN(Date.parse(header.InvoiceDate))) {
     return { isValid: false, message: 'Enter valid invoice date.' };
   }
-  if (!header.CurrencyCode?.trim()) {
+  if (!String(header.CurrencyCode ?? '').trim()) {
     return { isValid: false, message: 'Enter currency code.' };
   }
   const currRate = parseFloat(header.CurrencyRate) || 0;
   if (currRate <= 0) {
     return { isValid: false, message: 'Enter currency rate.' };
   }
-  if (!header.Payable?.trim()) {
+  if (!String(header.Payable ?? '').trim()) {
     return { isValid: false, message: 'Select payment type.' };
+  }
+  const isPieceClass = header.PurchaseType === 'P' || header.PurchaseMCType === 'PerPCS';
+  if (!isPieceClass) {
+    if ((parseFloat(header.TEALPercent) || 0) <= 0) {
+      return { isValid: false, message: 'Enter TEAL Percent.' };
+    }
+    if ((parseFloat(header.TEAL) || 0) <= 0) {
+      return { isValid: false, message: 'Enter teal.' };
+    }
+    if ((parseFloat(header.CostPerGram) || 0) <= 0) {
+      return { isValid: false, message: 'Enter cost per gram.' };
+    }
   }
   if (!details || details.length === 0) {
     return { isValid: false, message: 'Please add at least one line item to the grid' };
@@ -365,7 +436,12 @@ const fetchSuppliersApi = async () => {
 };
 
 const fetchSupplierByCodeApi = async (code: string) => {
-  const res = await fetch(`${API_URL}/supplier/${encodeURIComponent(code)}`);
+  const res = await fetch(`${API_URL}/supplier?code=${encodeURIComponent(code)}`);
+  return res.json();
+};
+
+const fetchCurrencyByCodeApi = async (code: string) => {
+  const res = await fetch(`${API_URL}/currency?code=${encodeURIComponent(code)}`);
   return res.json();
 };
 
@@ -375,8 +451,15 @@ const fetchCataloguesApi = async () => {
 };
 
 const fetchCatalogueByCodeApi = async (code: string) => {
-  const res = await fetch(`${API_URL}/catalogue/${encodeURIComponent(code)}`);
-  return res.json();
+  try {
+    const res = await fetch(`${API_URL}/catalogue/${encodeURIComponent(code)}`);
+    if (!res.ok) {
+      return { success: false, message: 'Invalid catalogue code!' };
+    }
+    return await res.json();
+  } catch (_) {
+    return { success: false, message: 'Invalid catalogue code!' };
+  }
 };
 
 const fetchCategoriesApi = async () => {
@@ -449,6 +532,38 @@ const fetchTradeBillsApi = async () => {
   return res.json();
 };
 
+const fetchGoldLossByWeightApi = async (weight: number) => {
+  try {
+    const res = await fetch(`${API_URL}/directpurchase/goldloss?weight=${weight}`);
+    return await res.json();
+  } catch (_) {
+    return { success: false, goldLoss: 0 };
+  }
+};
+
+const fetchCatalogueSummaryApi = async (catalogueCode: string, jobSheetNo: string) => {
+  try {
+    const res = await fetch(`${API_URL}/directpurchase/catalogue-summary?catalogueCode=${encodeURIComponent(catalogueCode)}&jobSheetNo=${encodeURIComponent(jobSheetNo)}`);
+    return await res.json();
+  } catch (_) {
+    return { success: false, weight: 0, pcs: 0 };
+  }
+};
+
+const fetchCategoryDetailApi = async (categoryCode: string, jobSheetNo?: string, catalogueCode?: string) => {
+  try {
+    let url = `${API_URL}/directpurchase/category-detail/${encodeURIComponent(categoryCode)}`;
+    const q: string[] = [];
+    if (jobSheetNo) q.push(`jobSheetNo=${encodeURIComponent(jobSheetNo)}`);
+    if (catalogueCode) q.push(`catalogueCode=${encodeURIComponent(catalogueCode)}`);
+    if (q.length > 0) url += `?${q.join('&')}`;
+    const res = await fetch(url);
+    return await res.json();
+  } catch (_) {
+    return { success: false };
+  }
+};
+
 const fetchNextJobSheetNoApi = async () => {
   try {
     let res = await fetch(`${API_URL}/jobsheet/next-number`);
@@ -466,8 +581,25 @@ const fetchNextJobSheetNoApi = async () => {
 };
 
 const fetchJobSheetByNoApi = async (jsNo: string) => {
-  const res = await fetch(`${API_URL}/jobsheet/${encodeURIComponent(jsNo)}`);
-  return res.json();
+  try {
+    const res = await fetch(`${API_URL}/jobsheet/${encodeURIComponent(jsNo)}`);
+    if (res.ok) {
+      return await res.json();
+    }
+    // Fallback: check /directpurchase endpoint by jobSheetNo
+    const dpRes = await fetch(`${API_URL}/directpurchase/${encodeURIComponent(jsNo)}`);
+    if (dpRes.ok) {
+      const dpJson = await dpRes.json();
+      return {
+        success: true,
+        header: dpJson.header,
+        details: dpJson.details
+      };
+    }
+    return { success: false, message: `Job sheet ${jsNo} not found` };
+  } catch (err: any) {
+    return { success: false, message: err.message || 'Error fetching jobsheet' };
+  }
 };
 
 const fetchPurchaseByBillNoApi = async (billNo: string) => {
@@ -475,7 +607,8 @@ const fetchPurchaseByBillNoApi = async (billNo: string) => {
   return res.json();
 };
 
-const saveDirectPurchaseApi = async (header: any, details: any[]) => {
+const saveDirectPurchaseApi = async (header: any, details: any[], userId?: string) => {
+  const effectiveUserId = (userId || header.userId || header.CreateUser || header.CreatedBy || '').trim();
   const mappedDetails = details.map((d: any) => ({
     ...d,
     PMCType: d.PurchaseMCType === 'PerPCS' ? 'P' : 'W',
@@ -487,31 +620,62 @@ const saveDirectPurchaseApi = async (header: any, details: any[]) => {
     CostPerGram: parseFloat(d.CostPerGram) || 0,
     TotalCost: parseFloat(d.TotalCost) || 0,
     PCS: parseInt(d.PCS, 10) || 1,
+    CreatedBy: effectiveUserId,
+    CreateUser: effectiveUserId,
+    ModifyUser: effectiveUserId,
+    ModifiedBy: effectiveUserId,
   }));
 
   const payload = {
+    userId: effectiveUserId,
     header: {
       ...header,
-      PurchaseBillNo: header.InvoiceNo?.trim(),
+      userId: effectiveUserId,
+      CreatedBy: effectiveUserId,
+      CreateUser: effectiveUserId,
+      ModifyUser: effectiveUserId,
+      ModifiedBy: effectiveUserId,
+      PurchaseBillNo: (header.InvoiceNo || header.PurchaseBillNo || '').trim(),
       JobSheetNo: header.JobSheetNo?.trim(),
       PaymentType: header.Payable === 'Gold' ? 'G' : header.Payable === 'Both' ? 'B' : 'C',
     },
     details: mappedDetails,
   };
 
-  const res = await fetch(`${API_URL}/directpurchase`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  });
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 90000); // 90s timeout for remote cloud DB
+
+  let res: Response;
+  try {
+    res = await fetch(`${API_URL}/directpurchase`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(effectiveUserId ? { 'x-user-id': effectiveUserId } : {})
+      },
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    });
+  } catch (fetchErr: any) {
+    clearTimeout(timeoutId);
+    if (fetchErr.name === 'AbortError') {
+      return { success: false, message: 'Request timed out. Please check database connection.' };
+    }
+    return { success: false, message: fetchErr.message || 'Network request failed' };
+  } finally {
+    clearTimeout(timeoutId);
+  }
   let json: any = {};
   try {
     json = await res.json();
   } catch (err: any) {
     json = { success: false, message: `Server error (${res.status}): ${res.statusText}` };
   }
-  if (!res.ok && json.success === undefined) {
+  if (!res.ok) {
     json.success = false;
+    if (!json.message && !json.error) {
+      json.message = `HTTP ${res.status}: ${res.statusText}`;
+    }
   }
   return json;
 };
@@ -523,23 +687,34 @@ const deletePurchaseBillApi = async (billNo: string) => {
   return res.json();
 };
 
-const deletePurchaseItemApi = async (billNo: string, inventoryCode: string) => {
-  const res = await fetch(
-    `${API_URL}/directpurchase/${encodeURIComponent(billNo)}/item/${encodeURIComponent(inventoryCode)}`,
-    {
-      method: 'DELETE',
-    }
-  );
+const deletePurchaseItemApi = async (billNo: string, inventoryCode: string, userId?: string, supplierCode?: string) => {
+  let url = `${API_URL}/directpurchase/${encodeURIComponent(billNo)}/item/${encodeURIComponent(inventoryCode)}`;
+  const q: string[] = [];
+  if (userId) q.push(`userId=${encodeURIComponent(userId)}`);
+  if (supplierCode) q.push(`supplierCode=${encodeURIComponent(supplierCode)}`);
+  if (q.length > 0) url += `?${q.join('&')}`;
+
+  const res = await fetch(url, {
+    method: 'DELETE',
+    headers: userId ? { 'x-user-id': userId } : undefined
+  });
   return res.json();
 };
 
-const closeJobSheetBillApi = async (jsNo: string) => {
-  const res = await fetch(`${API_URL}/directpurchase/billclose`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ jobSheetNo: jsNo }),
-  });
-  return res.json();
+const closeJobSheetBillApi = async (jsNo: string, invNo?: string, userId?: string) => {
+  try {
+    const res = await fetch(`${API_URL}/directpurchase/billclose`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(userId ? { 'x-user-id': userId } : {})
+      },
+      body: JSON.stringify({ jobSheetNo: jsNo, invoiceNo: invNo, userId: userId || '' }),
+    });
+    return await res.json();
+  } catch (err: any) {
+    return { success: false, message: err.message || 'Failed to connect to server' };
+  }
 };
 
 export default function DirectPurchaseScreen() {
@@ -555,6 +730,28 @@ export default function DirectPurchaseScreen() {
   } = themeColors;
 
   const router = useRouter();
+  const params = useLocalSearchParams<{ userId?: string; username?: string }>();
+
+  // Logged-in user authentication state
+  const [currentUserId, setCurrentUserId] = useState<string>('');
+  const [currentUserName, setCurrentUserName] = useState<string>('');
+
+  useEffect(() => {
+    let isMounted = true;
+    getLoggedInUser().then((user) => {
+      if (isMounted) {
+        const uid =
+          user.userId ||
+          (params?.userId ? String(params.userId) : '') ||
+          (params?.username ? String(params.username) : '');
+        setCurrentUserId(uid);
+        setCurrentUserName(user.userName || (params?.username ? String(params.username) : ''));
+      }
+    });
+    return () => {
+      isMounted = false;
+    };
+  }, [params?.userId, params?.username]);
 
   // Legacy Theme Colors matching VB6/VB.NET form directpurchase.txt
   const legacyYellow = '#FFBD00';
@@ -613,6 +810,156 @@ export default function DirectPurchaseScreen() {
   const [toast, setToast] = useState({ visible: false, message: '', type: 'success' });
   const toastTimeoutRef = useRef<any>(null);
 
+  // Direct Purchase Report Modal States
+  const [reportModalVisible, setReportModalVisible] = useState(false);
+  const [reportData, setReportData] = useState<any[]>([]);
+  const [reportTotals, setReportTotals] = useState<any>({});
+  const [reportCompany, setReportCompany] = useState<any>({});
+  const [reportLoading, setReportLoading] = useState(false);
+  const [reportExporting, setReportExporting] = useState(false);
+
+  const REPORT_COLUMNS = [
+    { key: 'JobSheetNo', label: 'Job Sheet No', width: 110 },
+    { key: 'PurchaseBillNo', label: 'Bill No', width: 100 },
+    { key: 'InventoryCode', label: 'Inv Code', width: 105 },
+    { key: 'Description', label: 'Description', width: 140 },
+    { key: 'CatalogueCode', label: 'Catalogue', width: 85 },
+    { key: 'Weight', label: 'Pur Wt (g)', width: 85, align: 'right', format: 'number' },
+    { key: 'GoldLoss', label: 'Gold Loss', width: 80, align: 'right', format: 'number' },
+    { key: 'PCS', label: 'PCS', width: 55, align: 'center' },
+    { key: 'MC', label: 'MC ($)', width: 80, align: 'right', format: 'currency' },
+    { key: 'TotalCost', label: 'Total Cost ($)', width: 95, align: 'right', format: 'currency' },
+    { key: 'DetailWeight', label: 'Det Wt (g)', width: 85, align: 'right', format: 'number' },
+    { key: 'DetailPCS', label: 'Det PCS', width: 65, align: 'center' },
+    { key: 'DetailMC', label: 'Det MC ($)', width: 80, align: 'right', format: 'currency' },
+    { key: 'DetailTotalCost', label: 'Det Total ($)', width: 95, align: 'right', format: 'currency' },
+    { key: 'SupplierCode', label: 'Supplier', width: 85 },
+    { key: 'DiamondDescription', label: 'Diamond Desc', width: 120 },
+    { key: 'CreateUser', label: 'User', width: 75 },
+  ];
+
+  const handlePrintReport = async () => {
+    const jsNo = headerState.JobSheetNo?.trim();
+    const invNo = headerState.InvoiceNo?.trim();
+
+    if (!jsNo && !invNo) {
+      showToast('Please enter or load a JobSheet / Invoice No. first', 'info');
+      return;
+    }
+
+    try {
+      setReportLoading(true);
+      const queryParams = new URLSearchParams();
+      if (jsNo) queryParams.append('jobSheetNo', jsNo);
+      if (invNo) queryParams.append('purchaseBillNo', invNo);
+
+      const res = await fetch(`${API_URL}/directpurchase/print-report?${queryParams.toString()}`);
+      const json = await res.json();
+
+      if (json.success && Array.isArray(json.data) && json.data.length > 0) {
+        setReportData(json.data);
+        setReportTotals(json.totals || {});
+        setReportCompany(json.company || {});
+        setReportModalVisible(true);
+      } else {
+        showToast(json.message || 'No direct purchase records found for this JobSheet/Bill No.', 'error');
+      }
+    } catch (err: any) {
+      console.error('Error fetching print report:', err);
+      showToast('Failed to generate direct purchase report', 'error');
+    } finally {
+      setReportLoading(false);
+    }
+  };
+
+  const handleExecutePrint = async () => {
+    if (!reportData || reportData.length === 0) {
+      showToast('No records available to print', 'info');
+      return;
+    }
+    try {
+      setReportExporting(true);
+      await printHtmlReport({
+        endpoint: 'directpurchase',
+        title: `Direct Purchase Detail Report (${headerState.JobSheetNo || headerState.InvoiceNo})`,
+        columns: REPORT_COLUMNS,
+        data: reportData,
+        totals: reportTotals,
+        fromDate: reportData[0]?.JobSheetDate || reportData[0]?.PurchaseBillDate || '',
+        toDate: reportData[0]?.JobSheetDate || reportData[0]?.PurchaseBillDate || '',
+      });
+    } catch (err: any) {
+      console.error('Print Error:', err);
+      showToast('Error sending document to printer', 'error');
+    } finally {
+      setReportExporting(false);
+    }
+  };
+
+  const handleExportPdf = async () => {
+    if (!reportData || reportData.length === 0) {
+      showToast('No records available to export', 'info');
+      return;
+    }
+    try {
+      setReportExporting(true);
+      await downloadPdfReport({
+        endpoint: 'directpurchase',
+        title: `Direct_Purchase_${headerState.JobSheetNo || headerState.InvoiceNo || 'Report'}`,
+        columns: REPORT_COLUMNS,
+        data: reportData,
+        totals: reportTotals,
+        fromDate: reportData[0]?.JobSheetDate || reportData[0]?.PurchaseBillDate || '',
+        toDate: reportData[0]?.JobSheetDate || reportData[0]?.PurchaseBillDate || '',
+      });
+    } catch (err: any) {
+      console.error('PDF Error:', err);
+      showToast('Failed to export PDF', 'error');
+    } finally {
+      setReportExporting(false);
+    }
+  };
+
+  const handleExportExcel = async () => {
+    if (!reportData || reportData.length === 0) {
+      showToast('No records available to export', 'info');
+      return;
+    }
+    try {
+      setReportExporting(true);
+      await downloadExcelReport({
+        endpoint: 'directpurchase',
+        title: `Direct_Purchase_${headerState.JobSheetNo || headerState.InvoiceNo || 'Report'}`,
+        columns: REPORT_COLUMNS,
+        data: reportData,
+        totals: reportTotals,
+        fromDate: reportData[0]?.JobSheetDate || reportData[0]?.PurchaseBillDate || '',
+        toDate: reportData[0]?.JobSheetDate || reportData[0]?.PurchaseBillDate || '',
+      });
+    } catch (err: any) {
+      console.error('Excel Error:', err);
+      showToast('Failed to export Excel', 'error');
+    } finally {
+      setReportExporting(false);
+    }
+  };
+
+  const [confirmDialog, setConfirmDialog] = useState<{
+    visible: boolean;
+    title: string;
+    message: string;
+    onConfirm: () => void;
+    confirmText?: string;
+    confirmStyle?: 'danger' | 'primary';
+  }>({
+    visible: false,
+    title: '',
+    message: '',
+    onConfirm: () => {},
+    confirmText: 'OK',
+    confirmStyle: 'primary',
+  });
+
   const showToast = (message: string, type: 'success' | 'error' | 'info' = 'success') => {
     if (toastTimeoutRef.current) {
       clearTimeout(toastTimeoutRef.current);
@@ -624,19 +971,23 @@ export default function DirectPurchaseScreen() {
   };
 
   const showAlert = (title: string, message: string, buttons?: any[]) => {
-    // If confirmation dialog with multiple action buttons
+    // If confirmation dialog with multiple action buttons, use custom beautiful in-app modal (NO window.confirm or native alerts)
     if (buttons && buttons.length > 1) {
-      if (Platform.OS === 'web') {
-        const confirmed = window.confirm(`${title ? title + ':\n' : ''}${message}`);
-        if (confirmed) {
-          const actionBtn = buttons.find((b: any) => b.style !== 'cancel' && b.text !== 'Cancel');
+      const actionBtn = buttons.find((b: any) => b.style !== 'cancel' && b.text !== 'Cancel');
+      const isDanger = actionBtn?.style === 'destructive' || title.toLowerCase().includes('delete');
+      setConfirmDialog({
+        visible: true,
+        title: title || 'Confirmation',
+        message,
+        confirmText: actionBtn?.text || 'OK',
+        confirmStyle: isDanger ? 'danger' : 'primary',
+        onConfirm: () => {
+          setConfirmDialog((prev) => ({ ...prev, visible: false }));
           if (actionBtn && actionBtn.onPress) {
             actionBtn.onPress();
           }
-        }
-      } else {
-        Alert.alert(title, message, buttons);
-      }
+        },
+      });
       return;
     }
 
@@ -695,7 +1046,7 @@ export default function DirectPurchaseScreen() {
       window.addEventListener('keydown', handleKeyDown);
       return () => window.removeEventListener('keydown', handleKeyDown);
     }
-  }, [headerState, details]);
+  }, [headerState, details, currentUserId]);
 
   // Initial load: Fetch Company configuration (GST %, etc.)
   useEffect(() => {
@@ -736,6 +1087,9 @@ export default function DirectPurchaseScreen() {
         );
         if (parseFloat(teal) > 0) {
           next.TEAL = teal;
+        }
+        if (parseFloat(value) > 0) {
+          setCurrentDetail((d: any) => ({ ...d, CostPerGram: value }));
         }
       } else if (key === 'GSTActive') {
         const costG = calculateCostPerGramFromTeal(
@@ -831,7 +1185,7 @@ export default function DirectPurchaseScreen() {
       }
     } catch (e: any) {
       setLoading(false);
-      showAlert('Error', e.message || 'Error fetching suppliers');
+      showToast(e.message || 'Error fetching suppliers', 'error');
     }
   };
 
@@ -849,7 +1203,7 @@ export default function DirectPurchaseScreen() {
       }
     } catch (e: any) {
       setLoading(false);
-      showAlert('Error', e.message || 'Error fetching currencies');
+      showToast(e.message || 'Error fetching currencies', 'error');
     }
   };
 
@@ -877,7 +1231,7 @@ export default function DirectPurchaseScreen() {
       }
     } catch (e: any) {
       setLoading(false);
-      showAlert('Error', e.message || 'Error fetching TEAL percentages');
+      showToast(e.message || 'Error fetching TEAL percentages', 'error');
     }
   };
 
@@ -896,31 +1250,57 @@ export default function DirectPurchaseScreen() {
           'Select Catalogue',
           catlgRes.data,
           ['CatalogueCode', 'CatalogueName', 'CategoryCode', 'TrayId'],
-          (item) => {
+          async (item) => {
             const trimmedItemCat = (item.CategoryCode || '').trim();
             const catCode = trimmedItemCat || (currentDetail.CategoryCode || '').trim();
+            const catalogueCodeVal = (item.CatalogueCode || '').trim();
+
             const matchedCategory = categoriesList.find(
               (c: any) => (c.CategoryCode || '').trim().toUpperCase() === catCode.toUpperCase()
             );
 
+            // Fetch enriched category detail (SizeFactor, ClassCode, NextInventoryCode, CostPerGram from JobSheetDetail)
+            let catDetailData: any = null;
+            let costPerGramVal: any = null;
+            if (catCode) {
+              try {
+                const catDetRes = await fetchCategoryDetailApi(catCode, headerState.JobSheetNo, catalogueCodeVal);
+                if (catDetRes.success && catDetRes.category) {
+                  catDetailData = catDetRes.category;
+                  costPerGramVal = catDetRes.costPerGram;
+                }
+              } catch (_) { }
+            }
+
+            // Fetch Catalogue Summary (Catalogue Weight & PCS)
+            let catSummary: any = { weight: 0, pcs: 0 };
+            if (catalogueCodeVal && headerState.JobSheetNo) {
+              try {
+                catSummary = await fetchCatalogueSummaryApi(catalogueCodeVal, headerState.JobSheetNo);
+              } catch (_) { }
+            }
+
             const updates: any = {
-              CatalogueCode: (item.CatalogueCode || '').trim(),
+              CatalogueCode: catalogueCodeVal,
               CategoryCode: catCode,
               TrayId: (item.TrayId || currentDetail.TrayId || '').trim(),
               InventoryDescription: item.CatalogueName || currentDetail.InventoryDescription,
+              CatalogueWeight: catSummary.weight ? Number(catSummary.weight).toFixed(2) : '0.00',
+              CataloguePCS: catSummary.pcs ? String(catSummary.pcs) : '0',
+              SizeFactor: catDetailData ? !!catDetailData.SizeFactor : (matchedCategory ? !!matchedCategory.SizeFactor : false),
+              ClassCode: catDetailData?.ClassCode || matchedCategory?.ClassCode || (catCode ? catCode.substring(0, 3) : ''),
+              CostPerGram: costPerGramVal != null ? String(costPerGramVal) : (currentDetail.CostPerGram || headerState.CostPerGram || '0.00'),
+              PCS: currentDetail.PCS || '1',
             };
 
-            if (matchedCategory) {
-              if (matchedCategory.ClassCode) {
-                updates.ClassCode = matchedCategory.ClassCode.trim();
-              } else if (catCode) {
-                updates.ClassCode = catCode.substring(0, 3);
-              }
-              if (!isManual && matchedCategory.NextInventoryCode) {
-                updates.InventoryCode = matchedCategory.NextInventoryCode.trim();
-              }
-            } else if (catCode) {
-              updates.ClassCode = catCode.substring(0, 3);
+            const nextInv = catDetailData?.NextInventoryCode || matchedCategory?.NextInventoryCode;
+            if (!isManual && nextInv) {
+              updates.InventoryCode = nextInv.trim();
+            }
+
+            if (item.PurchaseType === 'P' || item.SalesType === 'P') {
+              updates.PurchaseMCType = item.PurchaseType === 'P' ? 'PerPCS' : currentDetail.PurchaseMCType;
+              updates.SalesMCType = item.SalesType === 'P' ? 'PerPCS' : currentDetail.SalesMCType;
             }
 
             updateDetail(updates);
@@ -947,6 +1327,7 @@ export default function DirectPurchaseScreen() {
             const updates: any = {
               CategoryCode: (item.CategoryCode || '').trim(),
               ClassCode: (item.ClassCode || (item.CategoryCode ? item.CategoryCode.substring(0, 3) : '')).trim(),
+              SizeFactor: !!item.SizeFactor,
             };
             if (!isManual && item.NextInventoryCode) {
               updates.InventoryCode = (item.NextInventoryCode || '').trim();
@@ -968,7 +1349,7 @@ export default function DirectPurchaseScreen() {
       setLoading(false);
       if (json.success && Array.isArray(json.data)) {
         openLov('Select Size', json.data, ['SizeCode', 'SizeDescription'], (item) => {
-          updateDetail('SizeCode', item.SizeCode || '');
+          updateDetail('SizeCode', String(item.SizeCode ?? ''));
         });
       }
     } catch (e: any) {
@@ -1021,7 +1402,7 @@ export default function DirectPurchaseScreen() {
       }
     } catch (e: any) {
       setLoading(false);
-      showAlert('Error', e.message || 'Error fetching countries');
+      showToast(e.message || 'Error fetching countries', 'error');
     }
   };
 
@@ -1042,7 +1423,7 @@ export default function DirectPurchaseScreen() {
       }
     } catch (e: any) {
       setLoading(false);
-      showAlert('Error', e.message || 'Error searching trade-in inventory');
+      showToast(e.message || 'Error searching trade-in inventory', 'error');
     }
   };
 
@@ -1066,7 +1447,7 @@ export default function DirectPurchaseScreen() {
       }
     } catch (e: any) {
       setLoading(false);
-      showAlert('Error', e.message || 'Error fetching orders');
+      showToast(e.message || 'Error fetching orders', 'error');
     }
   };
 
@@ -1091,11 +1472,11 @@ export default function DirectPurchaseScreen() {
       }
     } catch (e: any) {
       setLoading(false);
-      showAlert('Error', e.message || 'Error fetching order items');
+      showToast(e.message || 'Error fetching order items', 'error');
     }
   };
 
-  const loadJobSheetByNo = async (jsNo: string) => {
+  const loadJobSheetByNo = async (jsNo: string, isManualBlur = false) => {
     const trimmed = (jsNo || '').trim();
     if (!trimmed) return;
     try {
@@ -1138,33 +1519,40 @@ export default function DirectPurchaseScreen() {
           TEAL: (h.TaelRate || 0).toString(),
           TEALPercent: (h.TaelPercent || 0).toString(),
           Payable: h.PaymentType === 'G' ? 'Gold' : h.PaymentType === 'C' ? 'Cash' : 'Both',
+          FixUnFix: (h.FixStatus === 'Y' || h.FixStatus === 'Fix') ? 'Fix' : 'UnFix',
         }));
 
-        if (jsJson.details && jsJson.details.length > 0) {
-          const mappedDetails = jsJson.details.map((d: any) => ({
+        const rawDetails = (jsJson.purchaseDetails && jsJson.purchaseDetails.length > 0)
+          ? jsJson.purchaseDetails
+          : ((jsJson.inventory && jsJson.inventory.length > 0)
+            ? jsJson.inventory
+            : (jsJson.details || []));
+
+        if (rawDetails && rawDetails.length > 0) {
+          const mappedDetails = rawDetails.map((d: any) => ({
             CatalogueCode: d.CatalogueCode || '',
             CategoryCode: d.CategoryCode || '',
             TrayId: d.TrayId || '',
             CatalogueWeight: '',
             CataloguePCS: '',
-            PurchaseMCType: d.PMCType === 'P' ? 'PerPCS' : 'PerGram',
+            PurchaseMCType: (d.PMCType === 'P' || d.PurchaseType === 'P') ? 'PerPCS' : 'PerGram',
             SalesMCType: d.SMCType === 'P' ? 'PerPCS' : 'PerGram',
             Auto: true,
             PCSCheck: false,
-            InventoryCode: d.NextInventoryCode || d.InventoryCode || '',
-            InventoryDescription: d.Description || '',
-            Weight: d.Weight?.toString() || '',
+            InventoryCode: d.InventoryCode || d.NextInventoryCode || '',
+            InventoryDescription: d.Description || d.InventoryDescription || '',
+            Weight: d.Weight != null ? d.Weight.toString() : (d.PurchaseWeight != null ? d.PurchaseWeight.toString() : ''),
             SizeCode: d.SizeCode?.toString() || d.Size?.toString() || '',
-            GoldLoss: d.GoldLoss?.toString() || '',
-            CostPerGram: d.CostPerGram?.toString() || '',
-            PMC: d.PMC?.toString() || d.MC?.toString() || '',
-            SMC: d.SMC?.toString() || '0',
-            PCS: d.PCS?.toString() || '1',
-            TotalCost: d.TotalCost?.toString() || '',
+            GoldLoss: d.GoldLoss != null ? d.GoldLoss.toString() : '0.000',
+            CostPerGram: d.CostPerGram != null ? d.CostPerGram.toString() : (d.PurchaseCostPerGram != null ? d.PurchaseCostPerGram.toString() : ''),
+            PMC: d.PMC != null ? d.PMC.toString() : (d.MC != null ? d.MC.toString() : '0.00'),
+            PMCCost: (d.MC != null ? d.MC : (d.PMC != null ? d.PMC : '0.00')).toString(),
+            SMC: d.SMC != null ? d.SMC.toString() : '0.00',
+            SMCCost: (d.SMC != null ? d.SMC : '0.00').toString(),
+            PCS: d.PCS != null ? d.PCS.toString() : '1',
+            TotalCost: d.TotalCost != null ? d.TotalCost.toString() : '',
             ClassCode: d.ClassCode || (d.CategoryCode ? d.CategoryCode.toString().substring(0, 3) : ''),
-            NetWeight: parseFloat(d.Weight || 0) > 0
-              ? (parseFloat(d.Weight || 0) - parseFloat(d.GoldLoss || 0)).toFixed(3)
-              : '',
+            NetWeight: (parseFloat(d.Weight || d.PurchaseWeight || 0) - parseFloat(d.StoneWeight || 0)).toFixed(3),
             DiamondDescription: d.DiamondDescription || '',
             StoneWeight: (d.StoneWeight || 0).toString(),
             IPM: false,
@@ -1175,12 +1563,16 @@ export default function DirectPurchaseScreen() {
           setDetails([]);
         }
       } else {
-        showAlert('Error', 'Job sheet no. is invalid!');
-        handleClearForm();
+        if (!isManualBlur) {
+          showToast('Job sheet no. is invalid!', 'error');
+          handleClearForm();
+        }
       }
     } catch (e: any) {
       setLoading(false);
-      showAlert('Error', e.message || 'Failed to load JobSheet details');
+      if (!isManualBlur) {
+        showToast(e.message || 'Failed to load JobSheet details', 'error');
+      }
     }
   };
 
@@ -1201,7 +1593,7 @@ export default function DirectPurchaseScreen() {
       }
     } catch (e: any) {
       setLoading(false);
-      showAlert('Error', e.message || 'Error fetching jobsheet');
+      showToast(e.message || 'Error fetching jobsheet', 'error');
     }
   };
 
@@ -1218,15 +1610,40 @@ export default function DirectPurchaseScreen() {
             setLoading(false);
             if (pJson.success) {
               const h = pJson.header;
+              const isClosed = (h.BillClose || '').toUpperCase() === 'Y';
+              const tranType = (h.TranType || '').toUpperCase();
+
+              if (isClosed) {
+                showToast('This bill is closed! Cannot modify!', 'info');
+              } else if (tranType && tranType !== 'DP') {
+                showToast('This is not a direct purchase bill. Cannot modify!', 'info');
+              }
+
               setHeaderState((prev: any) => ({
                 ...prev,
                 JobSheetNo: h.JobSheetNo || '',
                 InvoiceNo: h.PurchaseBillNo || '',
+                InvoiceDate: h.PurchaseBillDate ? h.PurchaseBillDate.split('T')[0] : (h.CreateDate ? h.CreateDate.split('T')[0] : prev.InvoiceDate),
                 SupplierCode: h.SupplierCode || '',
                 SupplierName: h.SupplierName || '',
-                CurrencyCode: h.CurrencyCode || '',
-                CurrencyRate: h.CurrencyRate != null ? h.CurrencyRate.toString() : '',
+                CurrencyCode: h.CurrencyCode || 'SGD',
+                CurrencyName: h.CurrencyName || '',
+                CurrencyRate: h.CurrencyRate != null ? h.CurrencyRate.toString() : '1',
+                CostPerGram: h.CostPerGram?.toString() || prev.CostPerGram,
+                TotalCost: h.TotalCost?.toString() || prev.TotalCost,
+                TotalMC: h.TotalMC?.toString() || prev.TotalMC,
+                Weight: h.TotalWeight24K?.toString() || prev.Weight,
+                GoldLoss: h.TotalGoldLoss?.toString() || prev.GoldLoss,
+                GSTPercent: h.GST?.toString() || prev.GSTPercent,
+                GSTActive: (h.TaelGST || '').toUpperCase() === 'Y',
+                HGSTActive: parseFloat(h.GST || 0) > 0,
+                TEAL: (h.TaelRate || 0).toString(),
+                TEALPercent: (h.TaelPercent || 0).toString(),
+                Payable: h.PaymentType === 'G' ? 'Gold' : h.PaymentType === 'C' ? 'Cash' : 'Both',
+                FixUnFix: h.FixStatus === 'Y' ? 'Fix' : 'UnFix',
                 Remarks: h.Remarks || '',
+                BillClose: isClosed ? 'Y' : 'N',
+                TranType: tranType || 'DP',
               }));
 
               if (pJson.details && pJson.details.length > 0) {
@@ -1236,22 +1653,24 @@ export default function DirectPurchaseScreen() {
                   TrayId: d.TrayId || '',
                   CatalogueWeight: '',
                   CataloguePCS: '',
-                  PurchaseMCType: d.PurchaseType === 'P' ? 'PerPCS' : 'PerGram',
-                  SalesMCType: 'PerPCS',
+                  PurchaseMCType: (d.PMCType === 'P' || d.PurchaseType === 'P') ? 'PerPCS' : 'PerGram',
+                  SalesMCType: d.SMCType === 'P' ? 'PerPCS' : 'PerGram',
                   Auto: true,
                   PCSCheck: false,
                   InventoryCode: d.InventoryCode || '',
-                  InventoryDescription: d.Description || '',
+                  InventoryDescription: d.Description || d.InventoryDescription || '',
                   Weight: d.Weight?.toString() || '',
-                  SizeCode: d.Size?.toString() || '',
-                  GoldLoss: d.GoldLoss?.toString() || '',
-                  CostPerGram: d.CostPerGram?.toString() || '',
-                  PMC: d.MC?.toString() || '',
-                  SMC: '0',
-                  PCS: d.PCS?.toString() || '1',
-                  TotalCost: d.TotalCost?.toString() || '',
+                  SizeCode: d.SizeCode?.toString() || d.Size?.toString() || '',
+                  GoldLoss: d.GoldLoss != null ? d.GoldLoss.toString() : '0.000',
+                  CostPerGram: d.CostPerGram != null ? d.CostPerGram.toString() : '',
+                  PMC: d.PMC != null ? d.PMC.toString() : (d.MC != null ? d.MC.toString() : '0.00'),
+                  PMCCost: (d.MC != null ? d.MC : (d.PMC != null ? d.PMC : '0.00')).toString(),
+                  SMC: d.SMC != null ? d.SMC.toString() : '0.00',
+                  SMCCost: (d.SMC != null ? d.SMC : '0.00').toString(),
+                  PCS: d.PCS != null ? d.PCS.toString() : '1',
+                  TotalCost: d.TotalCost != null ? d.TotalCost.toString() : '',
                   ClassCode: d.ClassCode || '',
-                  NetWeight: parseFloat(d.Weight || 0) > 0 ? (parseFloat(d.Weight || 0) - parseFloat(d.GoldLoss || 0)).toFixed(3) : '',
+                  NetWeight: (parseFloat(d.Weight || 0) - parseFloat(d.StoneWeight || 0)).toFixed(3),
                   DiamondDescription: d.DiamondDescription || '',
                   StoneWeight: (d.StoneWeight || 0).toString(),
                   IPM: false,
@@ -1262,21 +1681,22 @@ export default function DirectPurchaseScreen() {
             }
           } catch (err: any) {
             setLoading(false);
-            showAlert('Error', err.message || 'Failed to load purchase details');
+            showToast(err.message || 'Failed to load purchase details', 'error');
           }
         });
       }
     } catch (e: any) {
       setLoading(false);
-      showAlert('Error', e.message || 'Error fetching purchases');
+      showToast(e.message || 'Error fetching purchases', 'error');
     }
   };
 
   // Line Item Add / Update / Delete / Clear
   const handleAddOrUpdateDetail = () => {
-    // Sync CostPerGram from header if left blank
+    // Sync CostPerGram from header if left blank and normalize string values
     const itemToValidate = {
       ...currentDetail,
+      SizeCode: currentDetail.SizeCode != null ? String(currentDetail.SizeCode).trim() : '',
       CostPerGram: currentDetail.CostPerGram || headerState.CostPerGram || '0.00',
     };
 
@@ -1316,12 +1736,12 @@ export default function DirectPurchaseScreen() {
     }
 
     if (headerState.BillClose === 'Y') {
-      showAlert('Warning', 'This bill is closed. Cannot delete!');
+      showToast('This bill is closed. Cannot delete!', 'info');
       return;
     }
 
     if (headerState.TranType === 'JP') {
-      showAlert('Warning', 'This is not a direct purchase bill. Cannot delete!');
+      showToast('This is not a direct purchase bill. Cannot delete!', 'info');
       return;
     }
 
@@ -1338,10 +1758,21 @@ export default function DirectPurchaseScreen() {
             // If the item exists in the backend under InvoiceNo, call backend delete
             if (headerState.InvoiceNo?.trim() && itemCode) {
               setLoading(true);
-              const delRes = await deletePurchaseItemApi(headerState.InvoiceNo.trim(), itemCode);
+              let uId = currentUserId;
+              if (!uId) {
+                const u = await getLoggedInUser();
+                uId = u.userId || (params?.userId ? String(params.userId) : '') || (params?.username ? String(params.username) : '');
+                if (uId) setCurrentUserId(uId);
+              }
+              const delRes = await deletePurchaseItemApi(
+                headerState.InvoiceNo.trim(),
+                itemCode,
+                uId,
+                headerState.SupplierCode
+              );
               setLoading(false);
               if (!delRes.success) {
-                showAlert('Error', delRes.message || 'Cannot delete item!');
+                showToast(delRes.message || 'Cannot delete item!', 'error');
                 return;
               }
             }
@@ -1353,7 +1784,7 @@ export default function DirectPurchaseScreen() {
             showToast('Item deleted successfully', 'success');
           } catch (err: any) {
             setLoading(false);
-            showAlert('Error', err.message || 'Error deleting item');
+            showToast(err.message || 'Error deleting item', 'error');
           }
         },
       },
@@ -1375,6 +1806,12 @@ export default function DirectPurchaseScreen() {
 
   // Full Purchase Save
   const handleSavePurchase = async () => {
+    if (headerState.BillClose === 'Y') {
+      showToast('This bill is closed. Cannot modify!', 'error');
+      showAlert('Warning', 'This bill is closed. Cannot modify!');
+      return;
+    }
+
     const validation = validatePurchaseSave(headerState, details);
     if (!validation.isValid) {
       showToast(validation.message, 'error');
@@ -1383,6 +1820,16 @@ export default function DirectPurchaseScreen() {
 
     try {
       setSaving(true);
+      let uId = currentUserId;
+      if (!uId) {
+        const u = await getLoggedInUser();
+        uId =
+          u.userId ||
+          (params?.userId ? String(params.userId) : '') ||
+          (params?.username ? String(params.username) : '');
+        if (uId) setCurrentUserId(uId);
+      }
+
       let jsNo = (headerState.JobSheetNo || '').trim();
       if (!jsNo) {
         jsNo = await fetchNextJobSheetNoApi();
@@ -1399,49 +1846,82 @@ export default function DirectPurchaseScreen() {
 
       const saveHeader = {
         ...headerState,
+        userId: uId,
         JobSheetNo: jsNo || headerState.JobSheetNo,
         InvoiceNo: invoiceNo,
       };
 
-      const res = await saveDirectPurchaseApi(saveHeader, details);
-      setSaving(false);
+      const res = await saveDirectPurchaseApi(saveHeader, details, uId);
 
-      if (res.success) {
+      if (res && res.success) {
         showToast('Direct purchase saved successfully!', 'success');
+        if (jsNo) {
+          loadJobSheetByNo(jsNo, true);
+        }
       } else {
-        showAlert('Error', res.message || res.error || 'Failed to save direct purchase');
+        const errorMsg = res?.message || res?.error || 'Failed to save direct purchase';
+        showToast(errorMsg, 'error');
       }
     } catch (e: any) {
+      const errorMsg = e.message || 'Error occurred while saving direct purchase';
+      showToast(errorMsg, 'error');
+    } finally {
       setSaving(false);
-      showAlert('Error', e.message || 'Error occurred while saving direct purchase');
     }
   };
 
   // Bill Close Operation
   const handleBillClose = async () => {
-    if (!headerState.JobSheetNo?.trim()) {
-      showToast('Please enter or load a Job Sheet No. first', 'info');
+    const jsNo = (headerState.JobSheetNo || '').trim();
+    const invNo = (headerState.InvoiceNo || '').trim();
+
+    if (!jsNo && !invNo) {
+      showToast('Please enter the invoice no.!', 'error');
       return;
     }
 
-    showAlert('Confirmation', `Are you sure you want to close Job Sheet ${headerState.JobSheetNo}?`, [
+    if (headerState.BillClose === 'Y') {
+      showToast('This Job sheet bill is already closed!', 'info');
+      return;
+    }
+
+    if (headerState.TranType === 'JP') {
+      showToast('This is not a direct purchase bill. Use job sheet purchase screen to close this bill!', 'info');
+      return;
+    }
+
+    showAlert('Confirmation', 'You cannot make changes to closed bill. Would u like to close this purchase bill?', [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Close Bill',
         onPress: async () => {
           try {
             setLoading(true);
-            const res = await closeJobSheetBillApi(headerState.JobSheetNo);
+            let uId = currentUserId;
+            if (!uId) {
+              const u = await getLoggedInUser();
+              uId =
+                u.userId ||
+                (params?.userId ? String(params.userId) : '') ||
+                (params?.username ? String(params.username) : '');
+              if (uId) setCurrentUserId(uId);
+            }
+            const res = await closeJobSheetBillApi(jsNo, invNo, uId);
             setLoading(false);
             if (res.success) {
               setHeaderState((prev: any) => ({ ...prev, BillClose: 'Y' }));
-              showToast('Bill successfully closed!');
+              setCurrentDetail(getInitialDetailState());
+              setSelectedIndex(null);
+              setDetailModalVisible(false);
+              showToast('Purchase bill closed!', 'success');
             } else {
-              showAlert('Error', res.message || 'Failed to close bill');
+              const msg = res.message || 'Failed to close bill';
+              showToast(msg, 'error');
             }
           } catch (e: any) {
             setLoading(false);
-            showAlert('Error', e.message || 'Error closing bill');
+            const msg = e.message || 'Error closing bill';
+            showToast(msg, 'error');
           }
         },
       },
@@ -1461,7 +1941,7 @@ export default function DirectPurchaseScreen() {
           headerRight: () => (
             <View style={{ flexDirection: 'row', alignItems: 'center', paddingRight: 8 }}>
               {/* Auto / Manual Mode Pill Button */}
-              <TouchableOpacity
+              {/* <TouchableOpacity
                 style={[
                   styles.topActionBtn,
                   {
@@ -1483,7 +1963,7 @@ export default function DirectPurchaseScreen() {
                 >
                   {isManual ? 'MANUAL' : 'AUTO'}
                 </ThemedText>
-              </TouchableOpacity>
+              </TouchableOpacity> */}
 
               {/* Bill Close Button (F7) */}
               <TouchableOpacity
@@ -1509,27 +1989,35 @@ export default function DirectPurchaseScreen() {
 
 
 
+              {/* Print Button */}
+              <TouchableOpacity
+                style={[
+                  styles.topActionBtn,
+                  { backgroundColor: '#FFF8E1', borderColor: '#FFA000', flexDirection: 'row', alignItems: 'center', gap: 4 }
+                ]}
+                onPress={handlePrintReport}
+                disabled={reportLoading}
+              >
+                {reportLoading ? (
+                  <ActivityIndicator size="small" color="#B8860B" />
+                ) : (
+                  <>
+                    <Ionicons name="print-outline" size={13} color="#8D6E63" />
+                    <ThemedText style={{ color: '#8D6E63', fontWeight: 'bold', fontSize: 11 }}>Print</ThemedText>
+                  </>
+                )}
+              </TouchableOpacity>
+
               {/* Report Button */}
               <TouchableOpacity
                 style={[
                   styles.topActionBtn,
-                  { backgroundColor: '#E8EAF6', borderColor: '#7986CB' }
+                  { backgroundColor: '#E8EAF6', borderColor: '#7986CB', flexDirection: 'row', alignItems: 'center', gap: 4 }
                 ]}
-                onPress={() => {
-                  if (!headerState.JobSheetNo?.trim() && !headerState.InvoiceNo?.trim()) {
-                    showToast('Please enter or load a JobSheet / Invoice No. first', 'info');
-                    return;
-                  }
-                  router.push({
-                    pathname: '/reports' as any,
-                    params: {
-                      reportName: 'PurchaseDetail',
-                      jobSheetNo: headerState.JobSheetNo,
-                      invoiceNo: headerState.InvoiceNo,
-                    },
-                  });
-                }}
+                onPress={handlePrintReport}
+                disabled={reportLoading}
               >
+                <Ionicons name="document-text-outline" size={13} color="#283593" />
                 <ThemedText style={{ color: '#283593', fontWeight: 'bold', fontSize: 11 }}>Report</ThemedText>
               </TouchableOpacity>
 
@@ -1581,7 +2069,7 @@ export default function DirectPurchaseScreen() {
                       value={headerState.JobSheetNo}
                       onChangeText={(t) => updateHeader('JobSheetNo', t)}
                       onBlur={() => {
-                        if (headerState.JobSheetNo) loadJobSheetByNo(headerState.JobSheetNo);
+                        if (headerState.JobSheetNo) loadJobSheetByNo(headerState.JobSheetNo, true);
                       }}
                       editable={!isFormLocked}
                     />
@@ -1600,6 +2088,11 @@ export default function DirectPurchaseScreen() {
                       style={[styles.input, { flex: 1, borderTopRightRadius: 0, borderBottomRightRadius: 0 }]}
                       value={headerState.InvoiceNo}
                       onChangeText={(t) => updateHeader('InvoiceNo', t)}
+                      onBlur={() => {
+                        if (!headerState.InvoiceNo?.trim()) {
+                          showToast('Enter invoice no.', 'error');
+                        }
+                      }}
                       editable={!isFormLocked}
                     />
                     <TouchableOpacity
@@ -1616,6 +2109,11 @@ export default function DirectPurchaseScreen() {
                     style={[styles.input, { width: 110, textAlign: 'center' }]}
                     value={headerState.InvoiceDate}
                     onChangeText={(t) => updateHeader('InvoiceDate', t)}
+                    onBlur={() => {
+                      if (!headerState.InvoiceDate || isNaN(Date.parse(headerState.InvoiceDate))) {
+                        showToast('Enter valid invoice date.', 'error');
+                      }
+                    }}
                     placeholder="YYYY-MM-DD"
                     editable={!isFormLocked}
                   />
@@ -1631,14 +2129,20 @@ export default function DirectPurchaseScreen() {
                       onChangeText={(t) => updateHeader('SupplierCode', t)}
                       onBlur={async () => {
                         const sCode = (headerState.SupplierCode || '').trim();
-                        if (sCode) {
-                          try {
-                            const sJson = await fetchSupplierByCodeApi(sCode);
-                            if (sJson.success && sJson.data) {
-                              updateHeader('SupplierName', sJson.data.SupplierName || '');
-                            }
-                          } catch (_) { }
+                        if (!sCode) {
+                          showToast('Enter supplier code.', 'error');
+                          return;
                         }
+                        try {
+                          const sJson = await fetchSupplierByCodeApi(sCode);
+                          if (sJson.success && sJson.data) {
+                            updateHeader('SupplierName', sJson.data.SupplierName || '');
+                          } else {
+                            showToast('Invalid supplier code!', 'error');
+                            updateHeader('SupplierCode', '');
+                            updateHeader('SupplierName', '');
+                          }
+                        } catch (_) { }
                       }}
                       editable={!isFormLocked}
                     />
@@ -1667,18 +2171,24 @@ export default function DirectPurchaseScreen() {
                       onChangeText={(t) => updateHeader('CurrencyCode', t)}
                       onBlur={async () => {
                         const cCode = (headerState.CurrencyCode || '').trim();
-                        if (cCode) {
-                          try {
-                            const cRes = await fetch(`${API_URL}/currency/${encodeURIComponent(cCode)}`);
-                            const cJson = await cRes.json();
-                            if (cJson.success && cJson.data) {
-                              updateHeader('CurrencyName', cJson.data.CurrencyName || cCode);
-                              if (cJson.data.CurrencyRate != null) {
-                                updateHeader('CurrencyRate', String(cJson.data.CurrencyRate));
-                              }
-                            }
-                          } catch (_) { }
+                        if (!cCode) {
+                          showToast('Enter currency code.', 'error');
+                          return;
                         }
+                        try {
+                          const cJson = await fetchCurrencyByCodeApi(cCode);
+                          if (cJson.success && cJson.data) {
+                            updateHeader('CurrencyName', cJson.data.CurrencyName || cCode);
+                            if (cJson.data.CurrencyRate != null) {
+                              updateHeader('CurrencyRate', String(cJson.data.CurrencyRate));
+                            }
+                          } else {
+                            showToast('Set Default Currency in Currency Master', 'error');
+                            updateHeader('CurrencyCode', '');
+                            updateHeader('CurrencyName', '');
+                            updateHeader('CurrencyRate', '');
+                          }
+                        } catch (_) { }
                       }}
                       editable={!isFormLocked}
                     />
@@ -1698,6 +2208,11 @@ export default function DirectPurchaseScreen() {
                     style={[styles.input, { width: 90, textAlign: 'right' }]}
                     value={headerState.CurrencyRate}
                     onChangeText={(t) => updateHeader('CurrencyRate', t)}
+                    onBlur={() => {
+                      if ((parseFloat(headerState.CurrencyRate) || 0) <= 0) {
+                        showToast('Enter currency rate.', 'error');
+                      }
+                    }}
                     keyboardType="numeric"
                     editable={!isFormLocked}
                   />
@@ -1728,7 +2243,13 @@ export default function DirectPurchaseScreen() {
                   <Checkbox
                     label=""
                     selected={headerState.GSTActive}
-                    onPress={() => updateHeader('GSTActive', !headerState.GSTActive)}
+                    onPress={() => {
+                      const willCheck = !headerState.GSTActive;
+                      if (willCheck && (parseFloat(headerState.GSTPercent) || 0) <= 0) {
+                        showToast('Set GST Percentage in Company Master', 'error');
+                      }
+                      updateHeader('GSTActive', willCheck);
+                    }}
                   />
 
                   {/* TEAL % */}
@@ -1738,6 +2259,12 @@ export default function DirectPurchaseScreen() {
                       style={[styles.input, { width: 50, textAlign: 'center', borderTopRightRadius: 0, borderBottomRightRadius: 0 }]}
                       value={headerState.TEALPercent}
                       onChangeText={(t) => updateHeader('TEALPercent', t)}
+                      onBlur={() => {
+                        const isPiece = (currentDetail as any)?.PurchaseType === 'P' || (currentDetail as any)?.PurchaseMCType === 'PerPCS';
+                        if (!isPiece && (!headerState.TEALPercent || (parseFloat(headerState.TEALPercent) || 0) <= 0)) {
+                          showToast('Enter TEAL Percent.', 'error');
+                        }
+                      }}
                       keyboardType="numeric"
                     />
                     <TouchableOpacity style={[styles.lookupBtn, { width: 24 }]} onPress={fetchTaelPercent}>
@@ -1749,6 +2276,12 @@ export default function DirectPurchaseScreen() {
                       style={[styles.input, { width: 62, textAlign: 'right' }]}
                       value={headerState.TEAL}
                       onChangeText={(t) => updateHeader('TEAL', t)}
+                      onBlur={() => {
+                        const isPiece = (currentDetail as any)?.PurchaseType === 'P' || (currentDetail as any)?.PurchaseMCType === 'PerPCS';
+                        if (!isPiece && (parseFloat(headerState.TEAL) || 0) <= 0) {
+                          showToast('Enter teal.', 'error');
+                        }
+                      }}
                       keyboardType="numeric"
                     />
 
@@ -1757,6 +2290,12 @@ export default function DirectPurchaseScreen() {
                       style={[styles.input, { width: 66, textAlign: 'right' }]}
                       value={headerState.CostPerGram}
                       onChangeText={(t) => updateHeader('CostPerGram', t)}
+                      onBlur={() => {
+                        const isPiece = (currentDetail as any)?.PurchaseType === 'P' || (currentDetail as any)?.PurchaseMCType === 'PerPCS';
+                        if (!isPiece && (parseFloat(headerState.CostPerGram) || 0) <= 0) {
+                          showToast('Enter cost per gram.', 'error');
+                        }
+                      }}
                       keyboardType="numeric"
                     />
                   </View>
@@ -1918,12 +2457,17 @@ export default function DirectPurchaseScreen() {
                 </TouchableOpacity>
               )}
               <TouchableOpacity
-                style={styles.addLineBtn}
+                style={[styles.addLineBtn, isFormLocked && { backgroundColor: '#BDBDBD' }]}
                 onPress={() => {
+                  if (isFormLocked) {
+                    showToast('This bill is closed. Cannot add lines!', 'info');
+                    return;
+                  }
                   setSelectedIndex(null);
                   setCurrentDetail(getInitialDetailState());
                   setDetailModalVisible(true);
                 }}
+                disabled={isFormLocked}
               >
                 <Ionicons name="add" size={14} color="#FFF" style={{ marginRight: 4 }} />
                 <ThemedText style={styles.addLineBtnText}>New Line</ThemedText>
@@ -1932,20 +2476,22 @@ export default function DirectPurchaseScreen() {
           </View>
 
           <ScrollView horizontal contentContainerStyle={{ width: '100%' }}>
-            <View style={{ width: '100%', minWidth: 1050 }}>
+            <View style={{ width: '100%', minWidth: 1250 }}>
               <View style={styles.tableHeader}>
                 <ThemedText style={[styles.tableHeaderText, { width: 120, textAlign: 'center' }]}>Item Code</ThemedText>
                 <ThemedText style={[styles.tableHeaderText, { width: 60, textAlign: 'center' }]}>Class</ThemedText>
-                <ThemedText style={[styles.tableHeaderText, { flex: 2, minWidth: 200, textAlign: 'center' }]}>Description</ThemedText>
-                <ThemedText style={[styles.tableHeaderText, { width: 70, textAlign: 'center' }]}>SizeCode</ThemedText>
-                <ThemedText style={[styles.tableHeaderText, { width: 80, textAlign: 'right' }]}>Weight</ThemedText>
-                <ThemedText style={[styles.tableHeaderText, { width: 80, textAlign: 'right' }]}>NetWeight</ThemedText>
-                <ThemedText style={[styles.tableHeaderText, { width: 80, textAlign: 'right' }]}>GoldLoss</ThemedText>
-                <ThemedText style={[styles.tableHeaderText, { width: 90, textAlign: 'right' }]}>CostPerGram</ThemedText>
+                <ThemedText style={[styles.tableHeaderText, { flex: 2, minWidth: 180, textAlign: 'center' }]}>Description</ThemedText>
+                <ThemedText style={[styles.tableHeaderText, { flex: 1.5, minWidth: 150, textAlign: 'center' }]}>Stone Description</ThemedText>
+                <ThemedText style={[styles.tableHeaderText, { width: 65, textAlign: 'center' }]}>SizeCode</ThemedText>
+                <ThemedText style={[styles.tableHeaderText, { width: 75, textAlign: 'right' }]}>Weight</ThemedText>
+                <ThemedText style={[styles.tableHeaderText, { width: 75, textAlign: 'right' }]}>Stone Wt</ThemedText>
+                <ThemedText style={[styles.tableHeaderText, { width: 75, textAlign: 'right' }]}>Net Wt</ThemedText>
+                <ThemedText style={[styles.tableHeaderText, { width: 75, textAlign: 'right' }]}>GoldLoss</ThemedText>
+                <ThemedText style={[styles.tableHeaderText, { width: 85, textAlign: 'right' }]}>CostPerGram</ThemedText>
                 <ThemedText style={[styles.tableHeaderText, { width: 75, textAlign: 'right' }]}>PMC</ThemedText>
                 <ThemedText style={[styles.tableHeaderText, { width: 75, textAlign: 'right' }]}>SMC</ThemedText>
-                <ThemedText style={[styles.tableHeaderText, { width: 50, textAlign: 'right' }]}>PCS</ThemedText>
-                <ThemedText style={[styles.tableHeaderText, { flex: 1, minWidth: 110, textAlign: 'right' }]}>TotalCost</ThemedText>
+                <ThemedText style={[styles.tableHeaderText, { width: 45, textAlign: 'right' }]}>PCS</ThemedText>
+                <ThemedText style={[styles.tableHeaderText, { flex: 1, minWidth: 105, textAlign: 'right' }]}>TotalCost</ThemedText>
               </View>
 
               <ScrollView style={{ minHeight: 140, maxHeight: 240 }}>
@@ -1962,20 +2508,28 @@ export default function DirectPurchaseScreen() {
                         styles.tableRow,
                         { backgroundColor: selectedIndex === idx ? '#F9F1E2' : idx % 2 === 1 ? '#FAF7F0' : '#FFFFFF' }
                       ]}
-                      onPress={() => handleEditDetail(idx)}
+                      onPress={() => {
+                        if (isFormLocked) {
+                          showToast('This bill is closed. Cannot edit lines!', 'info');
+                          return;
+                        }
+                        handleEditDetail(idx);
+                      }}
                     >
                       <ThemedText style={[styles.tableCellText, { width: 120, fontWeight: 'bold' }]}>{item.InventoryCode}</ThemedText>
                       <ThemedText style={[styles.tableCellText, { width: 60, textAlign: 'center' }]}>{item.ClassCode}</ThemedText>
-                      <ThemedText style={[styles.tableCellText, { flex: 2, minWidth: 200 }]}>{item.InventoryDescription}</ThemedText>
-                      <ThemedText style={[styles.tableCellText, { width: 70, textAlign: 'center' }]}>{item.SizeCode}</ThemedText>
-                      <ThemedText style={[styles.tableCellText, { width: 80, textAlign: 'right' }]}>{parseFloat(item.Weight || 0).toFixed(3)}</ThemedText>
-                      <ThemedText style={[styles.tableCellText, { width: 80, textAlign: 'right' }]}>{parseFloat(item.NetWeight || item.Weight || 0).toFixed(3)}</ThemedText>
-                      <ThemedText style={[styles.tableCellText, { width: 80, textAlign: 'right' }]}>{parseFloat(item.GoldLoss || 0).toFixed(3)}</ThemedText>
-                      <ThemedText style={[styles.tableCellText, { width: 90, textAlign: 'right' }]}>{parseFloat(item.CostPerGram || 0).toFixed(2)}</ThemedText>
+                      <ThemedText style={[styles.tableCellText, { flex: 2, minWidth: 180 }]}>{item.InventoryDescription}</ThemedText>
+                      <ThemedText style={[styles.tableCellText, { flex: 1.5, minWidth: 150 }]}>{item.DiamondDescription || ''}</ThemedText>
+                      <ThemedText style={[styles.tableCellText, { width: 65, textAlign: 'center' }]}>{item.SizeCode}</ThemedText>
+                      <ThemedText style={[styles.tableCellText, { width: 75, textAlign: 'right' }]}>{parseFloat(item.Weight || 0).toFixed(3)}</ThemedText>
+                      <ThemedText style={[styles.tableCellText, { width: 75, textAlign: 'right' }]}>{parseFloat(item.StoneWeight || 0).toFixed(3)}</ThemedText>
+                      <ThemedText style={[styles.tableCellText, { width: 75, textAlign: 'right' }]}>{parseFloat(item.NetWeight || (parseFloat(item.Weight || 0) - parseFloat(item.StoneWeight || 0)) || 0).toFixed(3)}</ThemedText>
+                      <ThemedText style={[styles.tableCellText, { width: 75, textAlign: 'right' }]}>{parseFloat(item.GoldLoss || 0).toFixed(3)}</ThemedText>
+                      <ThemedText style={[styles.tableCellText, { width: 85, textAlign: 'right' }]}>{parseFloat(item.CostPerGram || 0).toFixed(2)}</ThemedText>
                       <ThemedText style={[styles.tableCellText, { width: 75, textAlign: 'right' }]}>{parseFloat(item.PMC || 0).toFixed(2)}</ThemedText>
                       <ThemedText style={[styles.tableCellText, { width: 75, textAlign: 'right' }]}>{parseFloat(item.SMC || 0).toFixed(2)}</ThemedText>
-                      <ThemedText style={[styles.tableCellText, { width: 50, textAlign: 'right' }]}>{item.PCS || '1'}</ThemedText>
-                      <ThemedText style={[styles.tableCellText, { flex: 1, minWidth: 110, textAlign: 'right', fontWeight: 'bold' }]}>{parseFloat(item.TotalCost || 0).toFixed(2)}</ThemedText>
+                      <ThemedText style={[styles.tableCellText, { width: 45, textAlign: 'right' }]}>{item.PCS || '1'}</ThemedText>
+                      <ThemedText style={[styles.tableCellText, { flex: 1, minWidth: 105, textAlign: 'right', fontWeight: 'bold' }]}>{parseFloat(item.TotalCost || 0).toFixed(2)}</ThemedText>
                     </TouchableOpacity>
                   ))
                 )}
@@ -1985,28 +2539,32 @@ export default function DirectPurchaseScreen() {
               <View style={styles.tableTotalRow}>
                 <ThemedText style={[styles.tableTotalCellText, { width: 120, textAlign: 'center' }]}>TOTAL :</ThemedText>
                 <View style={{ width: 60 }} />
-                <View style={{ flex: 2, minWidth: 200 }} />
-                <View style={{ width: 70 }} />
-                <ThemedText style={[styles.tableTotalCellText, { width: 80, textAlign: 'right' }]}>
+                <View style={{ flex: 2, minWidth: 180 }} />
+                <View style={{ flex: 1.5, minWidth: 150 }} />
+                <View style={{ width: 65 }} />
+                <ThemedText style={[styles.tableTotalCellText, { width: 75, textAlign: 'right' }]}>
                   {details.reduce((sum, i) => sum + (parseFloat(i.Weight) || 0), 0).toFixed(3)}
                 </ThemedText>
-                <ThemedText style={[styles.tableTotalCellText, { width: 80, textAlign: 'right' }]}>
-                  {details.reduce((sum, i) => sum + (parseFloat(i.NetWeight || i.Weight) || 0), 0).toFixed(3)}
+                <ThemedText style={[styles.tableTotalCellText, { width: 75, textAlign: 'right' }]}>
+                  {details.reduce((sum, i) => sum + (parseFloat(i.StoneWeight) || 0), 0).toFixed(3)}
                 </ThemedText>
-                <ThemedText style={[styles.tableTotalCellText, { width: 80, textAlign: 'right' }]}>
+                <ThemedText style={[styles.tableTotalCellText, { width: 75, textAlign: 'right' }]}>
+                  {details.reduce((sum, i) => sum + (parseFloat(i.NetWeight || (parseFloat(i.Weight || 0) - parseFloat(i.StoneWeight || 0))) || 0), 0).toFixed(3)}
+                </ThemedText>
+                <ThemedText style={[styles.tableTotalCellText, { width: 75, textAlign: 'right' }]}>
                   {details.reduce((sum, i) => sum + (parseFloat(i.GoldLoss) || 0), 0).toFixed(3)}
                 </ThemedText>
-                <View style={{ width: 90 }} />
+                <View style={{ width: 85 }} />
                 <ThemedText style={[styles.tableTotalCellText, { width: 75, textAlign: 'right' }]}>
                   {details.reduce((sum, i) => sum + (parseFloat(i.PMCCost || i.PMC) || 0), 0).toFixed(2)}
                 </ThemedText>
                 <ThemedText style={[styles.tableTotalCellText, { width: 75, textAlign: 'right' }]}>
                   {details.reduce((sum, i) => sum + (parseFloat(i.SMCCost || i.SMC) || 0), 0).toFixed(2)}
                 </ThemedText>
-                <ThemedText style={[styles.tableTotalCellText, { width: 50, textAlign: 'right' }]}>
+                <ThemedText style={[styles.tableTotalCellText, { width: 45, textAlign: 'right' }]}>
                   {details.reduce((sum, i) => sum + (parseFloat(i.PCS) || 1), 0)}
                 </ThemedText>
-                <ThemedText style={[styles.tableTotalCellText, { flex: 1, minWidth: 110, textAlign: 'right' }]}>
+                <ThemedText style={[styles.tableTotalCellText, { flex: 1, minWidth: 105, textAlign: 'right' }]}>
                   {details.reduce((sum, i) => sum + (parseFloat(i.TotalCost) || 0), 0).toFixed(2)}
                 </ThemedText>
               </View>
@@ -2122,30 +2680,67 @@ export default function DirectPurchaseScreen() {
                         onChangeText={(t) => updateDetail('CatalogueCode', t)}
                         onBlur={async () => {
                           const catCode = (currentDetail.CatalogueCode || '').trim();
-                          if (catCode) {
-                            try {
-                              const cRes = await fetchCatalogueByCodeApi(catCode);
-                              if (cRes.success && cRes.data) {
-                                const item = cRes.data;
-                                const categoryCodeVal = item.CategoryCode || currentDetail.CategoryCode;
-                                const updates: any = {
-                                  CatalogueCode: item.CatalogueCode || catCode,
-                                  CategoryCode: categoryCodeVal,
-                                  TrayId: item.TrayId || currentDetail.TrayId || '',
-                                  InventoryDescription: item.CatalogueName || currentDetail.InventoryDescription,
-                                };
-                                if (categoryCodeVal) {
-                                  updates.ClassCode = categoryCodeVal.substring(0, 3);
-                                  const catJson = await fetchCategoryByCodeApi(categoryCodeVal);
-                                  if (catJson.success && catJson.data) {
-                                    if (!isManual && catJson.data.NextInventoryCode) {
-                                      updates.InventoryCode = catJson.data.NextInventoryCode.trim();
-                                    }
+                          if (!catCode) {
+                            showToast('Catalogue Code Cannot be Blank ....', 'error');
+                            return;
+                          }
+                          try {
+                            const cRes = await fetchCatalogueByCodeApi(catCode);
+                            if (cRes.success && cRes.data) {
+                              const item = cRes.data;
+                              const categoryCodeVal = (item.CategoryCode || currentDetail.CategoryCode || '').trim();
+
+                              // Fetch enriched category detail (SizeFactor, ClassCode, NextInventoryCode, CostPerGram from JobSheetDetail)
+                              let catDetailData: any = null;
+                              let costPerGramVal: any = null;
+                              if (categoryCodeVal) {
+                                try {
+                                  const catDetRes = await fetchCategoryDetailApi(categoryCodeVal, headerState.JobSheetNo, item.CatalogueCode);
+                                  if (catDetRes.success && catDetRes.category) {
+                                    catDetailData = catDetRes.category;
+                                    costPerGramVal = catDetRes.costPerGram;
                                   }
-                                }
-                                updateDetail(updates);
+                                } catch (_) { }
                               }
-                            } catch (_) { }
+
+                              // Fetch Catalogue Summary (Catalogue Weight & PCS)
+                              let catSummary: any = { weight: 0, pcs: 0 };
+                              if (item.CatalogueCode && headerState.JobSheetNo) {
+                                try {
+                                  catSummary = await fetchCatalogueSummaryApi(item.CatalogueCode, headerState.JobSheetNo);
+                                } catch (_) { }
+                              }
+
+                              const updates: any = {
+                                CatalogueCode: item.CatalogueCode || catCode,
+                                CategoryCode: categoryCodeVal,
+                                TrayId: (item.TrayId || currentDetail.TrayId || '').trim(),
+                                InventoryDescription: item.CatalogueName || currentDetail.InventoryDescription,
+                                CatalogueWeight: catSummary.weight ? Number(catSummary.weight).toFixed(2) : '0.00',
+                                CataloguePCS: catSummary.pcs ? String(catSummary.pcs) : '0',
+                                SizeFactor: catDetailData ? !!catDetailData.SizeFactor : false,
+                                ClassCode: catDetailData?.ClassCode || (categoryCodeVal ? categoryCodeVal.substring(0, 3) : ''),
+                                CostPerGram: costPerGramVal != null ? String(costPerGramVal) : (currentDetail.CostPerGram || headerState.CostPerGram || '0.00'),
+                                PCS: currentDetail.PCS || '1',
+                              };
+
+                              if (!isManual && catDetailData?.NextInventoryCode) {
+                                updates.InventoryCode = catDetailData.NextInventoryCode.trim();
+                              }
+
+                              if (item.PurchaseType === 'P' || item.SalesType === 'P') {
+                                updates.PurchaseMCType = item.PurchaseType === 'P' ? 'PerPCS' : currentDetail.PurchaseMCType;
+                                updates.SalesMCType = item.SalesType === 'P' ? 'PerPCS' : currentDetail.SalesMCType;
+                              }
+
+                              updateDetail(updates);
+                            } else {
+                              showToast('Invalid catalogue code!', 'error');
+                              updateDetail({ CatalogueCode: '', CategoryCode: '', InventoryCode: '' });
+                            }
+                          } catch (_) {
+                            showToast('Invalid catalogue code!', 'error');
+                            updateDetail({ CatalogueCode: '', CategoryCode: '', InventoryCode: '' });
                           }
                         }}
                       />
@@ -2163,6 +2758,31 @@ export default function DirectPurchaseScreen() {
                         style={{ flex: 1, paddingHorizontal: 6, paddingVertical: 2, fontSize: 11.5, color: '#2B2114' }}
                         value={currentDetail.CategoryCode}
                         onChangeText={(t) => updateDetail('CategoryCode', t)}
+                        onBlur={async () => {
+                          const catg = (currentDetail.CategoryCode || '').trim();
+                          if (!catg) {
+                            showToast('Category Code Cannot be Blank ....', 'error');
+                            return;
+                          }
+                          try {
+                            const catDetailRes = await fetchCategoryDetailApi(catg, headerState.JobSheetNo, currentDetail.CatalogueCode);
+                            if (catDetailRes.success && catDetailRes.category) {
+                              const cData = catDetailRes.category;
+                              const updates: any = {
+                                CategoryCode: catg,
+                                ClassCode: cData.ClassCode || catg.substring(0, 3),
+                                SizeFactor: !!cData.SizeFactor,
+                              };
+                              if (!isManual && cData.NextInventoryCode) {
+                                updates.InventoryCode = cData.NextInventoryCode.trim();
+                              }
+                              if (catDetailRes.costPerGram != null) {
+                                updates.CostPerGram = String(catDetailRes.costPerGram);
+                              }
+                              updateDetail(updates);
+                            }
+                          } catch (_) { }
+                        }}
                       />
                     </View>
 
@@ -2172,6 +2792,22 @@ export default function DirectPurchaseScreen() {
                         style={{ width: 82, paddingHorizontal: 6, paddingVertical: 2, fontSize: 11.5, color: '#2B2114' }}
                         value={currentDetail.TrayId}
                         onChangeText={(t) => updateDetail('TrayId', t)}
+                        onBlur={async () => {
+                          const tray = (currentDetail.TrayId || '').trim();
+                          if (!tray) {
+                            showToast('Tray Id Cannot be Blank ....', 'error');
+                            return;
+                          }
+                          try {
+                            const res = await fetchTraysApi();
+                            if (res.success && Array.isArray(res.data)) {
+                              const match = res.data.find((tr: any) => (tr.TrayId || '').trim().toUpperCase() === tray.toUpperCase());
+                              if (!match) {
+                                showToast('Invalid tray ID!', 'error');
+                              }
+                            }
+                          } catch (_) { }
+                        }}
                       />
                       <TouchableOpacity
                         style={{ width: 26, backgroundColor: '#FAF4E6', borderLeftWidth: 1, borderColor: '#D8CEBD', justifyContent: 'center', alignItems: 'center', flexShrink: 0 }}
@@ -2282,6 +2918,11 @@ export default function DirectPurchaseScreen() {
                         style={{ flex: 1, paddingHorizontal: 6, paddingVertical: 2, fontSize: 11.5, color: '#2B2114' }}
                         value={currentDetail.InventoryCode}
                         onChangeText={(t) => updateDetail('InventoryCode', t)}
+                        onBlur={() => {
+                          if (!currentDetail.InventoryCode?.trim()) {
+                            showToast('Inventory Code Cannot be Blank ....', 'error');
+                          }
+                        }}
                         editable={isManual}
                       />
                     </View>
@@ -2292,6 +2933,11 @@ export default function DirectPurchaseScreen() {
                         style={{ flex: 1, paddingHorizontal: 6, paddingVertical: 2, fontSize: 11.5, color: '#2B2114' }}
                         value={currentDetail.InventoryDescription}
                         onChangeText={(t) => updateDetail('InventoryDescription', t)}
+                        onBlur={() => {
+                          if (!currentDetail.InventoryDescription?.trim() && !currentDetail.Description?.trim()) {
+                            showToast('Description Cannot be Blank ....', 'error');
+                          }
+                        }}
                       />
                     </View>
 
@@ -2301,6 +2947,27 @@ export default function DirectPurchaseScreen() {
                         style={{ flex: 1, paddingHorizontal: 6, paddingVertical: 2, fontSize: 11.5, color: '#2B2114', textAlign: 'right' }}
                         value={currentDetail.Weight}
                         onChangeText={(t) => updateDetail('Weight', t)}
+                        onBlur={async () => {
+                          const w = parseFloat(currentDetail.Weight) || 0;
+                          const isPiece = currentDetail.PurchaseMCType === 'PerPCS' || salesPCS;
+                          if (w < 0) {
+                            showToast('Invalid weight!', 'error');
+                            return;
+                          }
+                          if (!isPiece && w <= 0) {
+                            showToast('Invalid weight!', 'error');
+                            return;
+                          }
+                          if (w > 0) {
+                            try {
+                              const glRes = await fetchGoldLossByWeightApi(w);
+                              if (glRes.success && glRes.goldLoss != null) {
+                                const glVal = parseFloat(glRes.goldLoss).toFixed(3);
+                                updateDetail('GoldLoss', glVal);
+                              }
+                            } catch (_) { }
+                          }
+                        }}
                         keyboardType="numeric"
                       />
                     </View>
@@ -2309,8 +2976,27 @@ export default function DirectPurchaseScreen() {
                     <View style={{ width: 95, borderWidth: 1, borderColor: '#D8CEBD', borderTopWidth: 0, borderLeftWidth: 0, flexDirection: 'row', height: 28, backgroundColor: '#FFFFFF' }}>
                       <TextInput
                         style={{ width: 67, paddingHorizontal: 6, paddingVertical: 2, fontSize: 11.5, color: '#2B2114', textAlign: 'center' }}
-                        value={currentDetail.SizeCode}
+                        value={String(currentDetail.SizeCode ?? '')}
                         onChangeText={(t) => updateDetail('SizeCode', t)}
+                        onBlur={async () => {
+                          const size = String(currentDetail.SizeCode ?? '').trim();
+                          if (currentDetail.SizeFactor && !size) {
+                            showToast('SizeCode Cannot be Empty', 'error');
+                            return;
+                          }
+                          if (size) {
+                            try {
+                              const sRes = await fetchSizesApi();
+                              if (sRes.success && Array.isArray(sRes.data)) {
+                                const match = sRes.data.find((sz: any) => String(sz.SizeCode ?? '').trim().toUpperCase() === size.toUpperCase());
+                                if (!match) {
+                                  showToast('Invalid Size Code!', 'error');
+                                  updateDetail('SizeCode', '');
+                                }
+                              }
+                            } catch (_) { }
+                          }
+                        }}
                       />
                       <TouchableOpacity style={{ width: 26, backgroundColor: '#FAF4E6', borderLeftWidth: 1, borderColor: '#D8CEBD', justifyContent: 'center', alignItems: 'center', flexShrink: 0 }} onPress={fetchSizes}>
                         <ThemedText style={{ color: '#6E4E10', fontWeight: 'bold', fontSize: 12 }}>...</ThemedText>
@@ -2333,6 +3019,18 @@ export default function DirectPurchaseScreen() {
                         style={{ flex: 1, paddingHorizontal: 6, paddingVertical: 2, fontSize: 11.5, color: '#2B2114', textAlign: 'right' }}
                         value={currentDetail.CostPerGram}
                         onChangeText={(t) => updateDetail('CostPerGram', t)}
+                        onBlur={() => {
+                          let cpg = (currentDetail.CostPerGram || '').trim();
+                          if (!cpg) {
+                            cpg = headerState.CostPerGram || '0.00';
+                            updateDetail('CostPerGram', cpg);
+                          }
+                          const val = parseFloat(cpg) || 0;
+                          const isPiece = currentDetail.PurchaseMCType === 'PerPCS';
+                          if (!isPiece && val <= 0) {
+                            showToast('Invalid cost per gram!', 'error');
+                          }
+                        }}
                         placeholder={headerState.CostPerGram}
                         keyboardType="numeric"
                       />
@@ -2365,6 +3063,15 @@ export default function DirectPurchaseScreen() {
                         style={{ flex: 1, paddingHorizontal: 6, paddingVertical: 2, fontSize: 11.5, color: '#2B2114', textAlign: 'right' }}
                         value={currentDetail.PCS}
                         onChangeText={(t) => updateDetail('PCS', t)}
+                        onBlur={() => {
+                          const p = parseInt(currentDetail.PCS, 10) || 0;
+                          if (p < 1) {
+                            showToast('Invalid pcs!', 'error');
+                            updateDetail('PCS', '1');
+                          } else {
+                            updateDetail('PCS', String(p));
+                          }
+                        }}
                         keyboardType="numeric"
                       />
                     </View>
@@ -2377,6 +3084,78 @@ export default function DirectPurchaseScreen() {
                         editable={false}
                       />
                     </View>
+                  </View>
+
+                  {/* SUBLINE 3 - ROW 5: Second input row (matches VB.NET Panel1 y=92 controls) */}
+                  {/* No separate header row - fields align under Subline 2 column positions */}
+                  <View style={{ flexDirection: 'row' }}>
+                    {/* Spacer under Inventory Code (width: 130) */}
+                    <View style={{ width: 130, borderWidth: 1, borderColor: '#D8CEBD', borderTopWidth: 0, height: 28, backgroundColor: '#FAF8F3' }} />
+
+                    {/* Diamond/Stone Description — same column as Inventory Description (flex: 2, minWidth: 200) */}
+                    <View style={{ flex: 2, minWidth: 200, borderWidth: 1, borderColor: '#D8CEBD', borderTopWidth: 0, borderLeftWidth: 0, height: 28, backgroundColor: '#FFFFFF' }}>
+                      <TextInput
+                        style={{ flex: 1, paddingHorizontal: 6, paddingVertical: 2, fontSize: 11.5, color: '#2B2114' }}
+                        value={currentDetail.DiamondDescription}
+                        onChangeText={(t) => updateDetail('DiamondDescription', t)}
+                        maxLength={50}
+                        placeholder="Stone Description"
+                        placeholderTextColor="#C0A87A"
+                      />
+                    </View>
+
+                    {/* Stone Weight — same column as Weight (width: 85) */}
+                    <View style={{ width: 85, borderWidth: 1, borderColor: '#D8CEBD', borderTopWidth: 0, borderLeftWidth: 0, height: 28, backgroundColor: '#FFFFFF' }}>
+                      <TextInput
+                        style={{ flex: 1, paddingHorizontal: 6, paddingVertical: 2, fontSize: 11.5, color: '#2B2114', textAlign: 'right' }}
+                        value={currentDetail.StoneWeight}
+                        onChangeText={(t) => updateDetail('StoneWeight', t)}
+                        keyboardType="numeric"
+                        placeholder="0.000"
+                        placeholderTextColor="#C0A87A"
+                      />
+                    </View>
+
+                    {/* Spacer under Size Code (width: 95) */}
+                    <View style={{ width: 95, borderWidth: 1, borderColor: '#D8CEBD', borderTopWidth: 0, borderLeftWidth: 0, height: 28, backgroundColor: '#FAF8F3' }} />
+
+                    {/* Net Weight (readonly) — same column as Gold Loss (width: 85) */}
+                    <View style={{ width: 85, borderWidth: 1, borderColor: '#D8CEBD', borderTopWidth: 0, borderLeftWidth: 0, height: 28, backgroundColor: '#F8F5EE' }}>
+                      <TextInput
+                        style={{ flex: 1, paddingHorizontal: 6, paddingVertical: 2, fontSize: 11.5, color: '#6E4E10', textAlign: 'right', fontWeight: 'bold' }}
+                        value={currentDetail.NetWeight}
+                        editable={false}
+                        placeholder="Net Wt"
+                        placeholderTextColor="#C0A87A"
+                      />
+                    </View>
+
+                    {/* Spacer under Cost / g (width: 95) */}
+                    <View style={{ width: 95, borderWidth: 1, borderColor: '#D8CEBD', borderTopWidth: 0, borderLeftWidth: 0, height: 28, backgroundColor: '#FAF8F3' }} />
+
+                    {/* PMC Cost (readonly) — same column as PMC (width: 80) */}
+                    <View style={{ width: 80, borderWidth: 1, borderColor: '#D8CEBD', borderTopWidth: 0, borderLeftWidth: 0, height: 28, backgroundColor: '#F8F5EE' }}>
+                      <TextInput
+                        style={{ flex: 1, paddingHorizontal: 6, paddingVertical: 2, fontSize: 11.5, color: '#6E4E10', textAlign: 'right', fontWeight: 'bold' }}
+                        value={currentDetail.PMCCost}
+                        editable={false}
+                      />
+                    </View>
+
+                    {/* SMC Cost (readonly) — same column as SMC (width: 80) */}
+                    <View style={{ width: 80, borderWidth: 1, borderColor: '#D8CEBD', borderTopWidth: 0, borderLeftWidth: 0, height: 28, backgroundColor: '#F8F5EE' }}>
+                      <TextInput
+                        style={{ flex: 1, paddingHorizontal: 6, paddingVertical: 2, fontSize: 11.5, color: '#6E4E10', textAlign: 'right', fontWeight: 'bold' }}
+                        value={currentDetail.SMCCost}
+                        editable={false}
+                      />
+                    </View>
+
+                    {/* Spacer under PCS (width: 65) */}
+                    <View style={{ width: 65, borderWidth: 1, borderColor: '#D8CEBD', borderTopWidth: 0, borderLeftWidth: 0, height: 28, backgroundColor: '#FAF8F3' }} />
+
+                    {/* Spacer under Total Cost (flex: 1, minWidth: 110) */}
+                    <View style={{ flex: 1, minWidth: 110, borderWidth: 1, borderColor: '#D8CEBD', borderTopWidth: 0, borderLeftWidth: 0, height: 28, backgroundColor: '#FAF8F3' }} />
                   </View>
                 </View>
               </ScrollView>
@@ -2462,6 +3241,11 @@ export default function DirectPurchaseScreen() {
                         style={[styles.input, { width: 90 }]}
                         value={currentDetail.IPMType}
                         onChangeText={(t) => updateDetail('IPMType', t)}
+                        onBlur={() => {
+                          if (currentDetail.IPM && !currentDetail.IPMType?.trim()) {
+                            showToast('Type Cannot be Blank ....', 'error');
+                          }
+                        }}
                         placeholder="Bar / Coin"
                       />
                     </View>
@@ -2471,6 +3255,11 @@ export default function DirectPurchaseScreen() {
                         style={[styles.input, { width: 100 }]}
                         value={currentDetail.IPMBarNo}
                         onChangeText={(t) => updateDetail('IPMBarNo', t)}
+                        onBlur={() => {
+                          if (currentDetail.IPM && !currentDetail.IPMBarNo?.trim()) {
+                            showToast('BarNo Cannot be Blank ....', 'error');
+                          }
+                        }}
                       />
                     </View>
                     <View style={styles.ipmCol}>
@@ -2479,6 +3268,11 @@ export default function DirectPurchaseScreen() {
                         style={[styles.input, { width: 70 }]}
                         value={currentDetail.IPMPurity}
                         onChangeText={(t) => updateDetail('IPMPurity', t)}
+                        onBlur={() => {
+                          if (currentDetail.IPM && !currentDetail.IPMPurity?.trim()) {
+                            showToast('Purity Cannot be Blank ....', 'error');
+                          }
+                        }}
                         placeholder="999.9"
                       />
                     </View>
@@ -2488,6 +3282,11 @@ export default function DirectPurchaseScreen() {
                         style={[styles.input, { width: 80 }]}
                         value={currentDetail.IPMGSTType}
                         onChangeText={(t) => updateDetail('IPMGSTType', t)}
+                        onBlur={() => {
+                          if (currentDetail.IPM && !currentDetail.IPMGSTType?.trim()) {
+                            showToast('GST Type Cannot be Blank ....', 'error');
+                          }
+                        }}
                       />
                     </View>
                     <View style={styles.ipmCol}>
@@ -2497,6 +3296,11 @@ export default function DirectPurchaseScreen() {
                           style={[styles.input, { width: 85, borderTopRightRadius: 0, borderBottomRightRadius: 0 }]}
                           value={currentDetail.IPMRefiner}
                           onChangeText={(t) => updateDetail('IPMRefiner', t)}
+                          onBlur={() => {
+                            if (currentDetail.IPM && !currentDetail.IPMRefiner?.trim()) {
+                              showToast('Refiner Cannot be Blank ....', 'error');
+                            }
+                          }}
                         />
                         <TouchableOpacity style={[styles.lookupBtn, { width: 24 }]} onPress={fetchRefiners}>
                           <ThemedText style={{ fontSize: 10 }}>...</ThemedText>
@@ -2510,6 +3314,11 @@ export default function DirectPurchaseScreen() {
                           style={[styles.input, { width: 85, borderTopRightRadius: 0, borderBottomRightRadius: 0 }]}
                           value={currentDetail.IPMCountry}
                           onChangeText={(t) => updateDetail('IPMCountry', t)}
+                          onBlur={() => {
+                            if (currentDetail.IPM && !currentDetail.IPMCountry?.trim()) {
+                              showToast('Country Cannot be Blank ....', 'error');
+                            }
+                          }}
                         />
                         <TouchableOpacity style={[styles.lookupBtn, { width: 24 }]} onPress={fetchCountries}>
                           <ThemedText style={{ fontSize: 10 }}>...</ThemedText>
@@ -2725,6 +3534,269 @@ export default function DirectPurchaseScreen() {
         </View>
       </Modal>
 
+      {/* ================= DIRECT PURCHASE REPORT / PRINT PREVIEW MODAL ================= */}
+      <Modal visible={reportModalVisible} transparent={true} animationType="fade">
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalCard, { width: '95%', maxWidth: 1200, maxHeight: '90%', display: 'flex', flexDirection: 'column' }]}>
+            {/* Modal Top Bar */}
+            <View style={[styles.modalHeader, { backgroundColor: '#F9F4E8', borderBottomColor: '#D8CEBD', paddingVertical: 12, paddingHorizontal: 16 }]}>
+              <View style={{ flex: 1 }}>
+                <ThemedText style={{ fontSize: 16, fontWeight: 'bold', color: '#6E4E10' }}>
+                  Direct Purchase Detail Report
+                </ThemedText>
+                <ThemedText style={{ fontSize: 11, color: '#8C7A6B', marginTop: 2 }}>
+                  {reportCompany.name || 'SMART GOLD'} {reportCompany.city ? `• ${reportCompany.city}` : ''} {reportCompany.phone ? `• Tel: ${reportCompany.phone}` : ''}
+                </ThemedText>
+              </View>
+
+              {/* Action Buttons: Print, PDF, Excel, Close */}
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <TouchableOpacity
+                  style={[styles.reportActionBtn, { backgroundColor: '#FFF8E1', borderColor: '#FFA000' }]}
+                  onPress={handleExecutePrint}
+                  disabled={reportExporting}
+                >
+                  <Ionicons name="print-outline" size={15} color="#8D6E63" />
+                  <ThemedText style={[styles.reportActionBtnText, { color: '#8D6E63' }]}>Print</ThemedText>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[styles.reportActionBtn, { backgroundColor: '#FFEBEE', borderColor: '#E57373' }]}
+                  onPress={handleExportPdf}
+                  disabled={reportExporting}
+                >
+                  <Ionicons name="document-text-outline" size={15} color="#C62828" />
+                  <ThemedText style={[styles.reportActionBtnText, { color: '#C62828' }]}>PDF</ThemedText>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[styles.reportActionBtn, { backgroundColor: '#E8F5E9', borderColor: '#81C784' }]}
+                  onPress={handleExportExcel}
+                  disabled={reportExporting}
+                >
+                  <Ionicons name="download-outline" size={15} color="#2E7D32" />
+                  <ThemedText style={[styles.reportActionBtnText, { color: '#2E7D32' }]}>Excel</ThemedText>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[styles.reportActionBtn, { backgroundColor: '#F5F5F5', borderColor: '#BDBDBD' }]}
+                  onPress={() => setReportModalVisible(false)}
+                >
+                  <Ionicons name="close" size={16} color="#424242" />
+                  <ThemedText style={[styles.reportActionBtnText, { color: '#424242' }]}>Close</ThemedText>
+                </TouchableOpacity>
+              </View>
+            </View>
+
+            {/* Info Summary Strip */}
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 16, paddingHorizontal: 16, paddingVertical: 10, backgroundColor: '#FCFAF6', borderBottomWidth: 1, borderBottomColor: '#EFE7DA' }}>
+              <ThemedText style={{ fontSize: 11.5, color: '#3B2D19' }}>
+                <ThemedText style={{ fontWeight: 'bold', color: '#6E4E10' }}>Job Sheet No: </ThemedText>
+                {reportData[0]?.JobSheetNo || headerState.JobSheetNo || '—'}
+              </ThemedText>
+              <ThemedText style={{ fontSize: 11.5, color: '#3B2D19' }}>
+                <ThemedText style={{ fontWeight: 'bold', color: '#6E4E10' }}>Purchase Bill No: </ThemedText>
+                {reportData[0]?.PurchaseBillNo || headerState.InvoiceNo || '—'}
+              </ThemedText>
+              <ThemedText style={{ fontSize: 11.5, color: '#3B2D19' }}>
+                <ThemedText style={{ fontWeight: 'bold', color: '#6E4E10' }}>Supplier: </ThemedText>
+                {reportData[0]?.SupplierCode || headerState.SupplierCode || '—'}
+              </ThemedText>
+              <ThemedText style={{ fontSize: 11.5, color: '#3B2D19' }}>
+                <ThemedText style={{ fontWeight: 'bold', color: '#6E4E10' }}>Total Records: </ThemedText>
+                {reportData.length}
+              </ThemedText>
+            </View>
+
+            {/* Table Area (Horizontal & Vertical Scrollable) */}
+            <ScrollView horizontal style={{ flex: 1 }} contentContainerStyle={{ flexDirection: 'column' }}>
+              <View style={{ minWidth: 1150 }}>
+                {/* Table Header */}
+                <View style={{ flexDirection: 'row', backgroundColor: '#F4ECE0', borderBottomWidth: 2, borderBottomColor: '#B8903B', paddingVertical: 8 }}>
+                  <View style={{ width: 40, justifyContent: 'center', alignItems: 'center' }}>
+                    <ThemedText style={styles.rptHeaderCell}>#</ThemedText>
+                  </View>
+                  <View style={{ width: 100, paddingHorizontal: 6, justifyContent: 'center' }}>
+                    <ThemedText style={styles.rptHeaderCell}>Job Sheet</ThemedText>
+                  </View>
+                  <View style={{ width: 95, paddingHorizontal: 6, justifyContent: 'center' }}>
+                    <ThemedText style={styles.rptHeaderCell}>Bill No</ThemedText>
+                  </View>
+                  <View style={{ width: 100, paddingHorizontal: 6, justifyContent: 'center' }}>
+                    <ThemedText style={styles.rptHeaderCell}>Inv Code</ThemedText>
+                  </View>
+                  <View style={{ width: 150, paddingHorizontal: 6, justifyContent: 'center' }}>
+                    <ThemedText style={styles.rptHeaderCell}>Description</ThemedText>
+                  </View>
+                  <View style={{ width: 85, paddingHorizontal: 6, justifyContent: 'center' }}>
+                    <ThemedText style={styles.rptHeaderCell}>Catalogue</ThemedText>
+                  </View>
+                  <View style={{ width: 85, paddingHorizontal: 6, justifyContent: 'center', alignItems: 'flex-end' }}>
+                    <ThemedText style={styles.rptHeaderCell}>Pur Wt (g)</ThemedText>
+                  </View>
+                  <View style={{ width: 75, paddingHorizontal: 6, justifyContent: 'center', alignItems: 'flex-end' }}>
+                    <ThemedText style={styles.rptHeaderCell}>Gold Loss</ThemedText>
+                  </View>
+                  <View style={{ width: 55, paddingHorizontal: 6, justifyContent: 'center', alignItems: 'center' }}>
+                    <ThemedText style={styles.rptHeaderCell}>PCS</ThemedText>
+                  </View>
+                  <View style={{ width: 75, paddingHorizontal: 6, justifyContent: 'center', alignItems: 'flex-end' }}>
+                    <ThemedText style={styles.rptHeaderCell}>MC ($)</ThemedText>
+                  </View>
+                  <View style={{ width: 90, paddingHorizontal: 6, justifyContent: 'center', alignItems: 'flex-end' }}>
+                    <ThemedText style={styles.rptHeaderCell}>Total Cost ($)</ThemedText>
+                  </View>
+                  <View style={{ width: 85, paddingHorizontal: 6, justifyContent: 'center', alignItems: 'flex-end' }}>
+                    <ThemedText style={styles.rptHeaderCell}>Det Wt (g)</ThemedText>
+                  </View>
+                  <View style={{ width: 65, paddingHorizontal: 6, justifyContent: 'center', alignItems: 'center' }}>
+                    <ThemedText style={styles.rptHeaderCell}>Det PCS</ThemedText>
+                  </View>
+                  <View style={{ width: 75, paddingHorizontal: 6, justifyContent: 'center', alignItems: 'flex-end' }}>
+                    <ThemedText style={styles.rptHeaderCell}>Det MC ($)</ThemedText>
+                  </View>
+                  <View style={{ width: 90, paddingHorizontal: 6, justifyContent: 'center', alignItems: 'flex-end' }}>
+                    <ThemedText style={styles.rptHeaderCell}>Det Total ($)</ThemedText>
+                  </View>
+                  <View style={{ width: 80, paddingHorizontal: 6, justifyContent: 'center' }}>
+                    <ThemedText style={styles.rptHeaderCell}>Supplier</ThemedText>
+                  </View>
+                  <View style={{ width: 110, paddingHorizontal: 6, justifyContent: 'center' }}>
+                    <ThemedText style={styles.rptHeaderCell}>Diamond Desc</ThemedText>
+                  </View>
+                  <View style={{ width: 75, paddingHorizontal: 6, justifyContent: 'center' }}>
+                    <ThemedText style={styles.rptHeaderCell}>User</ThemedText>
+                  </View>
+                </View>
+
+                {/* Table Rows */}
+                <ScrollView style={{ maxHeight: 380 }}>
+                  {reportData.map((row, idx) => (
+                    <View
+                      key={idx}
+                      style={{
+                        flexDirection: 'row',
+                        backgroundColor: idx % 2 === 0 ? '#FFFFFF' : '#FAF8F4',
+                        borderBottomWidth: 1,
+                        borderBottomColor: '#EFEBE2',
+                        paddingVertical: 7,
+                        alignItems: 'center'
+                      }}
+                    >
+                      <View style={{ width: 40, justifyContent: 'center', alignItems: 'center' }}>
+                        <ThemedText style={styles.rptDataCell}>{idx + 1}</ThemedText>
+                      </View>
+                      <View style={{ width: 100, paddingHorizontal: 6 }}>
+                        <ThemedText style={[styles.rptDataCell, { fontWeight: '600' }]}>{row.JobSheetNo || '—'}</ThemedText>
+                      </View>
+                      <View style={{ width: 95, paddingHorizontal: 6 }}>
+                        <ThemedText style={styles.rptDataCell}>{row.PurchaseBillNo || '—'}</ThemedText>
+                      </View>
+                      <View style={{ width: 100, paddingHorizontal: 6 }}>
+                        <ThemedText style={[styles.rptDataCell, { fontWeight: '600', color: '#8D6E63' }]}>{row.InventoryCode || '—'}</ThemedText>
+                      </View>
+                      <View style={{ width: 150, paddingHorizontal: 6 }}>
+                        <ThemedText style={styles.rptDataCell} numberOfLines={1}>{row.Description || '—'}</ThemedText>
+                      </View>
+                      <View style={{ width: 85, paddingHorizontal: 6 }}>
+                        <ThemedText style={styles.rptDataCell}>{row.CatalogueCode || '—'}</ThemedText>
+                      </View>
+                      <View style={{ width: 85, paddingHorizontal: 6, alignItems: 'flex-end' }}>
+                        <ThemedText style={[styles.rptDataCell, { fontWeight: '600' }]}>{Number(row.Weight || 0).toFixed(3)}</ThemedText>
+                      </View>
+                      <View style={{ width: 75, paddingHorizontal: 6, alignItems: 'flex-end' }}>
+                        <ThemedText style={styles.rptDataCell}>{Number(row.GoldLoss || 0).toFixed(3)}</ThemedText>
+                      </View>
+                      <View style={{ width: 55, paddingHorizontal: 6, alignItems: 'center' }}>
+                        <ThemedText style={styles.rptDataCell}>{row.PCS ?? 1}</ThemedText>
+                      </View>
+                      <View style={{ width: 75, paddingHorizontal: 6, alignItems: 'flex-end' }}>
+                        <ThemedText style={styles.rptDataCell}>{Number(row.MC || 0).toFixed(2)}</ThemedText>
+                      </View>
+                      <View style={{ width: 90, paddingHorizontal: 6, alignItems: 'flex-end' }}>
+                        <ThemedText style={[styles.rptDataCell, { fontWeight: '600', color: '#1B5E20' }]}>{Number(row.TotalCost || 0).toFixed(2)}</ThemedText>
+                      </View>
+                      <View style={{ width: 85, paddingHorizontal: 6, alignItems: 'flex-end' }}>
+                        <ThemedText style={styles.rptDataCell}>{Number(row.DetailWeight || 0).toFixed(3)}</ThemedText>
+                      </View>
+                      <View style={{ width: 65, paddingHorizontal: 6, alignItems: 'center' }}>
+                        <ThemedText style={styles.rptDataCell}>{row.DetailPCS ?? 1}</ThemedText>
+                      </View>
+                      <View style={{ width: 75, paddingHorizontal: 6, alignItems: 'flex-end' }}>
+                        <ThemedText style={styles.rptDataCell}>{Number(row.DetailMC || 0).toFixed(2)}</ThemedText>
+                      </View>
+                      <View style={{ width: 90, paddingHorizontal: 6, alignItems: 'flex-end' }}>
+                        <ThemedText style={styles.rptDataCell}>{Number(row.DetailTotalCost || 0).toFixed(2)}</ThemedText>
+                      </View>
+                      <View style={{ width: 80, paddingHorizontal: 6 }}>
+                        <ThemedText style={styles.rptDataCell}>{row.SupplierCode || '—'}</ThemedText>
+                      </View>
+                      <View style={{ width: 110, paddingHorizontal: 6 }}>
+                        <ThemedText style={styles.rptDataCell} numberOfLines={1}>{row.DiamondDescription || '—'}</ThemedText>
+                      </View>
+                      <View style={{ width: 75, paddingHorizontal: 6 }}>
+                        <ThemedText style={styles.rptDataCell}>{row.CreateUser || '—'}</ThemedText>
+                      </View>
+                    </View>
+                  ))}
+                </ScrollView>
+
+                {/* Table Footer: Totals */}
+                <View style={{ flexDirection: 'row', backgroundColor: '#F4ECE0', borderTopWidth: 2, borderTopColor: '#B8903B', paddingVertical: 8, alignItems: 'center' }}>
+                  <View style={{ width: 40, justifyContent: 'center', alignItems: 'center' }}>
+                    <ThemedText style={[styles.rptHeaderCell, { color: '#B8860B' }]}>Σ</ThemedText>
+                  </View>
+                  <View style={{ width: 440, paddingHorizontal: 6 }}>
+                    <ThemedText style={[styles.rptHeaderCell, { color: '#6E4E10', fontWeight: 'bold' }]}>TOTALS:</ThemedText>
+                  </View>
+                  <View style={{ width: 85, paddingHorizontal: 6, alignItems: 'flex-end' }}>
+                    <ThemedText style={[styles.rptHeaderCell, { color: '#6E4E10', fontWeight: 'bold' }]}>{Number(reportTotals.totalWeight || 0).toFixed(3)}</ThemedText>
+                  </View>
+                  <View style={{ width: 75, paddingHorizontal: 6, alignItems: 'flex-end' }}>
+                    <ThemedText style={[styles.rptHeaderCell, { color: '#6E4E10', fontWeight: 'bold' }]}>{Number(reportTotals.totalGoldLoss || 0).toFixed(3)}</ThemedText>
+                  </View>
+                  <View style={{ width: 55, paddingHorizontal: 6, alignItems: 'center' }}>
+                    <ThemedText style={[styles.rptHeaderCell, { color: '#6E4E10', fontWeight: 'bold' }]}>{reportTotals.totalPCS || 0}</ThemedText>
+                  </View>
+                  <View style={{ width: 75, paddingHorizontal: 6, alignItems: 'flex-end' }}>
+                    <ThemedText style={[styles.rptHeaderCell, { color: '#6E4E10', fontWeight: 'bold' }]}>{Number(reportTotals.totalMC || 0).toFixed(2)}</ThemedText>
+                  </View>
+                  <View style={{ width: 90, paddingHorizontal: 6, alignItems: 'flex-end' }}>
+                    <ThemedText style={[styles.rptHeaderCell, { color: '#1B5E20', fontWeight: 'bold' }]}>{Number(reportTotals.totalCost || 0).toFixed(2)}</ThemedText>
+                  </View>
+                  <View style={{ width: 85, paddingHorizontal: 6, alignItems: 'flex-end' }}>
+                    <ThemedText style={[styles.rptHeaderCell, { color: '#6E4E10', fontWeight: 'bold' }]}>{Number(reportTotals.totalDetailWeight || 0).toFixed(3)}</ThemedText>
+                  </View>
+                  <View style={{ width: 65, paddingHorizontal: 6, alignItems: 'center' }}>
+                    <ThemedText style={[styles.rptHeaderCell, { color: '#6E4E10', fontWeight: 'bold' }]}>{reportTotals.totalDetailPCS || 0}</ThemedText>
+                  </View>
+                  <View style={{ width: 75, paddingHorizontal: 6, alignItems: 'flex-end' }}>
+                    <ThemedText style={[styles.rptHeaderCell, { color: '#6E4E10', fontWeight: 'bold' }]}>{Number(reportTotals.totalDetailMC || 0).toFixed(2)}</ThemedText>
+                  </View>
+                  <View style={{ width: 90, paddingHorizontal: 6, alignItems: 'flex-end' }}>
+                    <ThemedText style={[styles.rptHeaderCell, { color: '#6E4E10', fontWeight: 'bold' }]}>{Number(reportTotals.totalDetailCost || 0).toFixed(2)}</ThemedText>
+                  </View>
+                  <View style={{ width: 265, paddingHorizontal: 6 }} />
+                </View>
+              </View>
+            </ScrollView>
+
+            {/* Modal Bottom Footer */}
+            <View style={{ paddingVertical: 10, paddingHorizontal: 16, backgroundColor: '#FAF8F5', borderTopWidth: 1, borderTopColor: '#E8E1D5', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+              <ThemedText style={{ fontSize: 11, color: '#888' }}>
+                Query executed on tblJobSheetHeader, tblPurchase & tblJobSheetDetail
+              </ThemedText>
+              <TouchableOpacity
+                style={[styles.actionBtn, { width: 90, height: 32 }]}
+                onPress={() => setReportModalVisible(false)}
+              >
+                <ThemedText style={styles.actionBtnText}>Done</ThemedText>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
       {/* ================= LOADING OVERLAY ================= */}
       {loading && (
         <View style={styles.loadingOverlay}>
@@ -2732,6 +3804,69 @@ export default function DirectPurchaseScreen() {
           <ThemedText style={{ color: '#FFF', marginTop: 10, fontWeight: 'bold' }}>Processing...</ThemedText>
         </View>
       )}
+
+      {/* ================= IN-APP CONFIRMATION MODAL (Replaces window.confirm / Alert.alert) ================= */}
+      <Modal visible={confirmDialog.visible} transparent={true} animationType="fade">
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalCard, { width: 380, maxWidth: '90%', borderRadius: 10 }]}>
+            <View style={[styles.modalHeader, { backgroundColor: '#F5E7CA', borderTopLeftRadius: 10, borderTopRightRadius: 10 }]}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <Ionicons
+                  name={confirmDialog.confirmStyle === 'danger' ? 'warning-outline' : 'help-circle-outline'}
+                  size={20}
+                  color={confirmDialog.confirmStyle === 'danger' ? '#C62828' : '#8D6E63'}
+                />
+                <ThemedText style={[styles.modalHeaderTitle, { fontSize: 14, color: '#3B2D19' }]}>
+                  {confirmDialog.title}
+                </ThemedText>
+              </View>
+              <TouchableOpacity onPress={() => setConfirmDialog((prev) => ({ ...prev, visible: false }))}>
+                <Ionicons name="close" size={20} color="#3B2D19" />
+              </TouchableOpacity>
+            </View>
+
+            <View style={{ padding: 18 }}>
+              <ThemedText style={{ fontSize: 13, color: '#333', lineHeight: 20 }}>
+                {confirmDialog.message}
+              </ThemedText>
+
+              <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 10, marginTop: 20 }}>
+                <TouchableOpacity
+                  style={[
+                    styles.actionBtn,
+                    {
+                      backgroundColor: '#FFFFFF',
+                      borderWidth: 1,
+                      borderColor: '#D8CEBD',
+                      paddingHorizontal: 16,
+                      height: 32,
+                    }
+                  ]}
+                  onPress={() => setConfirmDialog((prev) => ({ ...prev, visible: false }))}
+                >
+                  <ThemedText style={{ color: '#555', fontWeight: '600', fontSize: 12 }}>Cancel</ThemedText>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[
+                    styles.actionBtn,
+                    {
+                      backgroundColor: confirmDialog.confirmStyle === 'danger' ? '#C62828' : '#B8860B',
+                      paddingHorizontal: 16,
+                      height: 32,
+                    }
+                  ]}
+                  onPress={confirmDialog.onConfirm}
+                >
+                  <ThemedText style={{ color: '#FFF', fontWeight: 'bold', fontSize: 12 }}>
+                    {confirmDialog.confirmText || 'OK'}
+                  </ThemedText>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </View>
+      </Modal>
 
       {/* ================= TOAST NOTIFICATION (When Modal is Closed) ================= */}
       {toast.visible && !detailModalVisible && (
@@ -3421,6 +4556,30 @@ const styles = StyleSheet.create({
   lovItemText: {
     flex: 1,
     fontSize: 11.5,
+    color: '#3B2D19',
+  },
+
+  // Report Modal Styles
+  reportActionBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingVertical: 5,
+    paddingHorizontal: 10,
+    borderRadius: 5,
+    borderWidth: 1,
+  },
+  reportActionBtnText: {
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  rptHeaderCell: {
+    fontSize: 10.5,
+    fontWeight: '700',
+    color: '#6E4E10',
+  },
+  rptDataCell: {
+    fontSize: 11,
     color: '#3B2D19',
   },
 

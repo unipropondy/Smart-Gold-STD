@@ -46,13 +46,25 @@ router.post("/", async (req, res) => {
     await ensureTableExists(pool);
     const { RefinerCode, RefinerName, Type } = req.body;
 
-    if (!RefinerCode) {
-      return res.status(400).json({ success: false, message: "Refiner Code is required." });
+    const trimmedCode = (RefinerCode || '').trim();
+    const trimmedName = (RefinerName || '').trim();
+    const trimmedType = (Type || '').trim();
+
+    if (!trimmedCode) {
+      return res.status(400).json({ success: false, message: "Please enter Refiner Code !" });
+    }
+
+    if (!trimmedName) {
+      return res.status(400).json({ success: false, message: "Please enter Refiner Name !" });
+    }
+
+    if (!trimmedType) {
+      return res.status(400).json({ success: false, message: "Please enter Type !" });
     }
 
     // Check if exists
     const checkResult = await pool.request()
-      .input('RefinerCode', sql.VarChar, RefinerCode)
+      .input('RefinerCode', sql.VarChar, trimmedCode)
       .query("SELECT RefinerCode FROM tblRefiner WHERE RefinerCode = @RefinerCode");
     
     if (checkResult.recordset.length > 0) {
@@ -70,15 +82,15 @@ router.post("/", async (req, res) => {
     `;
 
     await pool.request()
-      .input('RefinerCode', sql.VarChar, RefinerCode.substring(0, 50))
-      .input('RefinerName', sql.VarChar, RefinerName ? RefinerName.substring(0, 100) : '')
-      .input('Type', sql.VarChar, Type ? Type.substring(0, 50) : '')
+      .input('RefinerCode', sql.VarChar, trimmedCode.substring(0, 50))
+      .input('RefinerName', sql.VarChar, trimmedName ? trimmedName.substring(0, 100) : '')
+      .input('Type', sql.VarChar, trimmedType ? trimmedType.substring(0, 50) : '')
       .query(insertQuery);
 
-    res.json({ success: true, message: "Refiner created successfully." });
+    res.json({ success: true, message: "Saved Successfully!" });
   } catch (err) {
     console.error("Insert Refiner Error:", err);
-    res.status(500).json({ success: false, message: "Failed to create refiner", error: err.message });
+    res.status(500).json({ success: false, message: "Error in Save/Update !", error: err.message });
   }
 });
 
@@ -88,7 +100,21 @@ router.put("/", async (req, res) => {
     const pool = req.pool;
     const { RefinerCode, RefinerName, Type } = req.body;
     
-    if (!RefinerCode) return res.status(400).json({ success: false, message: "Refiner Code is required" });
+    const trimmedCode = (RefinerCode || '').trim();
+    const trimmedName = (RefinerName || '').trim();
+    const trimmedType = (Type || '').trim();
+
+    if (!trimmedCode) {
+      return res.status(400).json({ success: false, message: "Please enter Refiner Code !" });
+    }
+
+    if (!trimmedName) {
+      return res.status(400).json({ success: false, message: "Please enter Refiner Name !" });
+    }
+
+    if (!trimmedType) {
+      return res.status(400).json({ success: false, message: "Please enter Type !" });
+    }
 
     const updateQuery = `
       UPDATE tblRefiner SET 
@@ -100,19 +126,19 @@ router.put("/", async (req, res) => {
     `;
 
     const result = await pool.request()
-      .input('RefinerCode', sql.VarChar, RefinerCode)
-      .input('RefinerName', sql.VarChar, RefinerName ? RefinerName.substring(0, 100) : '')
-      .input('Type', sql.VarChar, Type ? Type.substring(0, 50) : '')
+      .input('RefinerCode', sql.VarChar, trimmedCode)
+      .input('RefinerName', sql.VarChar, trimmedName ? trimmedName.substring(0, 100) : '')
+      .input('Type', sql.VarChar, trimmedType ? trimmedType.substring(0, 50) : '')
       .query(updateQuery);
 
     if (result.rowsAffected[0] === 0) {
-      return res.status(404).json({ success: false, message: "Refiner not found." });
+      return res.status(404).json({ success: false, message: "No such user!" });
     }
 
-    res.json({ success: true, message: "Refiner updated successfully." });
+    res.json({ success: true, message: "Saved Successfully!" });
   } catch (err) {
     console.error("Update Refiner Error:", err);
-    res.status(500).json({ success: false, message: "Failed to update refiner", error: err.message });
+    res.status(500).json({ success: false, message: "Error in Save/Update !", error: err.message });
   }
 });
 

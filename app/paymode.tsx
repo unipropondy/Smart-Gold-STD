@@ -37,6 +37,7 @@ export default function PaymodeScreen() {
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
+  const [deleteConfirmCode, setDeleteConfirmCode] = useState<string | null>(null);
 
   const showSuccess = (msg: string) => {
     setSuccessMsg(msg);
@@ -83,17 +84,91 @@ export default function PaymodeScreen() {
     fetchPaymodes();
   }, []);
 
+  // Field-level blur handlers matching ValidateMe() in frmPayMode.vb
+  const handlePositionBlur = () => {
+    const trimmed = (position || '').trim();
+    if (!trimmed) {
+      showError('Position should not be blank! ');
+      return;
+    }
+    if (isNaN(Number(trimmed))) {
+      showError('Position should be Numeric!');
+      setPosition('');
+    }
+  };
+
+  const handlePayModeBlur = () => {
+    const trimmed = (payMode || '').trim();
+    if (!trimmed) {
+      showError('PayMode should not be blank!');
+    }
+  };
+
+  const handleDescriptionBlur = () => {
+    const trimmed = (description || '').trim();
+    if (!trimmed) {
+      showError('Description should not be blank!');
+    }
+  };
+
+  const handleCommissionBlur = () => {
+    const trimmed = (commission || '').trim();
+    if (!trimmed) {
+      showError('Commision code should not be blank!');
+      return;
+    }
+    if (isNaN(Number(trimmed))) {
+      showError('Commision should be Numeric!');
+      setCommission('');
+    }
+  };
+
   const handleSave = async () => {
-    if (!payMode || !payMode.trim()) {
-      showError('Pay Mode is required');
+    // Exact validation sequence matching ValidateMe() in frmPayMode.vb (lines 438-488)
+    const trimmedPosition = (position || '').trim();
+    const trimmedPayMode = (payMode || '').trim();
+    const trimmedDescription = (description || '').trim();
+    const trimmedCommission = (commission || '').trim();
+
+    // 1. Position validation
+    if (!trimmedPosition) {
+      showError('Position should not be blank! ');
+      return;
+    }
+    if (isNaN(Number(trimmedPosition))) {
+      showError('Position should be Numeric!');
+      setPosition('');
+      return;
+    }
+
+    // 2. PayMode validation
+    if (!trimmedPayMode) {
+      showError('PayMode should not be blank!');
+      return;
+    }
+
+    // 3. Description validation
+    if (!trimmedDescription) {
+      showError('Description should not be blank!');
+      return;
+    }
+
+    // 4. Commission validation
+    if (!trimmedCommission) {
+      showError('Commision code should not be blank!');
+      return;
+    }
+    if (isNaN(Number(trimmedCommission))) {
+      showError('Commision should be Numeric!');
+      setCommission('');
       return;
     }
 
     const payload = {
-      PayMode: payMode.trim(),
-      Position: parseInt(position) || 0,
-      Description: description.trim(),
-      Commission: parseFloat(commission) || 0,
+      PayMode: trimmedPayMode.toUpperCase(),
+      Position: parseInt(trimmedPosition) || 0,
+      Description: trimmedDescription,
+      Commission: parseFloat(trimmedCommission) || 0,
       Active: active,
     };
 
@@ -108,15 +183,15 @@ export default function PaymodeScreen() {
 
       const json = await response.json();
       if (json.success) {
-        showSuccess(`Paymode ${isEditing ? 'updated' : 'added'} successfully`);
+        showSuccess(json.message || 'Pay Mode saved successfully!');
         setIsModalVisible(false);
         fetchPaymodes();
       } else {
-        showError(json.message || 'Failed to save');
+        showError(json.message || 'Error in Save !');
       }
     } catch (error) {
       console.error('Save error:', error);
-      showError('Failed to save paymode');
+      showError('Error in Save !');
     } finally {
       setSaving(false);
     }
@@ -128,30 +203,21 @@ export default function PaymodeScreen() {
       const response = await fetch(`${API_URL}?id=${encodeURIComponent(codeToDelete)}`, { method: 'DELETE' });
       const json = await response.json();
       if (json.success) {
-        showSuccess('Paymode deleted successfully');
+        showSuccess(json.message || 'Paymode deleted successfully');
         fetchPaymodes();
       } else {
-        showError(json.message || 'Failed to delete');
+        showError(json.message || 'Error in Delete !');
       }
     } catch (error) {
       console.error('Delete error:', error);
-      showError('Failed to delete paymode');
+      showError('Error in Delete !');
     } finally {
       setDeletingId(null);
     }
   };
 
   const handleDelete = (codeToDelete: string) => {
-    if (Platform.OS === 'web') {
-      if (window.confirm(`Are you sure you want to delete Paymode ${codeToDelete}?`)) {
-        executeDelete(codeToDelete);
-      }
-    } else {
-      Alert.alert('Confirm Delete', `Are you sure you want to delete Paymode ${codeToDelete}?`, [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Delete', style: 'destructive', onPress: () => executeDelete(codeToDelete) },
-      ]);
-    }
+    setDeleteConfirmCode(codeToDelete);
   };
 
   const openAddModal = () => {
@@ -207,7 +273,16 @@ export default function PaymodeScreen() {
     if (!successMsg && !errorMsg) return null;
     const isError = !!errorMsg;
     return (
-      <View style={[styles.toast, { backgroundColor: isError ? '#F44336' : '#4CAF50' }]}>
+      <View
+        pointerEvents="none"
+        style={[styles.toast, isError ? styles.toastError : styles.toastSuccess]}
+      >
+        <Ionicons
+          name={isError ? 'alert-circle' : 'checkmark-circle'}
+          size={16}
+          color="#FFFFFF"
+          style={{ marginRight: 6 }}
+        />
         <ThemedText style={styles.toastText}>{isError ? errorMsg : successMsg}</ThemedText>
       </View>
     );
@@ -216,7 +291,7 @@ export default function PaymodeScreen() {
   return (
     <SafeAreaView style={[styles.safeArea, { backgroundColor }]} edges={['top']}>
       <Stack.Screen options={{ headerShown: false }} />
-      {!isModalVisible && renderToast()}
+      {!isModalVisible && !deleteConfirmCode && renderToast()}
       {/* Header */}
       <View style={[styles.header, { borderBottomColor: borderColor }]}>
         <View style={{ flexDirection: 'row', alignItems: 'center' }}>
@@ -275,23 +350,13 @@ export default function PaymodeScreen() {
 
               <View style={styles.modalBody}>
                 <View style={styles.inputGroup}>
-                  <ThemedText style={[styles.label, { color: subtitleColor }]}>Pay Mode *</ThemedText>
+                  <ThemedText style={[styles.label, { color: subtitleColor }]}>Position *</ThemedText>
                   <TextInput
                     style={[styles.input, { color: textColor, borderColor, backgroundColor: isDark ? '#2A2A2A' : '#FFF' }, isEditing && { backgroundColor: isDark ? '#333' : '#F0F0F0', color: subtitleColor }]}
-                    value={payMode}
-                    onChangeText={setPayMode}
-                    editable={!isEditing}
-                    placeholder="Enter Pay Mode (e.g. CASH)"
-                    placeholderTextColor={subtitleColor}
-                  />
-                </View>
-
-                <View style={styles.inputGroup}>
-                  <ThemedText style={[styles.label, { color: subtitleColor }]}>Position</ThemedText>
-                  <TextInput
-                    style={[styles.input, { color: textColor, borderColor, backgroundColor: isDark ? '#2A2A2A' : '#FFF' }]}
                     value={position}
                     onChangeText={setPosition}
+                    onBlur={handlePositionBlur}
+                    editable={!isEditing}
                     keyboardType="numeric"
                     placeholder="Position"
                     placeholderTextColor={subtitleColor}
@@ -299,22 +364,38 @@ export default function PaymodeScreen() {
                 </View>
 
                 <View style={styles.inputGroup}>
-                  <ThemedText style={[styles.label, { color: subtitleColor }]}>Description</ThemedText>
+                  <ThemedText style={[styles.label, { color: subtitleColor }]}>Pay Mode *</ThemedText>
+                  <TextInput
+                    style={[styles.input, { color: textColor, borderColor, backgroundColor: isDark ? '#2A2A2A' : '#FFF' }, isEditing && { backgroundColor: isDark ? '#333' : '#F0F0F0', color: subtitleColor }]}
+                    value={payMode}
+                    onChangeText={(t) => setPayMode(t.toUpperCase())}
+                    onBlur={handlePayModeBlur}
+                    editable={!isEditing}
+                    autoCapitalize="characters"
+                    placeholder="Enter Pay Mode (e.g. CASH)"
+                    placeholderTextColor={subtitleColor}
+                  />
+                </View>
+
+                <View style={styles.inputGroup}>
+                  <ThemedText style={[styles.label, { color: subtitleColor }]}>Description *</ThemedText>
                   <TextInput
                     style={[styles.input, { color: textColor, borderColor, backgroundColor: isDark ? '#2A2A2A' : '#FFF' }]}
                     value={description}
                     onChangeText={setDescription}
+                    onBlur={handleDescriptionBlur}
                     placeholder="Enter Description"
                     placeholderTextColor={subtitleColor}
                   />
                 </View>
 
                 <View style={styles.inputGroup}>
-                  <ThemedText style={[styles.label, { color: subtitleColor }]}>Commission</ThemedText>
+                  <ThemedText style={[styles.label, { color: subtitleColor }]}>Commission *</ThemedText>
                   <TextInput
                     style={[styles.input, { color: textColor, borderColor, backgroundColor: isDark ? '#2A2A2A' : '#FFF' }]}
                     value={commission}
                     onChangeText={setCommission}
+                    onBlur={handleCommissionBlur}
                     keyboardType="numeric"
                     placeholder="Commission Rate"
                     placeholderTextColor={subtitleColor}
@@ -349,6 +430,45 @@ export default function PaymodeScreen() {
             </View>
           </TouchableWithoutFeedback>
         </TouchableOpacity>
+      </Modal>
+
+      {/* Delete Confirmation Modal */}
+      <Modal visible={!!deleteConfirmCode} animationType="fade" transparent={true}>
+        <TouchableWithoutFeedback onPress={() => setDeleteConfirmCode(null)}>
+          <View style={styles.modalOverlay}>
+            <TouchableWithoutFeedback>
+              <View style={[styles.modalContent, { backgroundColor: cardColor, borderColor, maxWidth: 420, padding: 24 }]}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 16 }}>
+                  <Ionicons name="trash-outline" size={24} color="#C62828" style={{ marginRight: 10 }} />
+                  <ThemedText style={{ fontSize: 18, fontWeight: 'bold', color: textColor }}>Delete Paymode</ThemedText>
+                </View>
+                <ThemedText style={{ color: textColor, fontSize: 14, marginBottom: 24, lineHeight: 22 }}>
+                  {`Do you want to Delete  :  `}
+                  <ThemedText style={{ fontWeight: 'bold' }}>{deleteConfirmCode || ''}</ThemedText>
+                </ThemedText>
+                <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 12 }}>
+                  <TouchableOpacity
+                    style={[styles.btn, styles.btnCancel]}
+                    onPress={() => setDeleteConfirmCode(null)}
+                  >
+                    <ThemedText style={{ color: '#666', fontWeight: '600' }}>Cancel</ThemedText>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.btn, { backgroundColor: '#C62828' }]}
+                    onPress={() => {
+                      const code = deleteConfirmCode;
+                      setDeleteConfirmCode(null);
+                      if (code) executeDelete(code);
+                    }}
+                  >
+                    <ThemedText style={{ color: '#FFF', fontWeight: '600' }}>Delete</ThemedText>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </TouchableWithoutFeedback>
+          </View>
+        </TouchableWithoutFeedback>
+        {renderToast()}
       </Modal>
 
     </SafeAreaView>
@@ -468,22 +588,27 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: Platform.OS === 'web' ? 20 : 50,
     alignSelf: 'center',
-    minWidth: 250,
-    maxWidth: '90%',
-    padding: 15,
-    borderRadius: 8,
-    zIndex: 9999,
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 8,
+    zIndex: 999999,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.25,
     shadowRadius: 3.84,
-    elevation: 5,
+    elevation: 20,
+  },
+  toastSuccess: {
+    backgroundColor: '#2E7D32',
+  },
+  toastError: {
+    backgroundColor: '#C62828',
   },
   toastText: {
-    color: '#FFF',
-    fontSize: 14,
+    color: '#FFFFFF',
+    fontSize: 13,
     fontWeight: '600',
     textAlign: 'center',
   },

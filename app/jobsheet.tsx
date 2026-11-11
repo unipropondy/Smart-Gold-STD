@@ -380,42 +380,87 @@ export default function JobSheetScreen() {
   const updateDetail = (key: string, value: any) => {
     setCurrentDetail(prev => {
       const next = { ...prev, [key]: value };
-      if (['Weight', 'CostPerGram', 'MC', 'PCS'].includes(key)) {
+      if (['Weight', 'CostPerGram', 'MC', 'PCS', 'GoldLoss'].includes(key)) {
         const w = parseFloat(next.Weight) || 0;
+        const gl = parseFloat(next.GoldLoss) || 0;
         const c = parseFloat(next.CostPerGram) || 0;
         const mc = parseFloat(next.MC) || 0;
-        const pcs = parseFloat(next.PCS) || 1;
-        const total = (w * c) + (mc * pcs);
-        next.TotalCost = total > 0 ? total.toFixed(2) : '';
+        const currRate = parseFloat(headerState.CurrencyRate) || 1;
+        // VB.NET CalcTot: dCost = (Weight + GoldLoss) * CostPerGram + (MC * CurrencyRate)
+        const total = ((w + gl) * c) + (mc * (currRate !== 0 ? currRate : 1));
+        next.TotalCost = total > 0 ? total.toFixed(2) : (w > 0 || mc > 0 ? '0.00' : '');
       }
       return next;
     });
   };
 
   const addDetail = async () => {
-    if (!currentDetail.CatalogueCode?.trim()) {
-      showToast('Catalogue Code is required', 'error');
+    if (headerState.BillClose || headerState.TranType === 'DP') {
+      showToast('Transaction is closed or Direct Purchase. Cannot add/modify details.', 'error');
       return;
     }
-    if (!currentDetail.CategoryCode?.trim()) {
-      showToast('Category Code is required', 'error');
+
+    const catCode = String(currentDetail.CatalogueCode ?? '').trim();
+    if (!catCode) {
+      showToast('Enter valid catalogue!', 'error');
       return;
     }
+    const catgCode = String(currentDetail.CategoryCode ?? '').trim();
+    if (!catgCode) {
+      showToast('Enter valid category!', 'error');
+      return;
+    }
+
+    const currRate = parseFloat(headerState.CurrencyRate) || 0;
+    if (currRate <= 0) {
+      showToast('Please check the currency rate', 'error');
+      return;
+    }
+
     const weight = parseFloat(currentDetail.Weight) || 0;
     if (weight <= 0) {
-      showToast('Weight is required and must be greater than zero', 'error');
+      showToast('Enter valid weight!', 'error');
       return;
     }
+
+    const goldLoss = parseFloat(currentDetail.GoldLoss) || 0;
+    if (goldLoss < 0) {
+      showToast('Enter valid gold loss!', 'error');
+      return;
+    }
+
     const costPerGram = parseFloat(currentDetail.CostPerGram) || 0;
+    // Unless purchase type is P (per piece), cost per gram must be > 0
     if (costPerGram <= 0) {
-      showToast('Cost Per Gram is required and must be greater than zero', 'error');
+      showToast('Enter valid cost per gram!', 'error');
       return;
     }
+
+    const mc = parseFloat(currentDetail.MC) || 0;
+    if (mc < 0) {
+      showToast('Enter valid making charges!', 'error');
+      return;
+    }
+
     const pcs = parseInt(currentDetail.PCS) || 0;
     if (pcs <= 0) {
-      showToast('PCS is required and must be greater than zero', 'error');
+      showToast('Enter valid pcs!', 'error');
       return;
     }
+
+    // VB.NET Calculation of total cost
+    const computedTotal = ((weight + goldLoss) * costPerGram) + (mc * (currRate !== 0 ? currRate : 1));
+    const finalDetail: DetailItem = {
+      ...currentDetail,
+      CatalogueCode: catCode,
+      CategoryCode: catgCode,
+      Weight: weight.toFixed(2),
+      GoldLoss: goldLoss.toFixed(2),
+      CostPerGram: costPerGram.toFixed(2),
+      MC: mc.toFixed(2),
+      PCS: pcs.toString(),
+      TotalCost: computedTotal.toFixed(2)
+    };
 
     let activeJobSheetNo = headerState.JobSheetNo?.trim();
     if (!activeJobSheetNo) {
@@ -426,7 +471,7 @@ export default function JobSheetScreen() {
       }
     }
 
-    const detailToSave = { ...currentDetail, JobSheetNo: activeJobSheetNo };
+    const detailToSave = { ...finalDetail, JobSheetNo: activeJobSheetNo };
     let newDetails = [];
     if (selectedIndex !== null) {
       newDetails = [...details];
@@ -436,7 +481,17 @@ export default function JobSheetScreen() {
     }
     setDetails(newDetails);
     setSelectedIndex(null);
-    setCurrentDetail({ CatalogueCode: '', CategoryCode: '', Description: '', Weight: '', CostPerGram: '', MC: '', PCS: '', GoldLoss: '', TotalCost: '' });
+    setCurrentDetail({
+      CatalogueCode: '',
+      CategoryCode: '',
+      Description: '',
+      Weight: '',
+      CostPerGram: headerState.CostPerGram || '',
+      MC: '',
+      PCS: '1',
+      GoldLoss: '',
+      TotalCost: ''
+    });
     await saveJobSheet(newDetails);
     setDetailModalVisible(false);
   };
@@ -527,11 +582,11 @@ export default function JobSheetScreen() {
         setSupplierLovData(data.data);
         setSupplierLovVisible(true);
       } else {
-        alert(data.message || 'Failed to fetch suppliers');
+        showToast(data.message || 'Failed to fetch suppliers', 'error');
       }
     } catch (err) {
       console.error(err);
-      alert('Error fetching Supplier LOV');
+      showToast('Error fetching Supplier LOV', 'error');
     }
   };
 
@@ -543,11 +598,11 @@ export default function JobSheetScreen() {
         setCurrencyLovData(data.data);
         setCurrencyLovVisible(true);
       } else {
-        alert(data.message || 'Failed to fetch currencies');
+        showToast(data.message || 'Failed to fetch currencies', 'error');
       }
     } catch (err) {
       console.error(err);
-      alert('Error fetching Currency LOV');
+      showToast('Error fetching Currency LOV', 'error');
     }
   };
 
@@ -674,25 +729,35 @@ export default function JobSheetScreen() {
       return false;
     }
     if (!headerState.SupplierCode?.trim()) {
-      showToast('Supplier Code cannot be empty!', 'error');
+      showToast('Enter supplier code.', 'error');
       return false;
     }
     if (!headerState.CurrencyCode?.trim()) {
-      showToast('Currency cannot be blank!', 'error');
+      showToast('Enter currency code.', 'error');
       return false;
     }
     const rate = parseFloat(headerState.CurrencyRate) || 0;
     if (rate <= 0) {
-      showToast('Rate must be greater than zero!', 'error');
+      showToast('Enter currency rate.', 'error');
+      return false;
+    }
+    if (!headerState.PaymentType || !['G', 'C', 'B'].includes(headerState.PaymentType)) {
+      showToast('Select payment type.', 'error');
+      return false;
+    }
+    const tealPercent = parseFloat(headerState.TaelPercent) || 0;
+    if (tealPercent <= 0) {
+      showToast('Enter TEAL Percent.', 'error');
+      return false;
+    }
+    const tealVal = parseFloat(headerState.TaelRate) || 0;
+    if (tealVal <= 0) {
+      showToast('Enter teal.', 'error');
       return false;
     }
     const costPerGram = parseFloat(headerState.CostPerGram) || 0;
     if (!headerState.CostPerGram?.toString().trim() || costPerGram <= 0) {
-      showToast('CostPerGram must be greater than zero!', 'error');
-      return false;
-    }
-    if (!headerState.PaymentType || !['G', 'C', 'B'].includes(headerState.PaymentType)) {
-      showToast('Please select the payment type!', 'error');
+      showToast('Enter cost per gram.', 'error');
       return false;
     }
     if (activeDetails.length < 1) {
@@ -1079,15 +1144,19 @@ export default function JobSheetScreen() {
                       onChangeText={(text) => updateHeader('SupplierCode', text)}
                       onBlur={async () => {
                         const code = headerState.SupplierCode?.trim();
-                        if (!code) return;
+                        if (!code) {
+                          showToast('Enter supplier code.', 'error');
+                          return;
+                        }
                         try {
-                          const res = await fetch(`${API_BASE_URL}/supplier`);
+                          const res = await fetch(`${API_BASE_URL}/supplier?code=${encodeURIComponent(code)}`);
                           const data = await res.json();
                           if (data.success && data.data) {
-                            const found = data.data.find((s: any) => s.SupplierCode?.trim().toUpperCase() === code.toUpperCase());
-                            if (found) {
-                              onSupplierSelected(found);
-                            }
+                            onSupplierSelected(data.data);
+                          } else {
+                            showToast('Invalid supplier code!', 'error');
+                            updateHeader('SupplierCode', '');
+                            updateHeader('SupplierName', '');
                           }
                         } catch (e) {
                           console.log('Error looking up supplier on blur:', e);
@@ -1120,6 +1189,30 @@ export default function JobSheetScreen() {
                       style={[styles.input, { width: 104, borderTopRightRadius: 0, borderBottomRightRadius: 0, borderRightWidth: 0 }]}
                       value={headerState.CurrencyCode}
                       onChangeText={(text) => updateHeader('CurrencyCode', text)}
+                      onBlur={async () => {
+                        const cCode = headerState.CurrencyCode?.trim();
+                        if (!cCode) {
+                          showToast('Enter currency code.', 'error');
+                          return;
+                        }
+                        try {
+                          const res = await fetch(`${API_BASE_URL}/currency?code=${encodeURIComponent(cCode)}`);
+                          const data = await res.json();
+                          if (data.success && data.data) {
+                            updateHeader('CurrencyName', data.data.CurrencyName || cCode);
+                            if (data.data.CurrencyRate != null) {
+                              updateHeader('CurrencyRate', String(data.data.CurrencyRate));
+                            }
+                          } else {
+                            showToast('Set Default Currency in Currency Master', 'error');
+                            updateHeader('CurrencyCode', '');
+                            updateHeader('CurrencyName', '');
+                            updateHeader('CurrencyRate', '');
+                          }
+                        } catch (e) {
+                          console.log('Error looking up currency on blur:', e);
+                        }
+                      }}
                     />
                     <TouchableOpacity style={styles.lookupBtn} onPress={openCurrencyLov}>
                       <ThemedText style={styles.lookupBtnText}>...</ThemedText>
@@ -1136,6 +1229,12 @@ export default function JobSheetScreen() {
                     style={[styles.input, { flex: 0.8, minWidth: 90 }]}
                     value={headerState.CurrencyRate}
                     onChangeText={(text) => updateHeader('CurrencyRate', text)}
+                    onBlur={() => {
+                      if ((parseFloat(headerState.CurrencyRate) || 0) <= 0) {
+                        showToast('Enter currency rate.', 'error');
+                      }
+                    }}
+                    keyboardType="numeric"
                   />
                 </View>
 
@@ -1149,7 +1248,17 @@ export default function JobSheetScreen() {
                   </View>
 
                   <ThemedText style={{ marginRight: 6, color: '#3B3020', fontWeight: 'bold', fontSize: 11 }}>GST</ThemedText>
-                  <Checkbox label="" selected={chkGST1} onPress={() => handleChkGST1(!chkGST1)} />
+                  <Checkbox
+                    label=""
+                    selected={chkGST1}
+                    onPress={() => {
+                      const willCheck = !chkGST1;
+                      if (willCheck && companyGstPerc <= 0) {
+                        showToast('Set GST Percentage in Company Master', 'error');
+                      }
+                      handleChkGST1(willCheck);
+                    }}
+                  />
 
                   {/* 22K / 24 Pill Box */}
                   <View style={styles.pillBox}>
@@ -1173,6 +1282,12 @@ export default function JobSheetScreen() {
                         style={[styles.input, { width: 50, borderTopRightRadius: 0, borderBottomRightRadius: 0, borderRightWidth: 0 }]}
                         value={headerState.TaelPercent}
                         onChangeText={(text) => updateHeader('TaelPercent', text)}
+                        onBlur={() => {
+                          if ((parseFloat(headerState.TaelPercent) || 0) <= 0) {
+                            showToast('Enter TEAL Percent.', 'error');
+                          }
+                        }}
+                        keyboardType="numeric"
                       />
                       <TouchableOpacity style={[styles.lookupBtn, { width: 26 }]} onPress={openTaelPercentLov}>
                         <ThemedText style={styles.lookupBtnText}>...</ThemedText>
@@ -1184,6 +1299,11 @@ export default function JobSheetScreen() {
                       style={[styles.input, { width: 58 }]}
                       value={headerState.TaelRate}
                       onChangeText={(text) => updateHeader('TaelRate', text)}
+                      onBlur={() => {
+                        if ((parseFloat(headerState.TaelRate) || 0) <= 0) {
+                          showToast('Enter teal.', 'error');
+                        }
+                      }}
                       keyboardType="numeric"
                     />
 
@@ -1194,6 +1314,11 @@ export default function JobSheetScreen() {
                       style={[styles.input, { width: 68 }]}
                       value={headerState.CostPerGram}
                       onChangeText={(text) => updateHeader('CostPerGram', text)}
+                      onBlur={() => {
+                        if ((parseFloat(headerState.CostPerGram) || 0) <= 0) {
+                          showToast('Enter cost per gram.', 'error');
+                        }
+                      }}
                       keyboardType="numeric"
                     />
                   </View>
@@ -1438,7 +1563,7 @@ export default function JobSheetScreen() {
               </TouchableOpacity>
             </View>
             <View style={[styles.gridHeader, { backgroundColor: backgroundColor, borderBottomColor: borderColor }]}>
-              <ThemedText style={[styles.gridHeaderText, { flex: 15, color: textColor }]} >Catalogue Cod</ThemedText>
+              <ThemedText style={[styles.gridHeaderText, { flex: 15, color: textColor }]} >Catalogue Code</ThemedText>
               <ThemedText style={[styles.gridHeaderText, { flex: 13, color: textColor }]} >Category Code</ThemedText>
               <ThemedText style={[styles.gridHeaderText, { flex: 20, color: textColor }]} >Description</ThemedText>
               <ThemedText style={[styles.gridHeaderText, { flex: 10, color: textColor }]} >Weight</ThemedText>
@@ -1455,7 +1580,7 @@ export default function JobSheetScreen() {
                     value={currentDetail.CatalogueCode}
                     onChangeText={(t: string) => updateDetail('CatalogueCode', t)}
                     onBlur={async () => {
-                      const code = currentDetail.CatalogueCode?.trim();
+                      const code = String(currentDetail.CatalogueCode ?? '').trim();
                       if (!code) return;
                       try {
                         const res = await fetch(`${API_URL}/lookup/catalogue/${encodeURIComponent(code)}`);
@@ -1467,6 +1592,8 @@ export default function JobSheetScreen() {
                             updateDetail('CostPerGram', headerState.CostPerGram);
                           }
                           if (!currentDetail.PCS) updateDetail('PCS', '1');
+                        } else {
+                          showToast('Invalid CatalogueCode', 'error');
                         }
                       } catch (e) {
                         console.log('Error looking up catalogue:', e);
@@ -1482,7 +1609,7 @@ export default function JobSheetScreen() {
                   value={currentDetail.CategoryCode}
                   onChangeText={(t: string) => updateDetail('CategoryCode', t)}
                   onBlur={async () => {
-                    const code = currentDetail.CategoryCode?.trim();
+                    const code = String(currentDetail.CategoryCode ?? '').trim();
                     if (!code) return;
                     try {
                       const res = await fetch(`${API_URL}/lookup/category/${encodeURIComponent(code)}`);
@@ -1493,6 +1620,8 @@ export default function JobSheetScreen() {
                           updateDetail('CostPerGram', headerState.CostPerGram);
                         }
                         if (!currentDetail.PCS) updateDetail('PCS', '1');
+                      } else {
+                        showToast('Invalid CategoryCode', 'error');
                       }
                     } catch (e) {
                       console.log('Error looking up category:', e);
@@ -1504,19 +1633,77 @@ export default function JobSheetScreen() {
                 <TextInput style={[inputStyle, { flex: 1, padding: 4, height: 30 }]} value={currentDetail.Description} onChangeText={(t: string) => updateDetail('Description', t)} />
               </View>
               <View style={{ flex: 10, paddingRight: 4 }}>
-                <TextInput style={[inputStyle, { flex: 1, padding: 4, height: 30 }]} value={currentDetail.Weight} onChangeText={(t: string) => updateDetail('Weight', t)} keyboardType="numeric" />
+                <TextInput
+                  style={[inputStyle, { flex: 1, padding: 4, height: 30 }]}
+                  value={currentDetail.Weight}
+                  onChangeText={(t: string) => updateDetail('Weight', t)}
+                  keyboardType="numeric"
+                  onBlur={() => {
+                    const w = parseFloat(currentDetail.Weight);
+                    if (isNaN(w) || w <= 0) {
+                      updateDetail('Weight', '0.00');
+                    } else {
+                      updateDetail('Weight', w.toFixed(2));
+                    }
+                  }}
+                />
               </View>
               <View style={{ flex: 12, paddingRight: 4 }}>
-                <TextInput style={[inputStyle, { flex: 1, padding: 4, height: 30 }]} value={currentDetail.CostPerGram} onChangeText={(t: string) => updateDetail('CostPerGram', t)} keyboardType="numeric" />
+                <TextInput
+                  style={[inputStyle, { flex: 1, padding: 4, height: 30 }]}
+                  value={currentDetail.CostPerGram}
+                  onChangeText={(t: string) => updateDetail('CostPerGram', t)}
+                  keyboardType="numeric"
+                  onBlur={() => {
+                    const c = parseFloat(currentDetail.CostPerGram);
+                    if (isNaN(c) || c <= 0) {
+                      updateDetail('CostPerGram', '0.00');
+                    } else {
+                      updateDetail('CostPerGram', c.toFixed(2));
+                    }
+                  }}
+                />
               </View>
               <View style={{ flex: 10, paddingRight: 4 }}>
-                <TextInput style={[inputStyle, { flex: 1, padding: 4, height: 30 }]} value={currentDetail.MC} onChangeText={(t: string) => updateDetail('MC', t)} keyboardType="numeric" />
+                <TextInput
+                  style={[inputStyle, { flex: 1, padding: 4, height: 30 }]}
+                  value={currentDetail.MC}
+                  onChangeText={(t: string) => updateDetail('MC', t)}
+                  keyboardType="numeric"
+                  onBlur={() => {
+                    const mc = parseFloat(currentDetail.MC);
+                    if (isNaN(mc) || mc <= 0) {
+                      updateDetail('MC', '0.00');
+                    } else {
+                      updateDetail('MC', mc.toFixed(2));
+                    }
+                  }}
+                />
               </View>
               <View style={{ flex: 8, paddingRight: 4 }}>
-                <TextInput style={[inputStyle, { flex: 1, padding: 4, height: 30 }]} value={currentDetail.PCS} onChangeText={(t: string) => updateDetail('PCS', t)} keyboardType="numeric" />
+                <TextInput
+                  style={[inputStyle, { flex: 1, padding: 4, height: 30 }]}
+                  value={currentDetail.PCS}
+                  onChangeText={(t: string) => updateDetail('PCS', t)}
+                  keyboardType="numeric"
+                  onBlur={() => {
+                    const p = parseInt(currentDetail.PCS);
+                    if (isNaN(p) || p <= 0) {
+                      updateDetail('PCS', '1');
+                    } else {
+                      updateDetail('PCS', p.toString());
+                    }
+                  }}
+                />
               </View>
               <View style={{ flex: 12 }}>
-                <TextInput style={[inputStyle, { flex: 1, padding: 4, height: 30 }]} value={currentDetail.TotalCost} onChangeText={(t: string) => updateDetail('TotalCost', t)} keyboardType="numeric" />
+                <TextInput
+                  style={[inputStyle, { flex: 1, padding: 4, height: 30 }]}
+                  value={currentDetail.TotalCost}
+                  editable={false}
+                  onChangeText={(t: string) => updateDetail('TotalCost', t)}
+                  keyboardType="numeric"
+                />
               </View>
             </View>
             <View style={[styles.row, { justifyContent: 'flex-end', marginTop: 12, paddingRight: 8 }]}>
@@ -1682,6 +1869,10 @@ export default function JobSheetScreen() {
                     updateDetail('CatalogueCode', item.CatalogueCode);
                     if (item.CatalogueName) updateDetail('Description', item.CatalogueName);
                     if (item.CategoryCode) updateDetail('CategoryCode', item.CategoryCode);
+                    if (!currentDetail.CostPerGram && headerState.CostPerGram) {
+                      updateDetail('CostPerGram', headerState.CostPerGram);
+                    }
+                    if (!currentDetail.PCS) updateDetail('PCS', '1');
                   }}
                 >
                   <ThemedText style={{ flex: 1, color: textColor, fontSize: 12 }}>{item.CatalogueCode}</ThemedText>

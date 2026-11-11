@@ -1,4 +1,5 @@
 import { API_BASE_URL } from '@/constants/api';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import React, { useState } from 'react';
@@ -96,7 +97,26 @@ export default function LoginScreen() {
       const data = await response.json();
 
       if (data.success) {
-        router.replace({ pathname: '/(tabs)/home', params: { username } });
+        const uCode = data.user?.userCode || username;
+        const uName = data.user?.userName || username;
+        try {
+          await AsyncStorage.setItem('@logged_user', JSON.stringify(data.user || { userCode: uCode, userName: uName }));
+          await AsyncStorage.setItem('@user_id', uCode);
+          await AsyncStorage.setItem('@user_name', uName);
+        } catch (_) {}
+        if (Platform.OS === 'web' && typeof window !== 'undefined') {
+          try {
+            window.localStorage.setItem('userCode', uCode);
+            window.localStorage.setItem('userId', uCode);
+            window.localStorage.setItem('userName', uName);
+            window.localStorage.setItem('user', JSON.stringify(data.user || { userCode: uCode, userName: uName }));
+            window.sessionStorage.setItem('userCode', uCode);
+            window.sessionStorage.setItem('userId', uCode);
+            window.sessionStorage.setItem('userName', uName);
+            window.sessionStorage.setItem('user', JSON.stringify(data.user || { userCode: uCode, userName: uName }));
+          } catch (_) {}
+        }
+        router.replace({ pathname: '/(tabs)/home', params: { username: uCode, userId: uCode } });
       } else {
         setErrorMsg(data.message || 'Invalid credentials');
       }

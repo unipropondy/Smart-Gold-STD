@@ -217,18 +217,35 @@ router.post("/", async (req, res) => {
       CustomerImageName
     } = req.body;
 
-    const code = (CustomerCode || '').trim();
-    if (!code) {
-      return res.status(400).json({ success: false, message: "Customer Code is required." });
+    const trimmedCode = (CustomerCode || '').trim();
+    const trimmedName = (CustomerName || '').trim();
+    const trimmedMobile = (Mobile || '').trim();
+    const trimmedEmail = (eMail || '').trim();
+    const trimmedNationality = (Address4 || '').trim();
+    const trimmedPassport = (PassportNo || '').trim();
+
+    // 1. CustomerCode validation matching ValidateMe() in frmCustomer.vb
+    if (!trimmedCode) {
+      return res.status(400).json({ success: false, message: "CustomerCode should not be blank." });
     }
-    if (!CustomerName || !CustomerName.trim()) {
-      return res.status(400).json({ success: false, message: "Customer Name is required." });
+
+    // 2. CustomerName validation
+    if (!trimmedName) {
+      return res.status(400).json({ success: false, message: "CustomerName should not be blank." });
+    }
+
+    // Email format check matching EmailAddressCheck in frmCustomer.vb
+    if (trimmedEmail) {
+      const emailPattern = /^[a-zA-Z][\w\.-]*[a-zA-Z0-9]@[a-zA-Z0-9][\w\.-]*[a-zA-Z0-9]\.[a-zA-Z][a-zA-Z\.]*[a-zA-Z]$/;
+      if (!emailPattern.test(trimmedEmail)) {
+        return res.status(400).json({ success: false, message: "Enter Proper Email Address" });
+      }
     }
 
     // Check if exists
     const checkResult = await pool.request()
-      .input('CustomerCode', sql.VarChar, code)
-      .query("SELECT CustomerCode FROM tblCustomer WHERE RTRIM(CustomerCode) = RTRIM(@CustomerCode)");
+      .input('CustomerCode', sql.VarChar, trimmedCode)
+      .query("SELECT CustomerCode FROM tblCustomer WHERE UPPER(RTRIM(LTRIM(CustomerCode))) = UPPER(@CustomerCode)");
 
     const isUpdate = checkResult.recordset.length > 0;
     const finalNric = (NRICNo || NricNo || '').trim();
@@ -310,34 +327,34 @@ router.post("/", async (req, res) => {
     `;
 
     const request = pool.request()
-      .input('CustomerCode', sql.VarChar, code)
-      .input('CustomerName', sql.VarChar, (CustomerName || '').trim())
+      .input('CustomerCode', sql.VarChar, trimmedCode)
+      .input('CustomerName', sql.VarChar, trimmedName)
       .input('CustomerType', sql.VarChar, (CustomerType || 'DIAMOND').trim())
       .input('Address1', sql.VarChar, (Address1 || '').trim())
       .input('Address2', sql.VarChar, (Address2 || '').trim())
       .input('Address3', sql.VarChar, (Address3 || '').trim())
-      .input('Address4', sql.VarChar, (Address4 || '').trim()) // Nationality
+      .input('Address4', sql.VarChar, trimmedNationality) // Nationality
       .input('Phone1', sql.VarChar, (Phone1 || '').trim())
       .input('Phone2', sql.VarChar, (Phone2 || '').trim())
-      .input('Mobile', sql.VarChar, (Mobile || '').trim())
+      .input('Mobile', sql.VarChar, trimmedMobile)
       .input('Fax', sql.VarChar, (Fax || '').trim())
-      .input('eMail', sql.VarChar, (eMail || '').trim())
+      .input('eMail', sql.VarChar, trimmedEmail)
       .input('Url', sql.VarChar, (Url || '').trim())
       .input('AccountType', sql.VarChar, (AccountType || 'N').trim())
       .input('GLAccount1', sql.VarChar, (GLAccount1 || 'Y').trim())
       .input('Remarks', sql.VarChar, (Remarks || '').trim())
       .input('NRICNo', sql.VarChar, finalNric)
       .input('Gender', sql.VarChar, (Gender || 'M').trim())
-      .input('PassportNo', sql.VarChar, (PassportNo || '').trim())
+      .input('PassportNo', sql.VarChar, trimmedPassport)
       .input('DateType', sql.VarChar, (DateType || '').trim())
       .input('CustomerImageName', sql.VarChar, (CustomerImageName || null));
 
-    request.input('DOB', sql.DateTime, DOB ? new Date(DOB) : null);
-    request.input('DOA', sql.DateTime, DOA ? new Date(DOA) : null);
+    request.input('DOB', sql.DateTime, DOB && DOB.trim ? (DOB.trim() ? new Date(DOB.trim()) : null) : (DOB ? new Date(DOB) : null));
+    request.input('DOA', sql.DateTime, DOA && DOA.trim ? (DOA.trim() ? new Date(DOA.trim()) : null) : (DOA ? new Date(DOA) : null));
 
     await request.query(insertQuery);
 
-    res.json({ success: true, message: "Customer created successfully.", customerCode: code });
+    res.json({ success: true, message: "Customer created successfully.", customerCode: trimmedCode });
   } catch (err) {
     console.error("Save Customer Error:", err);
     res.status(500).json({ success: false, message: "Failed to save customer", error: err.message });
@@ -361,6 +378,26 @@ const updateCustomerHandler = async (req, res) => {
     const code = (paramId || CustomerCode || '').trim();
     if (!code) {
       return res.status(400).json({ success: false, message: "Customer Code is required." });
+    }
+
+    const trimmedCode = code;
+    const trimmedName = (CustomerName || '').trim();
+    const trimmedMobile = (Mobile || '').trim();
+    const trimmedEmail = (eMail || '').trim();
+    const trimmedNationality = (Address4 || '').trim();
+    const trimmedPassport = (PassportNo || '').trim();
+
+    // 1. CustomerName validation
+    if (!trimmedName) {
+      return res.status(400).json({ success: false, message: "CustomerName should not be blank." });
+    }
+
+    // Email format check matching EmailAddressCheck in frmCustomer.vb
+    if (trimmedEmail) {
+      const emailPattern = /^[a-zA-Z][\w\.-]*[a-zA-Z0-9]@[a-zA-Z0-9][\w\.-]*[a-zA-Z0-9]\.[a-zA-Z][a-zA-Z\.]*[a-zA-Z]$/;
+      if (!emailPattern.test(trimmedEmail)) {
+        return res.status(400).json({ success: false, message: "Enter Proper Email Address" });
+      }
     }
 
     const finalNric = (NRICNo || NricNo || '').trim();
@@ -391,34 +428,34 @@ const updateCustomerHandler = async (req, res) => {
         CustomerImageName = ISNULL(@CustomerImageName, CustomerImageName),
         ModifyUser = 'sys',
         ModifyDate = GETDATE()
-      WHERE RTRIM(CustomerCode) = RTRIM(@CustomerCode)
+      WHERE UPPER(RTRIM(LTRIM(CustomerCode))) = UPPER(@CustomerCode)
     `;
 
     const request = pool.request()
-      .input('CustomerCode', sql.VarChar, code)
-      .input('CustomerName', sql.VarChar, (CustomerName || '').trim())
+      .input('CustomerCode', sql.VarChar, trimmedCode)
+      .input('CustomerName', sql.VarChar, trimmedName)
       .input('CustomerType', sql.VarChar, (CustomerType || 'DIAMOND').trim())
       .input('Address1', sql.VarChar, (Address1 || '').trim())
       .input('Address2', sql.VarChar, (Address2 || '').trim())
       .input('Address3', sql.VarChar, (Address3 || '').trim())
-      .input('Address4', sql.VarChar, (Address4 || '').trim())
+      .input('Address4', sql.VarChar, trimmedNationality)
       .input('Phone1', sql.VarChar, (Phone1 || '').trim())
       .input('Phone2', sql.VarChar, (Phone2 || '').trim())
-      .input('Mobile', sql.VarChar, (Mobile || '').trim())
+      .input('Mobile', sql.VarChar, trimmedMobile)
       .input('Fax', sql.VarChar, (Fax || '').trim())
-      .input('eMail', sql.VarChar, (eMail || '').trim())
+      .input('eMail', sql.VarChar, trimmedEmail)
       .input('Url', sql.VarChar, (Url || '').trim())
       .input('AccountType', sql.VarChar, (AccountType || 'N').trim())
       .input('GLAccount1', sql.VarChar, (GLAccount1 || 'Y').trim())
       .input('Remarks', sql.VarChar, (Remarks || '').trim())
       .input('NRICNo', sql.VarChar, finalNric)
       .input('Gender', sql.VarChar, (Gender || 'M').trim())
-      .input('PassportNo', sql.VarChar, (PassportNo || '').trim())
       .input('DateType', sql.VarChar, (DateType || '').trim())
+      .input('PassportNo', sql.VarChar, trimmedPassport)
       .input('CustomerImageName', sql.VarChar, (CustomerImageName || null));
 
-    request.input('DOB', sql.DateTime, DOB ? new Date(DOB) : null);
-    request.input('DOA', sql.DateTime, DOA ? new Date(DOA) : null);
+    request.input('DOB', sql.DateTime, DOB && DOB.trim ? (DOB.trim() ? new Date(DOB.trim()) : null) : (DOB ? new Date(DOB) : null));
+    request.input('DOA', sql.DateTime, DOA && DOA.trim ? (DOA.trim() ? new Date(DOA.trim()) : null) : (DOA ? new Date(DOA) : null));
 
     const result = await request.query(updateQuery);
 
@@ -429,7 +466,7 @@ const updateCustomerHandler = async (req, res) => {
     res.json({ success: true, message: "Customer updated successfully.", customerCode: code });
   } catch (err) {
     console.error("Update Customer Error:", err);
-    res.status(500).json({ success: false, message: "Failed to update customer", error: err.message });
+    res.status(500).json({ success: false, message: "Error in Save", error: err.message });
   }
 };
 
@@ -449,10 +486,10 @@ router.delete("/:id", async (req, res) => {
       return res.status(400).json({ success: false, message: "Customer Code is required." });
     }
 
-    // Check if customer has transactions in tblSalesHeader
+    // Check if customer has transactions in tblSalesHeader matching fncGetCustomerTran
     const tranCheck = await pool.request()
       .input('CustomerCode', sql.VarChar, code)
-      .query("SELECT TOP 1 InvoiceNo FROM tblSalesHeader WHERE RTRIM(CustomerCode) = RTRIM(@CustomerCode)");
+      .query("SELECT TOP 1 InvoiceNo FROM tblSalesHeader WHERE UPPER(RTRIM(LTRIM(CustomerCode))) = UPPER(@CustomerCode)");
 
     if (tranCheck.recordset.length > 0) {
       return res.status(400).json({ 
@@ -464,7 +501,7 @@ router.delete("/:id", async (req, res) => {
     // Check if customer has points transactions in tblMemberTransactionAJ
     const pointsCheck = await pool.request()
       .input('CustomerCode', sql.VarChar, code)
-      .query("SELECT TOP 1 InvoiceNo FROM tblMemberTransactionAJ WHERE RTRIM(CustomerCode) = RTRIM(@CustomerCode)");
+      .query("SELECT TOP 1 InvoiceNo FROM tblMemberTransactionAJ WHERE UPPER(RTRIM(LTRIM(CustomerCode))) = UPPER(@CustomerCode)");
 
     if (pointsCheck.recordset.length > 0) {
       return res.status(400).json({ 
@@ -473,19 +510,19 @@ router.delete("/:id", async (req, res) => {
       });
     }
 
-    const deleteQuery = "DELETE FROM tblCustomer WHERE RTRIM(CustomerCode) = RTRIM(@CustomerCode)";
+    const deleteQuery = "DELETE FROM tblCustomer WHERE UPPER(RTRIM(LTRIM(CustomerCode))) = UPPER(@CustomerCode)";
     const result = await pool.request()
       .input('CustomerCode', sql.VarChar, code)
       .query(deleteQuery);
 
     if (result.rowsAffected[0] === 0) {
-      return res.status(404).json({ success: false, message: "Customer not found." });
+      return res.status(404).json({ success: false, message: "Error in deleting Customer detail." });
     }
 
-    res.json({ success: true, message: "Customer deleted successfully." });
+    res.json({ success: true, message: "Customer detail deleted." });
   } catch (err) {
     console.error("Delete Customer Error:", err);
-    res.status(500).json({ success: false, message: "Failed to delete customer", error: err.message });
+    res.status(500).json({ success: false, message: "Error in deleting Customer detail.", error: err.message });
   }
 });
 

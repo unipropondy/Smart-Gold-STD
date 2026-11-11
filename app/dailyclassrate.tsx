@@ -1,24 +1,23 @@
+import { ThemedText } from '@/components/themed-text';
+import { API_BASE_URL } from '@/constants/api';
+import { useThemeContext } from '@/contexts/ThemeContext';
+import { useThemeColors } from '@/hooks/useThemeColors';
 import { Ionicons } from '@expo/vector-icons';
 import { Stack, useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   FlatList,
   Modal,
+  Platform,
   StyleSheet,
   TextInput,
   TouchableOpacity,
   TouchableWithoutFeedback,
   useColorScheme,
   View,
-  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { ThemedText } from '@/components/themed-text';
-import { useThemeColors } from '@/hooks/useThemeColors';
-import { useThemeContext } from '@/contexts/ThemeContext';
-import { API_BASE_URL } from '@/constants/api';
 
 const GOLD_COLOR = '#D4AF37';
 const API_URL = `${API_BASE_URL}/dailyclassrate`;
@@ -43,17 +42,20 @@ export default function DailyClassRateScreen() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
-  const [successMsg, setSuccessMsg] = useState('');
-  const [errorMsg, setErrorMsg] = useState('');
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+  const [deleteConfirmItem, setDeleteConfirmItem] = useState<{ code: string; date: string } | null>(null);
+
+  const showToast = (message: string, type: 'success' | 'error' = 'success') => {
+    setToast({ message, type });
+    setTimeout(() => setToast(null), 3500);
+  };
 
   const showSuccess = (msg: string) => {
-    setSuccessMsg(msg);
-    setTimeout(() => setSuccessMsg(''), 3000);
+    showToast(msg, 'success');
   };
 
   const showError = (msg: string) => {
-    setErrorMsg(msg);
-    setTimeout(() => setErrorMsg(''), 3000);
+    showToast(msg, 'error');
   };
 
   // Modal State
@@ -102,39 +104,91 @@ export default function DailyClassRateScreen() {
     fetchClassesForLookup();
   }, []);
 
-  const handleSave = async () => {
-    if (!classCode || !classCode.trim()) {
-      showError('Class Code is required');
-      return;
-    }
-    if (!fromDate || !fromDate.trim()) {
-      showError('From Date is required');
-      return;
-    }
-    if (!rate || !rate.trim()) {
-      showError('Rate is required');
+  // 1. txtClassCode blur validation & auto-lookup matching txtClassCode_LostFocus in frmClassRate.vb
+  const handleClassCodeBlur = async () => {
+    const trimmed = (classCode || '').trim();
+    if (!trimmed) {
+      showError('ClassCode should not be blank.');
+      setClassName('');
       return;
     }
 
-    // Validate simple date format if possible (YYYY-MM-DD)
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(fromDate)) {
-      showError('From Date must be in YYYY-MM-DD format');
+    try {
+      const res = await fetch(`${API_URL}/validate-class/${encodeURIComponent(trimmed)}`);
+      const json = await res.json();
+      if (json.success && json.data) {
+        setClassName(json.data.ClassName || '');
+      } else {
+        showError('Please enter valid ClassCode.');
+        setClassCode('');
+        setClassName('');
+      }
+    } catch (e) {
+      const matched = classes.find((c: any) => (c.ClassCode || '').trim().toUpperCase() === trimmed.toUpperCase());
+      if (matched) {
+        setClassName(matched.ClassName || '');
+      } else {
+        showError('Please enter valid ClassCode.');
+        setClassCode('');
+        setClassName('');
+      }
+    }
+  };
+
+  // 2. txtRate blur validation matching txtRate_Validating in frmClassRate.vb
+  const handleRateBlur = () => {
+    const trimmed = (rate || '').trim();
+    if (!trimmed) {
+      showError('Rate Should not be empty.');
+      return;
+    }
+    if (isNaN(Number(trimmed))) {
+      showError('Rate Should be Numeric.');
+      setRate('');
+    }
+  };
+
+  const handleSave = async () => {
+    // Form validation matching fncValidateMe in frmClassRate.vb (lines 551-586)
+    if (!classCode || !classCode.trim()) {
+      showError('ClassCode should not be blank.');
+      return;
+    }
+    if (!fromDate || !fromDate.trim() || isNaN(new Date(fromDate.trim()).getTime())) {
+      showError('Please enter valid from date.');
+      return;
+    }
+    if (!toDate || !toDate.trim() || isNaN(new Date(toDate.trim()).getTime())) {
+      showError('Please enter valid to date.');
+      return;
+    }
+
+    const fDate = new Date(fromDate.trim());
+    const tDate = new Date(toDate.trim());
+    if (tDate.getTime() < fDate.getTime()) {
+      showError('To date should be greater than From date.');
+      return;
+    }
+
+    if (!rate || !rate.trim()) {
+      showError('Rate Should not be empty.');
+      return;
+    }
+
+    const numRate = parseFloat(rate.trim());
+    if (isNaN(numRate)) {
+      showError('Rate Should be Numeric.');
       return;
     }
 
     const payload = {
-      ClassCode: classCode.trim(),
+      ClassCode: classCode.trim().toUpperCase(),
       ClassName: className.trim(),
       FromDate: fromDate.trim(),
-      ToDate: toDate.trim() || null,
-      Rate: parseFloat(rate),
+      ToDate: toDate.trim(),
+      Rate: numRate,
       OriginalFromDate: isEditing ? originalFromDate : undefined
     };
-
-    if (isNaN(payload.Rate)) {
-      showError('Rate must be a valid number');
-      return;
-    }
 
     setSaving(true);
     try {
@@ -147,11 +201,11 @@ export default function DailyClassRateScreen() {
 
       const json = await response.json();
       if (json.success) {
-        showSuccess(`Class Rate ${isEditing ? 'updated' : 'added'} successfully`);
+        showSuccess(json.message || 'Class Rate detail saved sucssfully.');
         setIsModalVisible(false);
         fetchRates();
       } else {
-        showError(json.message || 'Failed to save');
+        showError(json.message || 'Error in Save');
       }
     } catch (error) {
       console.error('Save error:', error);
@@ -167,10 +221,10 @@ export default function DailyClassRateScreen() {
       const response = await fetch(`${API_URL}?code=${encodeURIComponent(code)}&date=${encodeURIComponent(date)}`, { method: 'DELETE' });
       const json = await response.json();
       if (json.success) {
-        showSuccess('Class Rate deleted successfully');
+        showSuccess(json.message || 'Class Rate Deleted.');
         fetchRates();
       } else {
-        showError(json.message || 'Failed to delete');
+        showError(json.message || 'Error in Delete');
       }
     } catch (error) {
       console.error('Delete error:', error);
@@ -181,24 +235,20 @@ export default function DailyClassRateScreen() {
   };
 
   const handleDelete = (code: string, date: string) => {
-    if (Platform.OS === 'web') {
-      if (window.confirm(`Are you sure you want to delete rate for ${code} on ${formatDate(date)}?`)) {
-        executeDelete(code, date);
-      }
-    } else {
-      Alert.alert('Confirm Delete', `Are you sure you want to delete rate for ${code} on ${formatDate(date)}?`, [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Delete', style: 'destructive', onPress: () => executeDelete(code, date) },
-      ]);
+    if (!code || !date) {
+      showError('Please select the Class Rate to Delete?');
+      return;
     }
+    setDeleteConfirmItem({ code, date });
   };
 
   const openAddModal = () => {
+    const today = new Date().toISOString().split('T')[0];
     setIsEditing(false);
     setClassCode('');
     setClassName('');
-    setFromDate(new Date().toISOString().split('T')[0]); // Default to today
-    setToDate('');
+    setFromDate(today);
+    setToDate(today);
     setRate('');
     setOriginalFromDate('');
     setIsModalVisible(true);
@@ -207,10 +257,10 @@ export default function DailyClassRateScreen() {
   const openEditModal = (item: any) => {
     setIsEditing(true);
     setClassCode(item.ClassCode);
-    
+
     const matchedClass = classes.find((c: any) => c.ClassCode === item.ClassCode);
     setClassName(matchedClass ? matchedClass.ClassName : (item.ClassName || ''));
-    
+
     setFromDate(formatDate(item.FromDate));
     setToDate(item.ToDate ? formatDate(item.ToDate) : '');
     setRate(item.Rate !== null ? item.Rate.toString() : '');
@@ -248,11 +298,17 @@ export default function DailyClassRateScreen() {
   );
 
   const renderToast = () => {
-    if (!successMsg && !errorMsg) return null;
-    const isError = !!errorMsg;
+    if (!toast) return null;
+    const isError = toast.type === 'error';
     return (
-      <View style={[styles.toast, { backgroundColor: isError ? '#F44336' : '#4CAF50' }]}>
-        <ThemedText style={styles.toastText}>{isError ? errorMsg : successMsg}</ThemedText>
+      <View style={[styles.toast, isError ? styles.toastError : styles.toastSuccess]}>
+        <Ionicons
+          name={isError ? 'alert-circle' : 'checkmark-circle'}
+          size={16}
+          color="#FFFFFF"
+          style={{ marginRight: 6 }}
+        />
+        <ThemedText style={styles.toastText}>{toast.message}</ThemedText>
       </View>
     );
   };
@@ -260,7 +316,7 @@ export default function DailyClassRateScreen() {
   return (
     <SafeAreaView style={[styles.safeArea, { backgroundColor }]} edges={['top']}>
       <Stack.Screen options={{ headerShown: false }} />
-      {!(isModalVisible || isClassLookupVisible) && renderToast()}
+      {!isModalVisible && renderToast()}
       {/* Header */}
       <View style={[styles.header, { borderBottomColor: borderColor }]}>
         <View style={{ flexDirection: 'row', alignItems: 'center' }}>
@@ -276,41 +332,41 @@ export default function DailyClassRateScreen() {
       </View>
 
       <View style={styles.tableContainer}>
-      {/* Table Header */}
-      <View style={[styles.tableHeader, { backgroundColor: 'rgba(0,0,0,0.02)' }]}>
-        <View style={[styles.cell, { flex: 1.5 }]}><ThemedText style={[styles.headerText, { color: subtitleColor }]}>CLASS CODE</ThemedText></View>
-        <View style={[styles.cell, { flex: 2 }]}><ThemedText style={[styles.headerText, { color: subtitleColor }]}>FROM DATE</ThemedText></View>
-        <View style={[styles.cell, { flex: 2 }]}><ThemedText style={[styles.headerText, { color: subtitleColor }]}>TO DATE</ThemedText></View>
-        <View style={[styles.cell, { flex: 1.5, alignItems: 'center' }]}><ThemedText style={[styles.headerText, { color: subtitleColor }]}>RATE</ThemedText></View>
-        <View style={[styles.actionCell, { alignItems: 'center', justifyContent: 'center' }]}>
-          <ThemedText style={[styles.headerText, { color: subtitleColor, width: 55, textAlign: 'center' }]}>EDIT</ThemedText>
-          <ThemedText style={[styles.headerText, { color: subtitleColor, width: 55, textAlign: 'center' }]}>DELETE</ThemedText>
+        {/* Table Header */}
+        <View style={[styles.tableHeader, { backgroundColor: 'rgba(0,0,0,0.02)' }]}>
+          <View style={[styles.cell, { flex: 1.5 }]}><ThemedText style={[styles.headerText, { color: subtitleColor }]}>CLASS CODE</ThemedText></View>
+          <View style={[styles.cell, { flex: 2 }]}><ThemedText style={[styles.headerText, { color: subtitleColor }]}>FROM DATE</ThemedText></View>
+          <View style={[styles.cell, { flex: 2 }]}><ThemedText style={[styles.headerText, { color: subtitleColor }]}>TO DATE</ThemedText></View>
+          <View style={[styles.cell, { flex: 1.5, alignItems: 'center' }]}><ThemedText style={[styles.headerText, { color: subtitleColor }]}>RATE</ThemedText></View>
+          <View style={[styles.actionCell, { alignItems: 'center', justifyContent: 'center' }]}>
+            <ThemedText style={[styles.headerText, { color: subtitleColor, width: 55, textAlign: 'center' }]}>EDIT</ThemedText>
+            <ThemedText style={[styles.headerText, { color: subtitleColor, width: 55, textAlign: 'center' }]}>DELETE</ThemedText>
+          </View>
         </View>
-      </View>
 
-      {loading ? (
-        <View style={styles.centered}><ActivityIndicator size="large" color={GOLD_COLOR} /></View>
-      ) : (
-        <FlatList
-          data={data}
-          renderItem={renderItem}
-          keyExtractor={(item, index) => `${item.ClassCode}_${item.FromDate}_${index}`}
-          contentContainerStyle={{ paddingBottom: 20 }}
-          ListEmptyComponent={
-            <View style={styles.centered}>
-              <ThemedText style={{ color: subtitleColor }}>No class rates found.</ThemedText>
-            </View>
-          }
-        />
-      )}
+        {loading ? (
+          <View style={styles.centered}><ActivityIndicator size="large" color={GOLD_COLOR} /></View>
+        ) : (
+          <FlatList
+            data={data}
+            renderItem={renderItem}
+            keyExtractor={(item, index) => `${item.ClassCode}_${item.FromDate}_${index}`}
+            contentContainerStyle={{ paddingBottom: 20 }}
+            ListEmptyComponent={
+              <View style={styles.centered}>
+                <ThemedText style={{ color: subtitleColor }}>No class rates found.</ThemedText>
+              </View>
+            }
+          />
+        )}
       </View>
 
       {/* Modal */}
       <Modal visible={isModalVisible} transparent animationType="fade">
         <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setIsModalVisible(false)}>
+          {renderToast()}
           <TouchableWithoutFeedback>
             <View style={[styles.modalContent, { backgroundColor: cardColor, borderColor }]}>
-              {renderToast()}
               <View style={[styles.modalHeader, { borderBottomColor: borderColor }]}>
                 <ThemedText style={{ fontSize: 18, fontWeight: 'bold', color: textColor }}>
                   {isEditing ? 'Edit Class Rate' : 'Add New Class Rate'}
@@ -321,7 +377,7 @@ export default function DailyClassRateScreen() {
               </View>
 
               <View style={styles.modalBody}>
-                
+
                 {/* Class Lookup Row */}
                 <View style={styles.inputGroup}>
                   <ThemedText style={[styles.label, { color: subtitleColor }]}>Class Code *</ThemedText>
@@ -329,10 +385,12 @@ export default function DailyClassRateScreen() {
                     <TextInput
                       style={[styles.input, { color: textColor, borderColor, backgroundColor: isDark ? '#2A2A2A' : '#FFF' }, isEditing && { backgroundColor: isDark ? '#333' : '#F0F0F0', color: subtitleColor }]}
                       value={classCode}
-                      onChangeText={setClassCode}
+                      onChangeText={(t) => setClassCode(t.toUpperCase())}
+                      onBlur={handleClassCodeBlur}
                       editable={!isEditing}
                       placeholder="Enter Class Code"
                       placeholderTextColor={subtitleColor}
+                      autoCapitalize="characters"
                     />
                     {!isEditing && (
                       <TouchableOpacity style={styles.lookupButton} onPress={() => setIsClassLookupVisible(true)}>
@@ -385,7 +443,7 @@ export default function DailyClassRateScreen() {
                 </View>
 
                 <View style={styles.inputGroup}>
-                  <ThemedText style={[styles.label, { color: subtitleColor }]}>To Date</ThemedText>
+                  <ThemedText style={[styles.label, { color: subtitleColor }]}>To Date *</ThemedText>
                   {Platform.OS === 'web' ? (
                     <input
                       type="date"
@@ -421,6 +479,7 @@ export default function DailyClassRateScreen() {
                     style={[styles.input, { color: textColor, borderColor, backgroundColor: isDark ? '#2A2A2A' : '#FFF' }]}
                     value={rate}
                     onChangeText={setRate}
+                    onBlur={handleRateBlur}
                     keyboardType="numeric"
                     placeholder="Enter Rate (e.g. 150.00)"
                     placeholderTextColor={subtitleColor}
@@ -463,13 +522,13 @@ export default function DailyClassRateScreen() {
               />
             </View>
             <FlatList
-              data={classes.filter(c => 
-                (c.ClassCode || '').toLowerCase().includes(classSearch.toLowerCase()) || 
+              data={classes.filter(c =>
+                (c.ClassCode || '').toLowerCase().includes(classSearch.toLowerCase()) ||
                 (c.ClassName || '').toLowerCase().includes(classSearch.toLowerCase())
               )}
               keyExtractor={(item) => item.ClassCode}
               renderItem={({ item }) => (
-                <TouchableOpacity 
+                <TouchableOpacity
                   style={{ padding: 16, borderBottomWidth: 1, borderBottomColor: borderColor, flexDirection: 'row' }}
                   onPress={() => {
                     setClassCode(item.ClassCode);
@@ -490,6 +549,51 @@ export default function DailyClassRateScreen() {
             />
           </View>
         </View>
+      </Modal>
+
+      {/* Delete Confirmation Modal */}
+      <Modal visible={!!deleteConfirmItem} animationType="fade" transparent={true}>
+        <TouchableWithoutFeedback onPress={() => setDeleteConfirmItem(null)}>
+          <View style={styles.modalOverlay}>
+            <TouchableWithoutFeedback>
+              <View style={[styles.modalContent, { backgroundColor: cardColor, borderColor, maxWidth: 420, padding: 24 }]}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 16 }}>
+                  <Ionicons name="trash-outline" size={24} color="#C62828" style={{ marginRight: 10 }} />
+                  <ThemedText style={{ fontSize: 18, fontWeight: 'bold', color: textColor }}>Delete Class Rate</ThemedText>
+                </View>
+                <ThemedText style={{ color: textColor, fontSize: 14, marginBottom: 24, lineHeight: 22 }}>
+                  {`Do you want to delete rate for `}
+                  <ThemedText style={{ fontWeight: 'bold' }}>
+                    {deleteConfirmItem?.code ? deleteConfirmItem.code.trim() : ''}
+                  </ThemedText>
+                  {` on `}
+                  <ThemedText style={{ fontWeight: '600' }}>
+                    {deleteConfirmItem ? formatDate(deleteConfirmItem.date) : ''}
+                  </ThemedText>
+                  {`?`}
+                </ThemedText>
+                <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 12 }}>
+                  <TouchableOpacity
+                    style={[styles.btn, styles.btnCancel]}
+                    onPress={() => setDeleteConfirmItem(null)}
+                  >
+                    <ThemedText style={{ color: '#666', fontWeight: '600' }}>Cancel</ThemedText>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.btn, { backgroundColor: '#C62828' }]}
+                    onPress={() => {
+                      const item = deleteConfirmItem;
+                      setDeleteConfirmItem(null);
+                      if (item) executeDelete(item.code, item.date);
+                    }}
+                  >
+                    <ThemedText style={{ color: '#FFF', fontWeight: '600' }}>Delete</ThemedText>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </TouchableWithoutFeedback>
+          </View>
+        </TouchableWithoutFeedback>
       </Modal>
 
     </SafeAreaView>
@@ -541,10 +645,10 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
   },
   modalBody: { padding: 20 },
-  inputGroup: { 
-    flexDirection: 'row', 
+  inputGroup: {
+    flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 16 
+    marginBottom: 16
   },
   label: {
     flex: 0.4,
@@ -586,33 +690,38 @@ const styles = StyleSheet.create({
     minWidth: 100,
     alignItems: 'center',
   },
-  btnCancel: { 
+  btnCancel: {
     backgroundColor: 'transparent',
     borderWidth: 1,
     borderColor: '#CCC',
   },
   btnSave: { backgroundColor: '#D4AF37' },
-  btnSaveText: {  fontWeight: 'bold' },
+  btnSaveText: { fontWeight: 'bold' },
   toast: {
     position: 'absolute',
     top: Platform.OS === 'web' ? 20 : 50,
     alignSelf: 'center',
-    minWidth: 250,
-    maxWidth: '90%',
-    padding: 15,
-    borderRadius: 8,
-    zIndex: 9999,
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 8,
+    zIndex: 999999,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.25,
     shadowRadius: 3.84,
-    elevation: 5,
+    elevation: 20,
+  },
+  toastSuccess: {
+    backgroundColor: '#2E7D32',
+  },
+  toastError: {
+    backgroundColor: '#C62828',
   },
   toastText: {
-    color: '#FFF',
-    fontSize: 14,
+    color: '#FFFFFF',
+    fontSize: 13,
     fontWeight: '600',
     textAlign: 'center',
   },

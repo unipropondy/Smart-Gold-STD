@@ -42,6 +42,27 @@ router.post("/", async (req, res) => {
       Remarks
     } = req.body;
 
+    const trimmedCatalogue = (CatalogueCode || '').trim();
+    const trimmedCategory = (CategoryCode || '').trim();
+    const trimmedFromWeight = (Weight !== undefined && Weight !== null) ? String(Weight).trim() : '';
+    const trimmedToWeight = (ToWeight !== undefined && ToWeight !== null) ? String(ToWeight).trim() : '';
+
+    if (!trimmedCatalogue) {
+      return res.status(400).json({ success: false, message: "CatalogueCode should not be blank." });
+    }
+
+    if (!trimmedFromWeight) {
+      return res.status(400).json({ success: false, message: "Weight should not be blank." });
+    }
+
+    if (!trimmedToWeight) {
+      return res.status(400).json({ success: false, message: "Weight should not be blank." });
+    }
+
+    if (!trimmedCategory) {
+      return res.status(400).json({ success: false, message: "CategoryCode should not be blank." });
+    }
+
     const query = `
       INSERT INTO tblReOrderLevelMaster (
         LocationCode, 
@@ -80,21 +101,21 @@ router.post("/", async (req, res) => {
     `;
 
     await req.pool.request()
-      .input("LocationCode", sql.NVarChar, LocationCode || null)
-      .input("CategoryCode", sql.NVarChar, CategoryCode || null)
-      .input("CatalogueCode", sql.NVarChar, CatalogueCode || null)
-      .input("Weight", sql.Decimal(18, 3), Weight ? parseFloat(Weight) : 0)
-      .input("ToWeight", sql.Decimal(18, 3), ToWeight ? parseFloat(ToWeight) : 0)
-      .input("SizeCode", sql.NVarChar, SizeCode || null)
-      .input("ToSizeCode", sql.NVarChar, ToSizeCode || null)
+      .input("LocationCode", sql.NVarChar, LocationCode ? LocationCode.trim() : null)
+      .input("CategoryCode", sql.NVarChar, trimmedCategory)
+      .input("CatalogueCode", sql.NVarChar, trimmedCatalogue)
+      .input("Weight", sql.Decimal(18, 3), trimmedFromWeight ? parseFloat(trimmedFromWeight) : 0)
+      .input("ToWeight", sql.Decimal(18, 3), trimmedToWeight ? parseFloat(trimmedToWeight) : 0)
+      .input("SizeCode", sql.NVarChar, SizeCode ? SizeCode.trim() : null)
+      .input("ToSizeCode", sql.NVarChar, ToSizeCode ? ToSizeCode.trim() : null)
       .input("ReOrderLevel", sql.Decimal(18, 2), ReOrderLevel ? parseFloat(ReOrderLevel) : 0)
-      .input("Remarks", sql.NVarChar, Remarks || null)
+      .input("Remarks", sql.NVarChar, Remarks ? Remarks.trim() : null)
       .query(query);
 
-    res.json({ success: true, message: "ReOrder Level added successfully" });
+    res.json({ success: true, message: "ReOrder detail saved sucssfully." });
   } catch (error) {
     console.error("Add ReOrder Level Error:", error);
-    res.status(500).json({ success: false, message: "Database Error", error: error.message });
+    res.status(500).json({ success: false, message: "Error in Save", error: error.message });
   }
 });
 
@@ -102,6 +123,9 @@ router.post("/", async (req, res) => {
 router.put("/", async (req, res) => {
   try {
     const {
+      OriginalLocationCode,
+      OriginalCategoryCode,
+      OriginalCatalogueCode,
       LocationCode,
       CategoryCode,
       CatalogueCode,
@@ -113,9 +137,37 @@ router.put("/", async (req, res) => {
       Remarks
     } = req.body;
 
+    const trimmedCatalogue = (CatalogueCode || '').trim();
+    const trimmedCategory = (CategoryCode || '').trim();
+    const trimmedFromWeight = (Weight !== undefined && Weight !== null) ? String(Weight).trim() : '';
+    const trimmedToWeight = (ToWeight !== undefined && ToWeight !== null) ? String(ToWeight).trim() : '';
+
+    if (!trimmedCatalogue) {
+      return res.status(400).json({ success: false, message: "CatalogueCode should not be blank." });
+    }
+
+    if (!trimmedFromWeight) {
+      return res.status(400).json({ success: false, message: "Weight should not be blank." });
+    }
+
+    if (!trimmedToWeight) {
+      return res.status(400).json({ success: false, message: "Weight should not be blank." });
+    }
+
+    if (!trimmedCategory) {
+      return res.status(400).json({ success: false, message: "CategoryCode should not be blank." });
+    }
+
+    const origLocation = OriginalLocationCode !== undefined ? (OriginalLocationCode || '').trim() : (LocationCode || '').trim();
+    const origCategory = OriginalCategoryCode !== undefined ? (OriginalCategoryCode || '').trim() : trimmedCategory;
+    const origCatalogue = OriginalCatalogueCode !== undefined ? (OriginalCatalogueCode || '').trim() : trimmedCatalogue;
+
     const query = `
       UPDATE tblReOrderLevelMaster
       SET 
+        LocationCode = @LocationCode,
+        CategoryCode = @CategoryCode,
+        CatalogueCode = @CatalogueCode,
         Weight = @Weight,
         ToWeight = @ToWeight,
         SizeCode = @SizeCode,
@@ -125,27 +177,34 @@ router.put("/", async (req, res) => {
         ModifyUser = 'sys',
         ModifyDate = GETDATE()
       WHERE 
-        LocationCode = @LocationCode 
-        AND CategoryCode = @CategoryCode 
-        AND CatalogueCode = @CatalogueCode
+        ISNULL(LocationCode, '') = @OrigLocationCode 
+        AND ISNULL(CategoryCode, '') = @OrigCategoryCode 
+        AND ISNULL(CatalogueCode, '') = @OrigCatalogueCode
     `;
 
-    await req.pool.request()
-      .input("LocationCode", sql.NVarChar, LocationCode || null)
-      .input("CategoryCode", sql.NVarChar, CategoryCode || null)
-      .input("CatalogueCode", sql.NVarChar, CatalogueCode || null)
-      .input("Weight", sql.Decimal(18, 3), Weight ? parseFloat(Weight) : 0)
-      .input("ToWeight", sql.Decimal(18, 3), ToWeight ? parseFloat(ToWeight) : 0)
-      .input("SizeCode", sql.NVarChar, SizeCode || null)
-      .input("ToSizeCode", sql.NVarChar, ToSizeCode || null)
+    const result = await req.pool.request()
+      .input("OrigLocationCode", sql.NVarChar, origLocation)
+      .input("OrigCategoryCode", sql.NVarChar, origCategory)
+      .input("OrigCatalogueCode", sql.NVarChar, origCatalogue)
+      .input("LocationCode", sql.NVarChar, LocationCode ? LocationCode.trim() : null)
+      .input("CategoryCode", sql.NVarChar, trimmedCategory)
+      .input("CatalogueCode", sql.NVarChar, trimmedCatalogue)
+      .input("Weight", sql.Decimal(18, 3), trimmedFromWeight ? parseFloat(trimmedFromWeight) : 0)
+      .input("ToWeight", sql.Decimal(18, 3), trimmedToWeight ? parseFloat(trimmedToWeight) : 0)
+      .input("SizeCode", sql.NVarChar, SizeCode ? SizeCode.trim() : null)
+      .input("ToSizeCode", sql.NVarChar, ToSizeCode ? ToSizeCode.trim() : null)
       .input("ReOrderLevel", sql.Decimal(18, 2), ReOrderLevel ? parseFloat(ReOrderLevel) : 0)
-      .input("Remarks", sql.NVarChar, Remarks || null)
+      .input("Remarks", sql.NVarChar, Remarks ? Remarks.trim() : null)
       .query(query);
 
-    res.json({ success: true, message: "ReOrder Level updated successfully" });
+    if (result.rowsAffected[0] === 0) {
+      return res.status(404).json({ success: false, message: "Error in Save" });
+    }
+
+    res.json({ success: true, message: "ReOrder detail saved sucssfully." });
   } catch (error) {
     console.error("Update ReOrder Level Error:", error);
-    res.status(500).json({ success: false, message: "Database Error", error: error.message });
+    res.status(500).json({ success: false, message: "Error in Save", error: error.message });
   }
 });
 
@@ -161,16 +220,20 @@ router.delete("/", async (req, res) => {
         AND CatalogueCode = @CatalogueCode
     `;
 
-    await req.pool.request()
+    const result = await req.pool.request()
       .input("LocationCode", sql.NVarChar, LocationCode || "")
       .input("CategoryCode", sql.NVarChar, CategoryCode || "")
       .input("CatalogueCode", sql.NVarChar, CatalogueCode || "")
       .query(query);
 
-    res.json({ success: true, message: "ReOrder Level deleted successfully" });
+    if (result.rowsAffected[0] === 0) {
+      return res.status(404).json({ success: false, message: "Error in deleting Catalogue detail." });
+    }
+
+    res.json({ success: true, message: "Catalogue detail deleted." });
   } catch (error) {
     console.error("Delete ReOrder Level Error:", error);
-    res.status(500).json({ success: false, message: "Database Error", error: error.message });
+    res.status(500).json({ success: false, message: "Error in deleting Catalogue detail.", error: error.message });
   }
 });
 

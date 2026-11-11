@@ -131,7 +131,7 @@ export default function StockTradeInTransferScreen() {
   };
 
   const fetchTransferDetails = async (tNo: string) => {
-    if (!tNo.trim()) return;
+    if (!tNo || !tNo.trim()) return;
     try {
       setLoading(true);
       const res = await fetch(`${API_URL}/fetch?transferNo=${encodeURIComponent(tNo.trim())}`);
@@ -150,10 +150,9 @@ export default function StockTradeInTransferScreen() {
         showToast(`Transfer details for ${tNo.trim()} loaded`, 'success');
       } else {
         showToast(data.message || 'Transfer number does not exist', 'error');
-        setTransferNo('');
       }
     } catch (err: any) {
-      showToast('Error loading transfer details', 'error');
+      showToast('Error loading transfer details: ' + (err.message || 'Server error'), 'error');
     } finally {
       setLoading(false);
     }

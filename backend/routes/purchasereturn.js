@@ -10,6 +10,20 @@ const { sql, poolPromise } = require("../db");
 router.get("/lov/supplier", async (req, res) => {
   try {
     const pool = req.pool || (await poolPromise);
+    const { code, SupplierCode } = req.query;
+    const filterCode = (code || SupplierCode || "").trim();
+
+    if (filterCode) {
+      const result = await pool.request()
+        .input("SupplierCode", sql.VarChar, filterCode)
+        .query("SELECT TOP 1 SupplierCode, SupplierName, Address1, Address2 FROM tblSupplier WHERE SupplierCode = @SupplierCode");
+      if (result.recordset.length > 0) {
+        return res.json({ success: true, data: result.recordset[0] });
+      } else {
+        return res.status(404).json({ success: false, message: "Invalid supplier code!" });
+      }
+    }
+
     let query = `
       SELECT TOP 200 
         SupplierCode, 
@@ -78,7 +92,7 @@ router.get("/lov/inventory", async (req, res) => {
 router.get("/inventoryDetail", async (req, res) => {
   try {
     const pool = req.pool || (await poolPromise);
-    const { InventoryCode } = req.query;
+    const { InventoryCode, SupplierCode } = req.query;
 
     if (!InventoryCode || !InventoryCode.trim()) {
       return res.status(400).json({ success: false, message: "InventoryCode is required." });
@@ -113,12 +127,28 @@ router.get("/inventoryDetail", async (req, res) => {
 
     if (result.recordset.length > 0) {
       const item = result.recordset[0];
+
+      // Validate Supplier match if SupplierCode is provided
+      if (SupplierCode && SupplierCode.trim()) {
+        const headerSupplier = SupplierCode.trim().toUpperCase();
+        const itemSupplier = (item.SupplierCode || "").trim().toUpperCase();
+        if (itemSupplier && itemSupplier !== headerSupplier) {
+          return res.json({
+            success: false,
+            message: `This inventory belongs to supplier '${item.SupplierCode}'. Please select the matching supplier!`,
+            supplierMismatch: true,
+            itemSupplier: item.SupplierCode,
+            itemSupplierName: item.SupplierName
+          });
+        }
+      }
+
       if (item.QtyOnHand <= 0) {
         return res.json({ success: false, message: "No Stock for this Inventory!" });
       }
       res.json({ success: true, data: item });
     } else {
-      res.json({ success: false, message: "This Inventory Not Found..." });
+      res.json({ success: false, message: "This Inventory Not Found... " });
     }
   } catch (err) {
     console.error("Get Inventory Detail Error:", err);
@@ -135,8 +165,32 @@ router.post("/", async (req, res) => {
     const { header, details, userId } = req.body;
     const sysUser = userId || "sys";
 
-    if (!header || !details || details.length === 0) {
-      return res.status(400).json({ success: false, message: "Header and details are required." });
+    if (!header) {
+      return res.status(400).json({ success: false, message: "Header is required." });
+    }
+
+    // VB validation: Validate Return Date
+    const retDateStr = header.ReturnDate ? String(header.ReturnDate).trim() : "";
+    if (!retDateStr || isNaN(new Date(retDateStr).getTime())) {
+      return res.status(400).json({ success: false, message: "Please enter the valid Return Date!" });
+    }
+
+    // VB validation: Details count must be > 0
+    if (!details || !Array.isArray(details) || details.length === 0) {
+      return res.status(400).json({ success: false, message: "There is no inventory in the Purchase Return List!" });
+    }
+
+    // Line items validation (Pcs, Stock on hand)
+    for (let i = 0; i < details.length; i++) {
+      const itm = details[i];
+      const invCode = (itm.InventoryCode || "").trim();
+      const pcsVal = parseInt(itm.PCS) || 0;
+      if (!invCode) {
+        return res.status(400).json({ success: false, message: `Item at line ${i + 1} has no Inventory Code!` });
+      }
+      if (pcsVal < 1) {
+        return res.status(400).json({ success: false, message: `PCS should be greater than or equal to one for item ${invCode}!` });
+      }
     }
 
     await transaction.begin();
@@ -205,8 +259,22 @@ router.post("/", async (req, res) => {
       hVals.push('@CreateUser');
       reqHeader.input("CreateUser", sql.VarChar, sysUser);
     }
+    if (hasHeaderCol('CreatedBy')) {
+      hCols.push('CreatedBy');
+      hVals.push('@CreatedBy');
+      reqHeader.input("CreatedBy", sql.VarChar, sysUser);
+    }
+    if (hasHeaderCol('ModifyUser')) {
+      hCols.push('ModifyUser');
+      hVals.push('@ModifyUser');
+      reqHeader.input("ModifyUser", sql.VarChar, sysUser);
+    }
     if (hasHeaderCol('CreateDate')) {
       hCols.push('CreateDate');
+      hVals.push('GETDATE()');
+    }
+    if (hasHeaderCol('ModifyDate')) {
+      hCols.push('ModifyDate');
       hVals.push('GETDATE()');
     }
 
@@ -245,8 +313,22 @@ router.post("/", async (req, res) => {
         dVals.push('@CreateUser');
         reqDetail.input("CreateUser", sql.VarChar, sysUser);
       }
+      if (hasDetailCol('CreatedBy')) {
+        dCols.push('CreatedBy');
+        dVals.push('@CreatedBy');
+        reqDetail.input("CreatedBy", sql.VarChar, sysUser);
+      }
+      if (hasDetailCol('ModifyUser')) {
+        dCols.push('ModifyUser');
+        dVals.push('@ModifyUser');
+        reqDetail.input("ModifyUser", sql.VarChar, sysUser);
+      }
       if (hasDetailCol('CreateDate')) {
         dCols.push('CreateDate');
+        dVals.push('GETDATE()');
+      }
+      if (hasDetailCol('ModifyDate')) {
+        dCols.push('ModifyDate');
         dVals.push('GETDATE()');
       }
 

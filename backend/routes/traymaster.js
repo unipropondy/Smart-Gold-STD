@@ -28,6 +28,29 @@ async function ensureTableExists(pool) {
   }
 }
 
+// GET /api/traymaster/validate-salesman/:code
+router.get("/validate-salesman/:code", async (req, res) => {
+  try {
+    const pool = req.pool;
+    const { code } = req.params;
+    if (!code || !code.trim()) {
+      return res.status(400).json({ success: false, message: "SalesmanID should not be blank." });
+    }
+    const result = await pool.request()
+      .input("code", sql.VarChar(50), code.trim())
+      .query("SELECT TOP 1 SalesManCode, SalesManName FROM tblSalesMan WHERE RTRIM(LTRIM(SalesManCode)) = RTRIM(LTRIM(@code))");
+
+    if (result.recordset.length > 0) {
+      res.json({ success: true, data: result.recordset[0] });
+    } else {
+      res.json({ success: false, message: "Please enter valid SalesmanID." });
+    }
+  } catch (err) {
+    console.error("Validate Salesman Error:", err);
+    res.status(500).json({ success: false, message: "Server error", error: err.message });
+  }
+});
+
 // GET all trays
 router.get("/", async (req, res) => {
   try {
@@ -82,15 +105,28 @@ router.post("/", async (req, res) => {
     await ensureTableExists(pool);
     const { TrayID, TrayName, TrayGroup, SalesManID, SalesManName, IsCustomerTray } = req.body;
 
-    if (!TrayID) {
-      return res.status(400).json({ success: false, message: "TrayID is required." });
+    // Field-level validations matching ValidateMe in frmTray.vb
+    if (!TrayID || !TrayID.trim()) {
+      return res.status(400).json({ success: false, message: "TrayID should not be blank." });
+    }
+    if (!TrayName || !TrayName.trim()) {
+      return res.status(400).json({ success: false, message: "TrayName should not be blank." });
+    }
+    if (!SalesManID || !SalesManID.trim()) {
+      return res.status(400).json({ success: false, message: "SalesmanID should not be blank." });
+    }
+    if (!SalesManName || !SalesManName.trim()) {
+      return res.status(400).json({ success: false, message: "SalesmanName should not be blank." });
+    }
+    if (!TrayGroup || !TrayGroup.trim()) {
+      return res.status(400).json({ success: false, message: "TrayGroup should not be blank." });
     }
 
     // Check if exists
     const checkResult = await pool.request()
-      .input('TrayID', sql.VarChar, TrayID)
-      .query("SELECT TrayID FROM tblTrayMaster WHERE TrayID = @TrayID");
-    
+      .input('TrayID', sql.VarChar, TrayID.trim())
+      .query("SELECT TrayID FROM tblTrayMaster WHERE RTRIM(LTRIM(TrayID)) = RTRIM(LTRIM(@TrayID))");
+
     if (checkResult.recordset.length > 0) {
       return res.status(400).json({ success: false, message: "TrayID already exists." });
     }
@@ -106,18 +142,18 @@ router.post("/", async (req, res) => {
     `;
 
     await pool.request()
-      .input('TrayID', sql.VarChar, TrayID.substring(0, 50))
-      .input('TrayName', sql.VarChar, TrayName ? TrayName.substring(0, 100) : '')
-      .input('TrayGroup', sql.VarChar, TrayGroup ? TrayGroup.substring(0, 50) : '')
-      .input('SalesManID', sql.VarChar, SalesManID ? SalesManID.substring(0, 50) : '')
-      .input('SalesManName', sql.VarChar, SalesManName ? SalesManName.substring(0, 100) : '')
+      .input('TrayID', sql.VarChar, TrayID.trim().substring(0, 50))
+      .input('TrayName', sql.VarChar, TrayName.trim().substring(0, 100))
+      .input('TrayGroup', sql.VarChar, TrayGroup.trim().substring(0, 50))
+      .input('SalesManID', sql.VarChar, SalesManID.trim().substring(0, 50))
+      .input('SalesManName', sql.VarChar, SalesManName.trim().substring(0, 100))
       .input('IsCustomerTray', sql.VarChar, IsCustomerTray ? IsCustomerTray.substring(0, 1) : 'N')
       .query(insertQuery);
 
-    res.json({ success: true, message: "Tray created successfully." });
+    res.json({ success: true, message: "Tray detail saved sucssfully." });
   } catch (err) {
     console.error("Insert Tray Error:", err);
-    res.status(500).json({ success: false, message: "Failed to create tray", error: err.message });
+    res.status(500).json({ success: false, message: "Error in Save", error: err.message });
   }
 });
 
@@ -126,8 +162,23 @@ router.put("/", async (req, res) => {
   try {
     const pool = req.pool;
     const { TrayID, TrayName, TrayGroup, SalesManID, SalesManName, IsCustomerTray } = req.body;
-    
-    if (!TrayID) return res.status(400).json({ success: false, message: "TrayID is required" });
+
+    // Field-level validations matching ValidateMe in frmTray.vb
+    if (!TrayID || !TrayID.trim()) {
+      return res.status(400).json({ success: false, message: "TrayID should not be blank." });
+    }
+    if (!TrayName || !TrayName.trim()) {
+      return res.status(400).json({ success: false, message: "TrayName should not be blank." });
+    }
+    if (!SalesManID || !SalesManID.trim()) {
+      return res.status(400).json({ success: false, message: "SalesmanID should not be blank." });
+    }
+    if (!SalesManName || !SalesManName.trim()) {
+      return res.status(400).json({ success: false, message: "SalesmanName should not be blank." });
+    }
+    if (!TrayGroup || !TrayGroup.trim()) {
+      return res.status(400).json({ success: false, message: "TrayGroup should not be blank." });
+    }
 
     const updateQuery = `
       UPDATE tblTrayMaster SET 
@@ -138,15 +189,15 @@ router.put("/", async (req, res) => {
         IsCustomerTray = @IsCustomerTray,
         ModifyUser = 'sys',
         ModifyDate = GETDATE()
-      WHERE TrayID = @TrayID
+      WHERE RTRIM(LTRIM(TrayID)) = RTRIM(LTRIM(@TrayID))
     `;
 
     const result = await pool.request()
-      .input('TrayID', sql.VarChar, TrayID.substring(0, 50))
-      .input('TrayName', sql.VarChar, TrayName ? TrayName.substring(0, 100) : '')
-      .input('TrayGroup', sql.VarChar, TrayGroup ? TrayGroup.substring(0, 50) : '')
-      .input('SalesManID', sql.VarChar, SalesManID ? SalesManID.substring(0, 50) : '')
-      .input('SalesManName', sql.VarChar, SalesManName ? SalesManName.substring(0, 100) : '')
+      .input('TrayID', sql.VarChar, TrayID.trim().substring(0, 50))
+      .input('TrayName', sql.VarChar, TrayName.trim().substring(0, 100))
+      .input('TrayGroup', sql.VarChar, TrayGroup.trim().substring(0, 50))
+      .input('SalesManID', sql.VarChar, SalesManID.trim().substring(0, 50))
+      .input('SalesManName', sql.VarChar, SalesManName.trim().substring(0, 100))
       .input('IsCustomerTray', sql.VarChar, IsCustomerTray ? IsCustomerTray.substring(0, 1) : 'N')
       .query(updateQuery);
 
@@ -154,10 +205,10 @@ router.put("/", async (req, res) => {
       return res.status(404).json({ success: false, message: "Tray not found." });
     }
 
-    res.json({ success: true, message: "Tray updated successfully." });
+    res.json({ success: true, message: "Tray detail saved sucssfully." });
   } catch (err) {
     console.error("Update Tray Error:", err);
-    res.status(500).json({ success: false, message: "Failed to update tray", error: err.message });
+    res.status(500).json({ success: false, message: "Error in Save", error: err.message });
   }
 });
 
@@ -167,19 +218,38 @@ router.delete("/", async (req, res) => {
     const pool = req.pool;
     const { id } = req.query;
 
-    const deleteQuery = "DELETE FROM tblTrayMaster WHERE TrayID = @TrayID";
+    if (!id || !id.trim()) {
+      return res.status(400).json({ success: false, message: "Tray ID is required" });
+    }
+
+    // Check if tray contains items matching IsTrayContainsItems in frmTray.vb
+    try {
+      const itemCheck = await pool.request()
+        .input('TrayID', sql.VarChar, id.trim())
+        .query("SELECT TOP 1 * FROM tblInventory WHERE TrayID = @TrayID OR TrayCode = @TrayID");
+      if (itemCheck.recordset.length > 0) {
+        return res.status(400).json({
+          success: false,
+          message: "This Tray contain some item. Please move the items and try again."
+        });
+      }
+    } catch (eCheck) {
+      // If column doesn't exist in tblInventory, proceed
+    }
+
+    const deleteQuery = "DELETE FROM tblTrayMaster WHERE RTRIM(LTRIM(TrayID)) = RTRIM(LTRIM(@TrayID))";
     const result = await pool.request()
-      .input('TrayID', sql.VarChar, id)
+      .input('TrayID', sql.VarChar, id.trim())
       .query(deleteQuery);
 
     if (result.rowsAffected[0] === 0) {
-      return res.status(404).json({ success: false, message: "Tray not found." });
+      return res.status(404).json({ success: false, message: "Error in deleting Category detail." });
     }
 
-    res.json({ success: true, message: "Tray deleted successfully." });
+    res.json({ success: true, message: "Tray detail deleted." });
   } catch (err) {
     console.error("Delete Tray Error:", err);
-    res.status(500).json({ success: false, message: "Failed to delete tray", error: err.message });
+    res.status(500).json({ success: false, message: "Error in deleting Category detail.", error: err.message });
   }
 });
 

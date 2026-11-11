@@ -3,7 +3,6 @@ import { Stack, useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   FlatList,
   Modal,
   StyleSheet,
@@ -38,17 +37,20 @@ export default function CatalogueScreen() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
-  const [successMsg, setSuccessMsg] = useState('');
-  const [errorMsg, setErrorMsg] = useState('');
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+  const [deleteConfirmCode, setDeleteConfirmCode] = useState<string | null>(null);
+
+  const showToast = (message: string, type: 'success' | 'error' = 'success') => {
+    setToast({ message, type });
+    setTimeout(() => setToast(null), 3500);
+  };
 
   const showSuccess = (msg: string) => {
-    setSuccessMsg(msg);
-    setTimeout(() => setSuccessMsg(''), 3000);
+    showToast(msg, 'success');
   };
 
   const showError = (msg: string) => {
-    setErrorMsg(msg);
-    setTimeout(() => setErrorMsg(''), 3000);
+    showToast(msg, 'error');
   };
 
   // Modal State
@@ -105,20 +107,75 @@ export default function CatalogueScreen() {
     fetchCategoriesForLookup();
   }, []);
 
-  const handleSave = async () => {
+  // 1. txtCatalogueCode blur validation
+  const handleCatalogueCodeBlur = () => {
     if (!catalogueCode || !catalogueCode.trim()) {
-      showError('Catalogue Code is required.');
+      showError('CatalogueCode should not be blank.');
+    }
+  };
+
+  // 2. txtCatalogueName blur validation
+  const handleCatalogueNameBlur = () => {
+    if (!catalogueName || !catalogueName.trim()) {
+      showError('CatalogueName should not be blank.');
+    }
+  };
+
+  // 3. txtCategoryCode blur validation & auto-fetch category name matching frmCatalogue.vb
+  const handleCategoryCodeBlur = async () => {
+    const trimmed = (categoryCode || '').trim();
+    if (!trimmed) {
+      showError('CategoryCode should not be blank.');
+      setCategoryName('');
+      return;
+    }
+
+    try {
+      const res = await fetch(`${API_URL}/validate-category/${encodeURIComponent(trimmed)}`);
+      const json = await res.json();
+      if (json.success && json.data) {
+        setCategoryName(json.data.CategoryName || '');
+      } else {
+        showError('Pleae enter valid CatagoryCode.');
+        setCategoryCode('');
+        setCategoryName('');
+      }
+    } catch (e) {
+      // Local fallback lookup
+      const matched = categories.find((c: any) => (c.CategoryCode || '').trim().toUpperCase() === trimmed.toUpperCase());
+      if (matched) {
+        setCategoryName(matched.CategoryName || '');
+      } else {
+        showError('Pleae enter valid CatagoryCode.');
+        setCategoryCode('');
+        setCategoryName('');
+      }
+    }
+  };
+
+  const handleSave = async () => {
+    // Exact validations from subValidateMe in frmCatalogue.vb (lines 808-834)
+    if (!catalogueCode || !catalogueCode.trim()) {
+      showError('CatalogueCode should not be blank.');
       return;
     }
     if (!catalogueName || !catalogueName.trim()) {
-      showError('Catalogue Name is required.');
+      showError('CatalogueName should not be blank.');
+      return;
+    }
+    if (!categoryCode || !categoryCode.trim()) {
+      showError('CategoryCode should not be blank.');
+      return;
+    }
+    if (!categoryName || !categoryName.trim()) {
+      showError('Pleae enter valid CatagoryCode.');
       return;
     }
 
     const payload = {
-      CatalogueCode: catalogueCode.trim(),
+      CatalogueCode: catalogueCode.trim().toUpperCase(),
       CatalogueName: catalogueName.trim(),
-      CategoryCode: categoryCode.trim(),
+      CategoryCode: categoryCode.trim().toUpperCase(),
       Remarks: remarks.trim(),
       IsActive: isActive,
     };
@@ -134,11 +191,11 @@ export default function CatalogueScreen() {
 
       const json = await response.json();
       if (json.success) {
-        showSuccess(`Catalogue ${isEditing ? 'updated' : 'added'} successfully`);
+        showSuccess(json.message || 'Catalogue detail saved sucssfully.');
         setIsModalVisible(false);
         fetchCatalogues();
       } else {
-        showError(json.message || 'Failed to save');
+        showError(json.message || 'Error in Save');
       }
     } catch (error) {
       console.error('Save error:', error);
@@ -154,10 +211,10 @@ export default function CatalogueScreen() {
       const response = await fetch(`${API_URL}?id=${encodeURIComponent(code)}`, { method: 'DELETE' });
       const json = await response.json();
       if (json.success) {
-        showSuccess('Catalogue deleted successfully');
+        showSuccess(json.message || 'Catalogue detail deleted.');
         fetchCatalogues();
       } else {
-        showError(json.message || 'Failed to delete');
+        showError(json.message || 'Error in deleting Catalogue detail.');
       }
     } catch (error) {
       console.error('Delete error:', error);
@@ -168,16 +225,7 @@ export default function CatalogueScreen() {
   };
 
   const handleDelete = (code: string) => {
-    if (Platform.OS === 'web') {
-      if (window.confirm(`Are you sure you want to delete Catalogue ${code}?`)) {
-        executeDelete(code);
-      }
-    } else {
-      Alert.alert('Confirm Delete', `Are you sure you want to delete Catalogue ${code}?`, [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Delete', style: 'destructive', onPress: () => executeDelete(code) },
-      ]);
-    }
+    setDeleteConfirmCode(code);
   };
 
   const openAddModal = () => {
@@ -236,11 +284,17 @@ export default function CatalogueScreen() {
   );
 
   const renderToast = () => {
-    if (!successMsg && !errorMsg) return null;
-    const isError = !!errorMsg;
+    if (!toast) return null;
+    const isError = toast.type === 'error';
     return (
-      <View style={[styles.toast, { backgroundColor: isError ? '#F44336' : '#4CAF50' }]}>
-        <ThemedText style={styles.toastText}>{isError ? errorMsg : successMsg}</ThemedText>
+      <View style={[styles.toast, isError ? styles.toastError : styles.toastSuccess]}>
+        <Ionicons
+          name={isError ? 'alert-circle' : 'checkmark-circle'}
+          size={16}
+          color="#FFFFFF"
+          style={{ marginRight: 6 }}
+        />
+        <ThemedText style={styles.toastText}>{toast.message}</ThemedText>
       </View>
     );
   };
@@ -248,7 +302,7 @@ export default function CatalogueScreen() {
   return (
     <SafeAreaView style={[styles.safeArea, { backgroundColor }]} edges={['top']}>
       <Stack.Screen options={{ headerShown: false }} />
-      {!(isModalVisible || isCategoryLookupVisible) && renderToast()}
+      {!isModalVisible && renderToast()}
       {/* Header */}
       <View style={[styles.header, { borderBottomColor: borderColor }]}>
         <View style={{ flexDirection: 'row', alignItems: 'center' }}>
@@ -293,9 +347,9 @@ export default function CatalogueScreen() {
       {/* Modal */}
       <Modal visible={isModalVisible} transparent animationType="fade">
         <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setIsModalVisible(false)}>
+          {renderToast()}
           <TouchableWithoutFeedback>
             <View style={[styles.modalContent, { backgroundColor: cardColor, borderColor }]}>
-              {renderToast()}
               <View style={[styles.modalHeader, { borderBottomColor: borderColor }]}>
                 <ThemedText style={{ fontSize: 18, fontWeight: 'bold', color: textColor }}>
                   {isEditing ? 'Edit Catalogue' : 'Add New Catalogue'}
@@ -311,10 +365,12 @@ export default function CatalogueScreen() {
                   <TextInput
                     style={[styles.input, { color: textColor, borderColor, backgroundColor: isDark ? '#2A2A2A' : '#FFF' }, isEditing && { backgroundColor: isDark ? '#333' : '#F0F0F0', color: subtitleColor }]}
                     value={catalogueCode}
-                    onChangeText={setCatalogueCode}
+                    onChangeText={(t) => setCatalogueCode(t.toUpperCase())}
+                    onBlur={handleCatalogueCodeBlur}
                     editable={!isEditing}
                     placeholder="Enter Catalogue Code"
                     placeholderTextColor={subtitleColor}
+                    autoCapitalize="characters"
                   />
                 </View>
 
@@ -324,6 +380,7 @@ export default function CatalogueScreen() {
                     style={[styles.input, { color: textColor, borderColor, backgroundColor: isDark ? '#2A2A2A' : '#FFF' }]}
                     value={catalogueName}
                     onChangeText={setCatalogueName}
+                    onBlur={handleCatalogueNameBlur}
                     placeholder="Enter Catalogue Name"
                     placeholderTextColor={subtitleColor}
                   />
@@ -331,14 +388,16 @@ export default function CatalogueScreen() {
 
                 {/* Category Lookup Row */}
                 <View style={styles.inputGroup}>
-                  <ThemedText style={[styles.label, { color: subtitleColor }]}>Category Code</ThemedText>
+                  <ThemedText style={[styles.label, { color: subtitleColor }]}>Category Code *</ThemedText>
                   <View style={styles.lookupContainer}>
                     <TextInput
                       style={[styles.input, { color: textColor, borderColor, backgroundColor: isDark ? '#2A2A2A' : '#FFF' }]}
                       value={categoryCode}
-                      onChangeText={setCategoryCode}
+                      onChangeText={(t) => setCategoryCode(t.toUpperCase())}
+                      onBlur={handleCategoryCodeBlur}
                       placeholder="Enter Category Code"
                       placeholderTextColor={subtitleColor}
+                      autoCapitalize="characters"
                     />
                     <TouchableOpacity style={styles.lookupButton} onPress={() => setIsCategoryLookupVisible(true)}>
                       <ThemedText style={{ color: textColor, fontWeight: 'bold' }}>...</ThemedText>
@@ -448,6 +507,43 @@ export default function CatalogueScreen() {
             />
           </View>
         </View>
+      </Modal>
+
+      {/* Delete Confirmation Modal */}
+      <Modal visible={!!deleteConfirmCode} animationType="fade" transparent={true}>
+        <TouchableWithoutFeedback onPress={() => setDeleteConfirmCode(null)}>
+          <View style={styles.modalOverlay}>
+            <TouchableWithoutFeedback>
+              <View style={[styles.modalContent, { backgroundColor: cardColor, borderColor, maxWidth: 420, padding: 24 }]}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 16 }}>
+                  <Ionicons name="trash-outline" size={24} color="#C62828" style={{ marginRight: 10 }} />
+                  <ThemedText style={{ fontSize: 18, fontWeight: 'bold', color: textColor }}>Delete Catalogue</ThemedText>
+                </View>
+                <ThemedText style={{ color: textColor, fontSize: 14, marginBottom: 24, lineHeight: 20 }}>
+                  Do you want to delete <ThemedText style={{ fontWeight: 'bold' }}>{deleteConfirmCode}</ThemedText> Catalogue?
+                </ThemedText>
+                <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 12 }}>
+                  <TouchableOpacity
+                    style={[styles.btn, styles.btnCancel]}
+                    onPress={() => setDeleteConfirmCode(null)}
+                  >
+                    <ThemedText style={{ color: '#666', fontWeight: '600' }}>Cancel</ThemedText>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.btn, { backgroundColor: '#C62828' }]}
+                    onPress={() => {
+                      const code = deleteConfirmCode;
+                      setDeleteConfirmCode(null);
+                      if (code) executeDelete(code);
+                    }}
+                  >
+                    <ThemedText style={{ color: '#FFF', fontWeight: '600' }}>Delete</ThemedText>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </TouchableWithoutFeedback>
+          </View>
+        </TouchableWithoutFeedback>
       </Modal>
 
     </SafeAreaView>
@@ -578,22 +674,27 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: Platform.OS === 'web' ? 20 : 50,
     alignSelf: 'center',
-    minWidth: 250,
-    maxWidth: '90%',
-    padding: 15,
-    borderRadius: 8,
-    zIndex: 9999,
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 8,
+    zIndex: 999999,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.25,
     shadowRadius: 3.84,
-    elevation: 5,
+    elevation: 20,
+  },
+  toastSuccess: {
+    backgroundColor: '#2E7D32',
+  },
+  toastError: {
+    backgroundColor: '#C62828',
   },
   toastText: {
-    color: '#FFF',
-    fontSize: 14,
+    color: '#FFFFFF',
+    fontSize: 13,
     fontWeight: '600',
     textAlign: 'center',
   },

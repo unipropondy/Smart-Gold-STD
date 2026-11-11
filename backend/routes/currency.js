@@ -26,10 +26,31 @@ async function ensureTableExists(pool) {
   }
 }
 
-// GET all Currency
+// GET all Currency or single Currency by code
 router.get("/", async (req, res) => {
   try {
     await ensureTableExists(req.pool);
+    const { code } = req.query;
+
+    if (code) {
+      const result = await req.pool.request()
+        .input("CurrencyCode", sql.VarChar, code.trim())
+        .query(`
+          SELECT 
+            CurrencyCode,
+            CurrencyName,
+            CurrencyRate,
+            Remarks
+          FROM tblCurrency
+          WHERE CurrencyCode = @CurrencyCode
+        `);
+      if (result.recordset.length > 0) {
+        return res.json({ success: true, data: result.recordset[0] });
+      } else {
+        return res.status(404).json({ success: false, message: "Set Default Currency in Currency Master" });
+      }
+    }
+
     const result = await req.pool.request().query(`
       SELECT 
         CurrencyCode,
@@ -46,18 +67,61 @@ router.get("/", async (req, res) => {
   }
 });
 
+// GET Currency by code
+router.get("/by-code/:code", async (req, res) => {
+  try {
+    await ensureTableExists(req.pool);
+    const { code } = req.params;
+    const result = await req.pool.request()
+      .input("CurrencyCode", sql.VarChar, (code || '').trim())
+      .query(`
+        SELECT 
+          CurrencyCode,
+          CurrencyName,
+          CurrencyRate,
+          Remarks
+        FROM tblCurrency
+        WHERE CurrencyCode = @CurrencyCode
+      `);
+    if (result.recordset.length > 0) {
+      return res.json({ success: true, data: result.recordset[0] });
+    } else {
+      return res.status(404).json({ success: false, message: "Set Default Currency in Currency Master" });
+    }
+  } catch (error) {
+    console.error("Fetch Currency By Code Error:", error);
+    res.status(500).json({ success: false, message: "Database Error", error: error.message });
+  }
+});
+
 // POST (Create) a Currency
 router.post("/", async (req, res) => {
   try {
     await ensureTableExists(req.pool);
     const { CurrencyCode, CurrencyName, CurrencyRate, Remarks } = req.body;
 
-    if (!CurrencyCode) {
-      return res.status(400).json({ success: false, message: "Currency Code is required" });
+    const trimmedCode = (CurrencyCode || '').trim();
+    const trimmedName = (CurrencyName || '').trim();
+    const trimmedRate = (CurrencyRate !== undefined && CurrencyRate !== null) ? String(CurrencyRate).trim() : '';
+
+    if (!trimmedCode) {
+      return res.status(400).json({ success: false, message: "Please enter Currency Code !" });
+    }
+
+    if (!trimmedName) {
+      return res.status(400).json({ success: false, message: "Please enter Currency Name !" });
+    }
+
+    if (!trimmedRate) {
+      return res.status(400).json({ success: false, message: "Please enter Rate !" });
+    }
+
+    if (isNaN(Number(trimmedRate))) {
+      return res.status(400).json({ success: false, message: "Please enter numeric value to Rate !" });
     }
 
     const checkResult = await req.pool.request()
-      .input("CurrencyCode", sql.VarChar, CurrencyCode)
+      .input("CurrencyCode", sql.VarChar, trimmedCode)
       .query("SELECT CurrencyCode FROM tblCurrency WHERE CurrencyCode = @CurrencyCode");
     
     if (checkResult.recordset.length > 0) {
@@ -88,16 +152,16 @@ router.post("/", async (req, res) => {
     `;
 
     await req.pool.request()
-      .input("CurrencyCode", sql.VarChar, CurrencyCode)
-      .input("CurrencyName", sql.VarChar, CurrencyName || null)
-      .input("CurrencyRate", sql.Decimal(18, 8), CurrencyRate ? parseFloat(CurrencyRate) : 0)
-      .input("Remarks", sql.VarChar, Remarks || null)
+      .input("CurrencyCode", sql.VarChar, trimmedCode)
+      .input("CurrencyName", sql.VarChar, trimmedName || null)
+      .input("CurrencyRate", sql.Decimal(18, 8), parseFloat(trimmedRate))
+      .input("Remarks", sql.VarChar, Remarks ? Remarks.trim() : null)
       .query(query);
 
-    res.json({ success: true, message: "Currency added successfully" });
+    res.json({ success: true, message: "Saved Successfully!" });
   } catch (error) {
     console.error("Add Currency Error:", error);
-    res.status(500).json({ success: false, message: "Database Error", error: error.message });
+    res.status(500).json({ success: false, message: "Error in Save/Update !", error: error.message });
   }
 });
 
@@ -106,8 +170,24 @@ router.put("/", async (req, res) => {
   try {
     const { CurrencyCode, CurrencyName, CurrencyRate, Remarks } = req.body;
 
-    if (!CurrencyCode) {
-      return res.status(400).json({ success: false, message: "Currency Code is required" });
+    const trimmedCode = (CurrencyCode || '').trim();
+    const trimmedName = (CurrencyName || '').trim();
+    const trimmedRate = (CurrencyRate !== undefined && CurrencyRate !== null) ? String(CurrencyRate).trim() : '';
+
+    if (!trimmedCode) {
+      return res.status(400).json({ success: false, message: "Please enter Currency Code !" });
+    }
+
+    if (!trimmedName) {
+      return res.status(400).json({ success: false, message: "Please enter Currency Name !" });
+    }
+
+    if (!trimmedRate) {
+      return res.status(400).json({ success: false, message: "Please enter Rate !" });
+    }
+
+    if (isNaN(Number(trimmedRate))) {
+      return res.status(400).json({ success: false, message: "Please enter numeric value to Rate !" });
     }
 
     const query = `
@@ -123,20 +203,20 @@ router.put("/", async (req, res) => {
     `;
 
     const result = await req.pool.request()
-      .input("CurrencyCode", sql.VarChar, CurrencyCode)
-      .input("CurrencyName", sql.VarChar, CurrencyName || null)
-      .input("CurrencyRate", sql.Decimal(18, 8), CurrencyRate ? parseFloat(CurrencyRate) : 0)
-      .input("Remarks", sql.VarChar, Remarks || null)
+      .input("CurrencyCode", sql.VarChar, trimmedCode)
+      .input("CurrencyName", sql.VarChar, trimmedName || null)
+      .input("CurrencyRate", sql.Decimal(18, 8), parseFloat(trimmedRate))
+      .input("Remarks", sql.VarChar, Remarks ? Remarks.trim() : null)
       .query(query);
 
     if (result.rowsAffected[0] === 0) {
-      return res.status(404).json({ success: false, message: "Currency not found" });
+      return res.status(404).json({ success: false, message: "No such user!" });
     }
 
-    res.json({ success: true, message: "Currency updated successfully" });
+    res.json({ success: true, message: "Saved Successfully!" });
   } catch (error) {
     console.error("Update Currency Error:", error);
-    res.status(500).json({ success: false, message: "Database Error", error: error.message });
+    res.status(500).json({ success: false, message: "Error in Save/Update !", error: error.message });
   }
 });
 

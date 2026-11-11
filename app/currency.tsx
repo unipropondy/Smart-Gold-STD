@@ -3,7 +3,6 @@ import { Stack, useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   FlatList,
   Modal,
   StyleSheet,
@@ -38,17 +37,20 @@ export default function CurrencyScreen() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
-  const [successMsg, setSuccessMsg] = useState('');
-  const [errorMsg, setErrorMsg] = useState('');
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+  const [deleteConfirmCode, setDeleteConfirmCode] = useState<string | null>(null);
+
+  const showToast = (message: string, type: 'success' | 'error' = 'success') => {
+    setToast({ message, type });
+    setTimeout(() => setToast(null), 3000);
+  };
 
   const showSuccess = (msg: string) => {
-    setSuccessMsg(msg);
-    setTimeout(() => setSuccessMsg(''), 3000);
+    showToast(msg, 'success');
   };
 
   const showError = (msg: string) => {
-    setErrorMsg(msg);
-    setTimeout(() => setErrorMsg(''), 3000);
+    showToast(msg, 'error');
   };
 
   // Modal State
@@ -83,17 +85,62 @@ export default function CurrencyScreen() {
     fetchData();
   }, []);
 
+  // Field-level blur handlers matching fnScreenValidate in frmCurrency.vb
+  const handleCurrencyCodeBlur = () => {
+    const trimmed = (currencyCode || '').trim();
+    if (!trimmed) {
+      showError('Please enter Currency Code !');
+    }
+  };
+
+  const handleCurrencyNameBlur = () => {
+    const trimmed = (currencyName || '').trim();
+    if (!trimmed) {
+      showError('Please enter Currency Name !');
+    }
+  };
+
+  const handleCurrencyRateBlur = () => {
+    const trimmed = (currencyRate || '').trim();
+    if (!trimmed) {
+      showError('Please enter Rate !');
+    } else if (isNaN(Number(trimmed))) {
+      showError('Please enter numeric value to Rate !');
+      setCurrencyRate('');
+    }
+  };
+
   const handleSave = async () => {
-    if (!currencyCode || !currencyCode.trim()) {
-      showError('Currency Code is required');
+    const trimmedCode = (currencyCode || '').trim();
+    const trimmedName = (currencyName || '').trim();
+    const trimmedRate = (currencyRate || '').trim();
+
+    if (!trimmedCode) {
+      showError('Please enter Currency Code !');
+      return;
+    }
+
+    if (!trimmedName) {
+      showError('Please enter Currency Name !');
+      return;
+    }
+
+    if (!trimmedRate) {
+      showError('Please enter Rate !');
+      return;
+    }
+
+    if (isNaN(Number(trimmedRate))) {
+      showError('Please enter numeric value to Rate !');
+      setCurrencyRate('');
       return;
     }
 
     const payload = {
-      CurrencyCode: currencyCode.trim(),
-      CurrencyName: currencyName.trim(),
-      CurrencyRate: currencyRate.trim(),
-      Remarks: remarks.trim(),
+      CurrencyCode: trimmedCode,
+      CurrencyName: trimmedName,
+      CurrencyRate: trimmedRate,
+      Remarks: (remarks || '').trim(),
     };
 
     setSaving(true);
@@ -107,15 +154,15 @@ export default function CurrencyScreen() {
 
       const json = await response.json();
       if (json.success) {
-        showSuccess(`Currency ${isEditing ? 'updated' : 'added'} successfully`);
+        showSuccess(json.message || 'Saved Successfully!');
         setIsModalVisible(false);
         fetchData();
       } else {
-        showError(json.message || 'Failed to save');
+        showError(json.message || 'Error in Save/Update !');
       }
     } catch (error) {
       console.error('Save error:', error);
-      showError('Failed to save currency');
+      showError('Error in Save/Update !');
     } finally {
       setSaving(false);
     }
@@ -130,7 +177,7 @@ export default function CurrencyScreen() {
         showSuccess('Currency deleted successfully');
         fetchData();
       } else {
-        showError(json.message || 'Failed to delete');
+        showError(json.message || 'No such user!');
       }
     } catch (error) {
       console.error('Delete error:', error);
@@ -141,16 +188,7 @@ export default function CurrencyScreen() {
   };
 
   const handleDelete = (code: string) => {
-    if (Platform.OS === 'web') {
-      if (window.confirm(`Are you sure you want to delete Currency ${code}?`)) {
-        executeDelete(code);
-      }
-    } else {
-      Alert.alert('Confirm Delete', `Are you sure you want to delete Currency ${code}?`, [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Delete', style: 'destructive', onPress: () => executeDelete(code) },
-      ]);
-    }
+    setDeleteConfirmCode(code);
   };
 
   const openAddModal = () => {
@@ -198,11 +236,17 @@ export default function CurrencyScreen() {
   );
 
   const renderToast = () => {
-    if (!successMsg && !errorMsg) return null;
-    const isError = !!errorMsg;
+    if (!toast) return null;
+    const isError = toast.type === 'error';
     return (
       <View style={[styles.toast, { backgroundColor: isError ? '#F44336' : '#4CAF50' }]}>
-        <ThemedText style={styles.toastText}>{isError ? errorMsg : successMsg}</ThemedText>
+        <Ionicons
+          name={isError ? 'alert-circle' : 'checkmark-circle'}
+          size={16}
+          color="#FFF"
+          style={{ marginRight: 6 }}
+        />
+        <ThemedText style={styles.toastText}>{toast.message}</ThemedText>
       </View>
     );
   };
@@ -273,6 +317,7 @@ export default function CurrencyScreen() {
                     style={[styles.input, { color: textColor, borderColor, backgroundColor: isDark ? '#2A2A2A' : '#FFF' }, isEditing && { backgroundColor: isDark ? '#333' : '#F0F0F0', color: subtitleColor }]}
                     value={currencyCode}
                     onChangeText={setCurrencyCode}
+                    onBlur={handleCurrencyCodeBlur}
                     editable={!isEditing}
                     placeholder="E.g., SGD"
                     placeholderTextColor={subtitleColor}
@@ -280,22 +325,24 @@ export default function CurrencyScreen() {
                 </View>
 
                 <View style={styles.inputGroup}>
-                  <ThemedText style={[styles.label, { color: subtitleColor }]}>Currency Name</ThemedText>
+                  <ThemedText style={[styles.label, { color: subtitleColor }]}>Currency Name *</ThemedText>
                   <TextInput
                     style={[styles.input, { color: textColor, borderColor, backgroundColor: isDark ? '#2A2A2A' : '#FFF' }]}
                     value={currencyName}
                     onChangeText={setCurrencyName}
+                    onBlur={handleCurrencyNameBlur}
                     placeholder="E.g., Singapore Dollar"
                     placeholderTextColor={subtitleColor}
                   />
                 </View>
 
                 <View style={styles.inputGroup}>
-                  <ThemedText style={[styles.label, { color: subtitleColor }]}>Exchange Rate</ThemedText>
+                  <ThemedText style={[styles.label, { color: subtitleColor }]}>Exchange Rate *</ThemedText>
                   <TextInput
                     style={[styles.input, { color: textColor, borderColor, backgroundColor: isDark ? '#2A2A2A' : '#FFF' }]}
                     value={currencyRate}
                     onChangeText={setCurrencyRate}
+                    onBlur={handleCurrencyRateBlur}
                     keyboardType="numeric"
                     placeholder="1.00000000"
                     placeholderTextColor={subtitleColor}
@@ -326,6 +373,46 @@ export default function CurrencyScreen() {
             </View>
           </TouchableWithoutFeedback>
         </TouchableOpacity>
+      </Modal>
+
+      {/* Delete Confirmation Modal */}
+      <Modal visible={!!deleteConfirmCode} animationType="fade" transparent={true}>
+        <TouchableWithoutFeedback onPress={() => setDeleteConfirmCode(null)}>
+          <View style={styles.modalOverlay}>
+            <TouchableWithoutFeedback>
+              <View style={[styles.modalContent, { backgroundColor: cardColor, borderColor, maxWidth: 420, padding: 24 }]}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 16 }}>
+                  <Ionicons name="trash-outline" size={24} color="#C62828" style={{ marginRight: 10 }} />
+                  <ThemedText style={{ fontSize: 18, fontWeight: 'bold', color: textColor }}>Delete Currency</ThemedText>
+                </View>
+                <ThemedText style={{ color: textColor, fontSize: 14, marginBottom: 24, lineHeight: 22 }}>
+                  Do you want to Delete ?{' '}
+                  <ThemedText style={{ fontWeight: 'bold' }}>
+                    {deleteConfirmCode ? deleteConfirmCode.trim() : ''}
+                  </ThemedText>
+                </ThemedText>
+                <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 12 }}>
+                  <TouchableOpacity
+                    style={[styles.btn, styles.btnCancel]}
+                    onPress={() => setDeleteConfirmCode(null)}
+                  >
+                    <ThemedText style={{ color: '#666', fontWeight: '600' }}>Cancel</ThemedText>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.btn, { backgroundColor: '#C62828' }]}
+                    onPress={() => {
+                      const code = deleteConfirmCode;
+                      setDeleteConfirmCode(null);
+                      if (code) executeDelete(code);
+                    }}
+                  >
+                    <ThemedText style={{ color: '#FFF', fontWeight: '600' }}>Delete</ThemedText>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </TouchableWithoutFeedback>
+          </View>
+        </TouchableWithoutFeedback>
       </Modal>
 
     </SafeAreaView>

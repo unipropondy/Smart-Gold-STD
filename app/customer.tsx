@@ -39,6 +39,7 @@ export default function CustomerScreen() {
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [toast, setToast] = useState<{ message: string, type: 'success' | 'error' } | null>(null);
+  const [deleteConfirmCode, setDeleteConfirmCode] = useState<string | null>(null);
 
   const showToast = (message: string, type: 'success' | 'error' = 'success') => {
     setToast({ message, type });
@@ -121,19 +122,72 @@ export default function CustomerScreen() {
     }
   }, [customerCode, isEditing]);
 
-  const handleSave = async () => {
-    if (!customerCode || !customerCode.trim()) {
-      showToast('Customer Code is required', 'error');
-      return;
+  // Field-level blur handlers matching ValidateMe() in frmCustomer.vb
+  const handleCustomerCodeBlur = () => {
+    const trimmed = (customerCode || '').trim();
+    if (!trimmed) {
+      showToast('CustomerCode should not be blank.', 'error');
     }
-    if (!customerName || !customerName.trim()) {
-      showToast('Customer Name is required', 'error');
+  };
+
+  const handleCustomerNameBlur = () => {
+    const trimmed = (customerName || '').trim();
+    if (!trimmed) {
+      showToast('CustomerName should not be blank.', 'error');
+    }
+  };
+
+  const handlePassportNoBlur = () => {
+    const trimmed = (passportNo || '').trim();
+    if (!trimmed) {
+      showToast('Passport Number should not be blank.', 'error');
+    }
+  };
+
+  const handleEmailBlur = () => {
+    const trimmed = (eMail || '').trim();
+    if (trimmed) {
+      const emailPattern = /^[a-zA-Z][\w\.-]*[a-zA-Z0-9]@[a-zA-Z0-9][\w\.-]*[a-zA-Z0-9]\.[a-zA-Z][a-zA-Z\.]*[a-zA-Z]$/;
+      if (!emailPattern.test(trimmed)) {
+        showToast('Enter Proper Email Address', 'error');
+      }
+    }
+  };
+
+  const handleSave = async () => {
+    // Validation matching ValidateMe() in frmCustomer.vb (lines 1621-1677)
+    const trimmedCode = (customerCode || '').trim();
+    const trimmedName = (customerName || '').trim();
+    const trimmedEmail = (eMail || '').trim();
+
+    if (!trimmedCode) {
+      showToast('CustomerCode should not be blank.', 'error');
       return;
     }
 
+    if (!trimmedName) {
+      showToast('CustomerName should not be blank.', 'error');
+      return;
+    }
+
+    const trimmedPassport = (passportNo || '').trim();
+    if (!trimmedPassport) {
+      showToast('Passport Number should not be blank.', 'error');
+      return;
+    }
+
+    // Email format validation matching EmailAddressCheck in frmCustomer.vb
+    if (trimmedEmail) {
+      const emailPattern = /^[a-zA-Z][\w\.-]*[a-zA-Z0-9]@[a-zA-Z0-9][\w\.-]*[a-zA-Z0-9]\.[a-zA-Z][a-zA-Z\.]*[a-zA-Z]$/;
+      if (!emailPattern.test(trimmedEmail)) {
+        showToast('Enter Proper Email Address', 'error');
+        return;
+      }
+    }
+
     const payload = {
-      CustomerCode: customerCode.trim(),
-      CustomerName: customerName.trim(),
+      CustomerCode: trimmedCode.toUpperCase(),
+      CustomerName: trimmedName,
       CustomerType: customerType.trim(),
       Address1: address1.trim(),
       Address2: address2.trim(),
@@ -141,7 +195,7 @@ export default function CustomerScreen() {
       Address4: address4.trim(), // Nationality
       NRICNo: nricNo.trim(),
       Remarks: remarks.trim(),
-      eMail: eMail.trim(),
+      eMail: trimmedEmail,
       Url: url.trim(),
       Phone1: phone1.trim(),
       Phone2: phone2.trim(),
@@ -167,7 +221,7 @@ export default function CustomerScreen() {
 
       const json = await response.json();
       if (json.success) {
-        showToast(`Customer ${isEditing ? 'updated' : 'added'} successfully`, 'success');
+        showToast(json.message || 'Customer detail saved sucssfully.', 'success');
         fetchCustomers();
         if (returnPath) {
           const retCustCode = customerCode.trim();
@@ -185,48 +239,39 @@ export default function CustomerScreen() {
           return;
         }
       } else {
-        showToast(json.message || 'Failed to save', 'error');
+        showToast(json.message || 'Error in Save', 'error');
       }
     } catch (error) {
       console.error('Save error:', error);
-      showToast('Failed to save customer', 'error');
+      showToast('Error in Save', 'error');
     } finally {
       setSaving(false);
     }
   };
 
+  const executeDelete = async (code: string) => {
+    setDeleting(true);
+    try {
+      const response = await fetch(`${API_URL}/${encodeURIComponent(code)}`, { method: 'DELETE' });
+      const json = await response.json();
+      if (json.success) {
+        showToast(json.message || 'Customer detail deleted.', 'success');
+        handleClear();
+        fetchCustomers();
+      } else {
+        showToast(json.message || 'Error in deleting Customer detail.', 'error');
+      }
+    } catch (error) {
+      console.error('Delete error:', error);
+      showToast('Error in deleting Customer detail.', 'error');
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   const handleDelete = () => {
-    if (!customerCode) return;
-    Alert.alert(
-      'Confirm Delete',
-      'Are you sure you want to delete this customer?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: async () => {
-            setDeleting(true);
-            try {
-              const response = await fetch(`${API_URL}/${encodeURIComponent(customerCode)}`, { method: 'DELETE' });
-              const json = await response.json();
-              if (json.success) {
-                showToast('Customer deleted successfully', 'success');
-                handleClear();
-                fetchCustomers();
-              } else {
-                showToast(json.message || 'Failed to delete', 'error');
-              }
-            } catch (error) {
-              console.error('Delete error:', error);
-              showToast('Failed to delete customer', 'error');
-            } finally {
-              setDeleting(false);
-            }
-          },
-        },
-      ]
-    );
+    if (!customerCode || !customerCode.trim()) return;
+    setDeleteConfirmCode(customerCode.trim());
   };
 
   const handleClear = () => {
@@ -451,30 +496,43 @@ export default function CustomerScreen() {
 
               <View style={{ padding: 12 }}>
                 <View style={styles.row}>
-                  <ThemedText style={styles.label}>Customer Code</ThemedText>
+                  <ThemedText style={styles.label}>Customer Code *</ThemedText>
                   <View style={{ width: 160, flexDirection: 'row' }}>
-                    <TextInput style={[styles.input, { flex: 1, backgroundColor: cardColor, borderColor: borderColor, color: textColor }]} value={customerCode} onChangeText={setCustomerCode} editable={!isEditing} />
+                    <TextInput
+                      style={[styles.input, { flex: 1, backgroundColor: cardColor, borderColor: borderColor, color: textColor }]}
+                      value={customerCode}
+                      onChangeText={(t) => setCustomerCode(t.toUpperCase())}
+                      onBlur={handleCustomerCodeBlur}
+                      editable={!isEditing}
+                      autoCapitalize="characters"
+                    />
                     <TouchableOpacity style={[styles.lookupBtn, { backgroundColor: GOLD_COLOR, borderColor: GOLD_COLOR }]} onPress={() => setIsModalVisible(true)}>
                       <Ionicons name="search" size={12} color="#FFFFFF" />
                     </TouchableOpacity>
                   </View>
-                  <ThemedText style={[styles.label, { width: 100, marginLeft: 32 }]}>Passport Number</ThemedText>
-                  <TextInput style={[styles.input, { flex: 1, minWidth: 150, backgroundColor: backgroundColor, borderColor: borderColor, color: textColor }]} value={passportNo} onChangeText={setPassportNo} />
+                  <ThemedText style={[styles.label, { width: 100, marginLeft: 32 }]}>Passport Number *</ThemedText>
+                  <TextInput
+                    style={[styles.input, { flex: 1, minWidth: 150, backgroundColor: backgroundColor, borderColor: borderColor, color: textColor }]}
+                    value={passportNo}
+                    onChangeText={setPassportNo}
+                    onBlur={handlePassportNoBlur}
+                  />
                   
                   <ThemedText style={[styles.label, { width: 100, marginLeft: 32 }]}>Customer Type</ThemedText>
-                  <View style={[styles.radioGroup, { flex: 1, minWidth: 220, flexWrap: 'nowrap' }]}>
+                  <View style={[styles.radioGroup, { flex: 1, minWidth: 260, flexWrap: 'nowrap' }]}>
                     {['DIAMOND', 'EMERALD', 'RUBY'].map((opt) => {
-                      const isSelected = customerType === opt;
+                      const isSelected = (customerType || '').trim().toUpperCase() === opt;
                       const badge = getCustomerTypeBadgeStyle(opt);
                       return (
                         <TouchableOpacity
                           key={opt}
-                          style={styles.radioOpt}
+                          style={[styles.radioOpt, { cursor: 'pointer' as any, paddingVertical: 4, paddingHorizontal: 4 }]}
                           onPress={() => setCustomerType(opt)}
+                          activeOpacity={0.7}
                         >
                           <Ionicons
                             name={isSelected ? "radio-button-on" : "radio-button-off"}
-                            size={14}
+                            size={16}
                             color={isSelected ? badge.text : subtitleColor}
                           />
                           <ThemedText style={{ color: isSelected ? badge.text : textColor, marginLeft: 4, fontSize: 11, fontWeight: isSelected ? '700' : 'normal' }}>
@@ -487,8 +545,13 @@ export default function CustomerScreen() {
                 </View>
 
                 <View style={styles.row}>
-                  <ThemedText style={styles.label}>Customer Name</ThemedText>
-                  <TextInput style={[styles.input, { width: 160, backgroundColor: backgroundColor, borderColor: borderColor, color: textColor }]} value={customerName} onChangeText={setCustomerName} />
+                  <ThemedText style={styles.label}>Customer Name *</ThemedText>
+                  <TextInput
+                    style={[styles.input, { width: 160, backgroundColor: backgroundColor, borderColor: borderColor, color: textColor }]}
+                    value={customerName}
+                    onChangeText={setCustomerName}
+                    onBlur={handleCustomerNameBlur}
+                  />
                   <ThemedText style={[styles.label, { width: 100, marginLeft: 32 }]}>Phone 1</ThemedText>
                   <TextInput style={[styles.input, { flex: 1, minWidth: 150, backgroundColor: backgroundColor, borderColor: borderColor, color: textColor }]} value={phone1} onChangeText={setPhone1} />
                   
@@ -564,7 +627,14 @@ export default function CustomerScreen() {
                   <ThemedText style={styles.label}>Nationality</ThemedText>
                   <TextInput style={[styles.input, { width: 160, backgroundColor: backgroundColor, borderColor: borderColor, color: textColor }]} value={address4} onChangeText={setAddress4} />
                   <ThemedText style={[styles.label, { width: 100, marginLeft: 32 }]}>Email</ThemedText>
-                  <TextInput style={[styles.input, { flex: 1, minWidth: 150, backgroundColor: backgroundColor, borderColor: borderColor, color: textColor }]} value={eMail} onChangeText={setEMail} />
+                  <TextInput
+                    style={[styles.input, { flex: 1, minWidth: 150, backgroundColor: backgroundColor, borderColor: borderColor, color: textColor }]}
+                    value={eMail}
+                    onChangeText={setEMail}
+                    onBlur={handleEmailBlur}
+                    keyboardType="email-address"
+                    autoCapitalize="none"
+                  />
                   
                   <View style={{ width: 100, marginLeft: 32 }} />
                   <TouchableOpacity style={{ flexDirection: 'row', alignItems: 'center', flex: 1, minWidth: 150 }} onPress={() => setGlAccount1(glAccount1 === 'Y' ? 'N' : 'Y')}>
@@ -803,8 +873,50 @@ export default function CustomerScreen() {
         </TouchableWithoutFeedback>
       </Modal>
 
+      {/* Delete Confirmation Modal */}
+      <Modal visible={!!deleteConfirmCode} animationType="fade" transparent={true} onRequestClose={() => setDeleteConfirmCode(null)}>
+        <TouchableWithoutFeedback onPress={() => setDeleteConfirmCode(null)}>
+          <View style={styles.modalOverlay}>
+            <TouchableWithoutFeedback>
+              <View style={[styles.modalContainer, { backgroundColor: cardColor, borderColor, maxWidth: 420, padding: 24 }]}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 16 }}>
+                  <Ionicons name="trash-outline" size={24} color="#C62828" style={{ marginRight: 10 }} />
+                  <ThemedText style={{ fontSize: 18, fontWeight: 'bold', color: textColor }}>Delete Customer</ThemedText>
+                </View>
+                <ThemedText style={{ color: textColor, fontSize: 14, marginBottom: 24, lineHeight: 22 }}>
+                  {`Do you want to delete `}
+                  <ThemedText style={{ fontWeight: 'bold' }}>{deleteConfirmCode || ''}</ThemedText>
+                  {` Customer?`}
+                </ThemedText>
+                <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 12 }}>
+                  <TouchableOpacity
+                    style={[styles.actionBtn, { backgroundColor: 'transparent', borderColor: '#CCC' }]}
+                    onPress={() => setDeleteConfirmCode(null)}
+                  >
+                    <ThemedText style={{ color: '#666', fontWeight: '600' }}>Cancel</ThemedText>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.actionBtn, { backgroundColor: '#C62828', borderColor: '#C62828' }]}
+                    onPress={() => {
+                      const code = deleteConfirmCode;
+                      setDeleteConfirmCode(null);
+                      if (code) executeDelete(code);
+                    }}
+                  >
+                    <ThemedText style={{ color: '#FFF', fontWeight: '600' }}>Delete</ThemedText>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </TouchableWithoutFeedback>
+          </View>
+        </TouchableWithoutFeedback>
+      </Modal>
+
       {toast && (
-        <View style={[styles.toast, { backgroundColor: toast.type === 'success' ? '#10B981' : '#EF4444' }]}>
+        <View
+          pointerEvents="none"
+          style={[styles.toast, { backgroundColor: toast.type === 'success' ? '#2E7D32' : '#C62828' }]}
+        >
           <Ionicons
             name={toast.type === 'success' ? 'checkmark-circle' : 'alert-circle'}
             size={18}
@@ -1023,20 +1135,18 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: Platform.OS === 'web' ? 20 : 50,
     alignSelf: 'center',
-    minWidth: 250,
-    maxWidth: '90%',
-    paddingVertical: 12,
+    paddingVertical: 10,
     paddingHorizontal: 16,
-    borderRadius: 24,
-    zIndex: 9999,
+    borderRadius: 8,
+    zIndex: 999999,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 3 },
+    shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.25,
-    shadowRadius: 4,
-    elevation: 6,
+    shadowRadius: 3.84,
+    elevation: 20,
   },
   toastText: {
     color: '#FFF',

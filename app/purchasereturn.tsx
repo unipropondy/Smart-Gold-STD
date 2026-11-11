@@ -3,9 +3,11 @@ import { API_BASE_URL } from '@/constants/api';
 import { useThemeContext } from '@/contexts/ThemeContext';
 import { useThemeColors } from '@/hooks/useThemeColors';
 import { Ionicons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Stack, useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import {
+  Alert,
   FlatList,
   Modal,
   Platform,
@@ -19,6 +21,51 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 const API_URL = `${API_BASE_URL}`;
+
+const getLoggedInUser = async () => {
+  let uid = '';
+  let uname = '';
+
+  // Check web localStorage / sessionStorage first
+  if (Platform.OS === 'web' && typeof window !== 'undefined') {
+    try {
+      uid = window.localStorage.getItem('userId') || window.localStorage.getItem('userCode') || '';
+      uname = window.localStorage.getItem('userName') || '';
+      if (!uid) {
+        const uStr = window.localStorage.getItem('user');
+        if (uStr) {
+          const uObj = JSON.parse(uStr);
+          uid = uObj.userCode || uObj.userId || uObj.userName || '';
+          uname = uObj.userName || '';
+        }
+      }
+      if (!uid) {
+        uid = window.sessionStorage.getItem('userId') || window.sessionStorage.getItem('userCode') || '';
+        uname = window.sessionStorage.getItem('userName') || '';
+      }
+    } catch (_) { }
+  }
+
+  // Check AsyncStorage
+  if (!uid) {
+    try {
+      uid = (await AsyncStorage.getItem('@user_id')) || '';
+      if (!uname) {
+        uname = (await AsyncStorage.getItem('@user_name')) || '';
+      }
+      if (!uid) {
+        const uStr = await AsyncStorage.getItem('@logged_user');
+        if (uStr) {
+          const uObj = JSON.parse(uStr);
+          uid = uObj.userCode || uObj.userId || uObj.userName || '';
+          uname = uObj.userName || '';
+        }
+      }
+    } catch (_) { }
+  }
+
+  return { userId: uid || 'sys', userName: uname || 'System' };
+};
 
 export default function PurchaseReturnScreen() {
   const themeColors = useThemeColors();
@@ -35,6 +82,7 @@ export default function PurchaseReturnScreen() {
 
   // Total costs
   const [gstActive, setGstActive] = useState(false);
+  const [gstPercentage, setGstPercentage] = useState<number>(9);
   const [totalCost, setTotalCost] = useState(0);
   const [gstAmount, setGstAmount] = useState(0);
   const [totalMc, setTotalMc] = useState(0);
@@ -62,6 +110,13 @@ export default function PurchaseReturnScreen() {
   const [loading, setLoading] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
 
+  // Confirmation Modal State (for duplicate items)
+  const [confirmDialog, setConfirmDialog] = useState<{
+    visible: boolean;
+    message: string;
+    onConfirm: () => void;
+  } | null>(null);
+
   // LOV State
   const [lovVisible, setLovVisible] = useState(false);
   const [lovTitle, setLovTitle] = useState('');
@@ -78,9 +133,27 @@ export default function PurchaseReturnScreen() {
     }, 3000);
   };
 
+  // Fetch company GST percentage
   useEffect(() => {
-    calculateTotal(details, gstActive);
-  }, [gstActive]);
+    const fetchCompanyConfig = async () => {
+      try {
+        const res = await fetch(`${API_URL}/company`);
+        const json = await res.json();
+        if (json.success && Array.isArray(json.data) && json.data.length > 0) {
+          const comp = json.data[0];
+          const perc = parseFloat(comp.GSTPerc || comp.GSTPercentage || comp.GstPercentage || '9');
+          if (!isNaN(perc) && perc > 0) {
+            setGstPercentage(perc);
+          }
+        }
+      } catch (_) {}
+    };
+    fetchCompanyConfig();
+  }, []);
+
+  useEffect(() => {
+    calculateTotal(details, gstActive, gstPercentage);
+  }, [gstActive, gstPercentage]);
 
   const openLov = (title: string, data: any[], columns: string[], onSelect: (item: any) => void) => {
     setLovTitle(title);
@@ -131,10 +204,32 @@ export default function PurchaseReturnScreen() {
     }
   };
 
+  const handleSupplierCodeBlur = async () => {
+    const code = supplierCode.trim();
+    if (!code) {
+      setSupplierName('');
+      return;
+    }
+    try {
+      const res = await fetch(`${API_URL}/purchasereturn/lov/supplier?code=${encodeURIComponent(code)}`);
+      const json = await res.json();
+      if (json.success && json.data) {
+        setSupplierCode(json.data.SupplierCode);
+        setSupplierName(json.data.SupplierName);
+      } else {
+        showToast('Invalid supplier code!', 'error');
+        setSupplierCode('');
+        setSupplierName('');
+      }
+    } catch (e) {
+      showToast('Error validating supplier code', 'error');
+    }
+  };
+
   const fetchInventoryItems = async () => {
     setLoading(true);
     try {
-      const res = await fetch(`${API_URL}/purchasereturn/lov/inventory?SupplierCode=${supplierCode}`);
+      const res = await fetch(`${API_URL}/purchasereturn/lov/inventory?SupplierCode=${encodeURIComponent(supplierCode.trim())}`);
       const json = await res.json();
       if (json.success) {
         openLov(
@@ -157,31 +252,97 @@ export default function PurchaseReturnScreen() {
   };
 
   const loadInventoryDetail = async (code: string) => {
+    if (!code || !code.trim()) return;
     try {
-      const res = await fetch(`${API_URL}/purchasereturn/inventoryDetail?InventoryCode=${code}`);
+      const res = await fetch(
+        `${API_URL}/purchasereturn/inventoryDetail?InventoryCode=${encodeURIComponent(code.trim())}&SupplierCode=${encodeURIComponent(supplierCode.trim())}`
+      );
       const json = await res.json();
-      if (json.success) {
+      if (json.success && json.data) {
         const item = json.data;
+        setInventoryCode(item.InventoryCode || code.trim());
         setDescription(item.Description || '');
-        setWeight(item.Weight ? item.Weight.toString() : '0');
-        setGoldLoss(item.GoldLoss ? item.GoldLoss.toString() : '0');
-        setCostPerGram(item.CostPerGram ? item.CostPerGram.toString() : '0');
-        setMc(item.PMC ? item.PMC.toString() : '0');
-        setPcs(item.QtyOnHand ? item.QtyOnHand.toString() : '1');
-        setValue(item.TotalCost ? item.TotalCost.toString() : '0');
-        setPurchaseType(item.PurchaseType || 'W');
-        setQtyOnHand(item.QtyOnHand || 0);
+        setWeight(item.Weight !== undefined && item.Weight !== null ? String(item.Weight) : '0');
+        setGoldLoss(item.GoldLoss !== undefined && item.GoldLoss !== null ? String(item.GoldLoss) : '0');
+        setCostPerGram(item.CostPerGram !== undefined && item.CostPerGram !== null ? String(item.CostPerGram) : '0');
+        setMc(item.PMC !== undefined && item.PMC !== null ? String(item.PMC) : '0');
+
+        const pType = (item.PurchaseType || 'W').toUpperCase();
+        setPurchaseType(pType);
+        const qoh = Number(item.QtyOnHand) || 0;
+        setQtyOnHand(qoh);
+
+        if (pType === 'W') {
+          setPcs('1');
+        } else {
+          setPcs(qoh > 0 ? '1' : '0');
+        }
+
+        setValue(item.TotalCost !== undefined && item.TotalCost !== null ? String(item.TotalCost) : '0');
+
+        // Auto-populate supplier if header supplier is empty
+        if (!supplierCode.trim() && item.SupplierCode) {
+          setSupplierCode(item.SupplierCode);
+          if (item.SupplierName) {
+            setSupplierName(item.SupplierName);
+          }
+        }
       } else {
-        showToast(json.message || 'Failed to load inventory info', 'error');
+        showToast(json.message || 'This Inventory Not Found... ', 'error');
+        clearItemFields();
       }
     } catch (e) {
       showToast('Error fetching inventory details', 'error');
+      clearItemFields();
     }
   };
 
-  const handleAddRow = () => {
+  const handleInventoryCodeBlur = async () => {
+    const code = inventoryCode.trim();
+    if (!code) {
+      clearItemFields();
+      return;
+    }
+    await loadInventoryDetail(code);
+  };
+
+  const handlePcsChange = (text: string) => {
+    const numericText = text.replace(/[^0-9]/g, '');
+    setPcs(numericText);
+  };
+
+  const handlePcsBlur = () => {
+    if (!inventoryCode.trim()) return;
+    const valPcs = parseInt(pcs) || 0;
+    if (valPcs < 1) {
+      showToast('PCS should be greater than or equal to one!', 'error');
+      setPcs('1');
+      return;
+    }
+    if (valPcs > qtyOnHand) {
+      showToast(`Maximum available PCS for this Inventory is ${qtyOnHand}`, 'error');
+      setPcs(String(qtyOnHand));
+      return;
+    }
+  };
+
+  const confirmAddDuplicate = (existPcs: number, addPcs: number): Promise<boolean> => {
+    const promptMsg = `${existPcs} PCS for this item found in Return list (Do you want to add ${addPcs} Pieces )`;
+    return new Promise(resolve => {
+      setConfirmDialog({
+        visible: true,
+        message: promptMsg,
+        onConfirm: () => {
+          setConfirmDialog(null);
+          resolve(true);
+        }
+      });
+    });
+  };
+
+  const handleAddRow = async () => {
     if (!inventoryCode.trim()) {
-      showToast('Select Inventory Code!', 'error');
+      showToast('Select InventoryCode!', 'error');
       return;
     }
     const valPcs = parseInt(pcs) || 0;
@@ -194,24 +355,36 @@ export default function PurchaseReturnScreen() {
       return;
     }
 
-    const existingIdx = details.findIndex(d => d.InventoryCode === inventoryCode);
+    const existingIdx = details.findIndex(
+      d => d.InventoryCode.trim().toUpperCase() === inventoryCode.trim().toUpperCase()
+    );
     let updatedDetails = [...details];
 
     if (existingIdx !== -1) {
       const exist = updatedDetails[existingIdx];
-      const newPcs = exist.PCS + valPcs;
-      if (newPcs > qtyOnHand) {
+      const confirmed = await confirmAddDuplicate(exist.PCS, valPcs);
+      if (!confirmed) {
+        return;
+      }
+      if (valPcs > (qtyOnHand - exist.PCS)) {
         showToast(`Maximum available PCS for this Inventory is ${qtyOnHand}`, 'error');
         return;
       }
-      exist.PCS = newPcs;
-      exist.Weight = exist.Weight + (parseFloat(weight) || 0);
-      exist.GoldLoss = exist.GoldLoss + (parseFloat(goldLoss) || 0);
-      exist.MC = exist.MC + (parseFloat(mc) || 0);
-      exist.TotalCost = (exist.Weight + exist.GoldLoss) * exist.CostPerGram + exist.MC;
+      const newWeight = (Number(exist.Weight) || 0) + (parseFloat(weight) || 0);
+      const newGoldLoss = (Number(exist.GoldLoss) || 0) + (parseFloat(goldLoss) || 0);
+      const newMc = (Number(exist.MC) || 0) + (parseFloat(mc) || 0);
+      const cpg = parseFloat(costPerGram) || Number(exist.CostPerGram) || 0;
+      const newTotalCost = (newWeight + newGoldLoss) * cpg + newMc;
+
+      exist.PCS = exist.PCS + valPcs;
+      exist.Weight = Number(newWeight.toFixed(3));
+      exist.GoldLoss = Number(newGoldLoss.toFixed(3));
+      exist.MC = Number(newMc.toFixed(2));
+      exist.CostPerGram = Number(cpg.toFixed(2));
+      exist.TotalCost = Number(newTotalCost.toFixed(2));
     } else {
       updatedDetails.push({
-        InventoryCode: inventoryCode,
+        InventoryCode: inventoryCode.trim(),
         Description: description,
         Weight: parseFloat(weight) || 0,
         GoldLoss: parseFloat(goldLoss) || 0,
@@ -223,7 +396,7 @@ export default function PurchaseReturnScreen() {
     }
 
     setDetails(updatedDetails);
-    calculateTotal(updatedDetails, gstActive);
+    calculateTotal(updatedDetails, gstActive, gstPercentage);
     clearItemFields();
     showToast('Added item to list', 'success');
   };
@@ -236,29 +409,29 @@ export default function PurchaseReturnScreen() {
     const updated = details.filter((_, i) => i !== selectedIndex);
     setDetails(updated);
     setSelectedIndex(null);
-    calculateTotal(updated, gstActive);
+    calculateTotal(updated, gstActive, gstPercentage);
     showToast('Deleted item row', 'success');
   };
 
-  const calculateTotal = (list: any[], checkGst: boolean) => {
+  const calculateTotal = (list: any[], checkGst: boolean, gstPerc: number = gstPercentage) => {
     let totWt = 0;
     let totPcs = 0;
     let totVal = 0;
 
     list.forEach(item => {
-      totWt += item.Weight;
-      totPcs += item.PCS;
-      totVal += item.TotalCost;
+      totWt += Number(item.Weight) || 0;
+      totPcs += Number(item.PCS) || 0;
+      totVal += Number(item.TotalCost) || 0;
     });
 
     setTotalWeight(totWt);
     setTotalPcs(totPcs);
     setTotalCost(totVal);
 
-    if (checkGst) {
-      const gstVal = Number((totVal * 0.09).toFixed(2));
+    if (checkGst && totVal !== 0) {
+      const gstVal = Number(((totVal * gstPerc) / 100).toFixed(2));
       setGstAmount(gstVal);
-      setTotalMc(totVal + gstVal);
+      setTotalMc(Number((totVal + gstVal).toFixed(2)));
     } else {
       setGstAmount(0);
       setTotalMc(totVal);
@@ -296,7 +469,11 @@ export default function PurchaseReturnScreen() {
   };
 
   const handleSave = async () => {
-    if (!supplierCode) {
+    if (!returnDate || isNaN(new Date(returnDate).getTime())) {
+      showToast('Please enter the valid Return Date!', 'error');
+      return;
+    }
+    if (!supplierCode.trim()) {
       showToast('Supplier Code is required', 'error');
       return;
     }
@@ -305,18 +482,19 @@ export default function PurchaseReturnScreen() {
       return;
     }
     if (refNo) {
-      showToast('You can only print old reference transactions!', 'error');
+      showToast('You can take only the print out for old Purchase Return!', 'error');
       return;
     }
 
     setSaving(true);
     try {
+      const user = await getLoggedInUser();
       const res = await fetch(`${API_URL}/purchasereturn`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           header: {
-            SupplierCode: supplierCode,
+            SupplierCode: supplierCode.trim(),
             ReturnDate: returnDate,
             TotalWeight: totalWeight,
             TotalPCS: totalPcs,
@@ -326,7 +504,8 @@ export default function PurchaseReturnScreen() {
             Remarks: remarks,
             LocationCode: 'HQ'
           },
-          details: details
+          details: details,
+          userId: user.userId
         })
       });
       const json = await res.json();
@@ -457,6 +636,8 @@ export default function PurchaseReturnScreen() {
                   style={[styles.input, { width: 108, borderTopRightRadius: 0, borderBottomRightRadius: 0, borderRightWidth: 0 }]}
                   value={supplierCode}
                   onChangeText={setSupplierCode}
+                  onBlur={handleSupplierCodeBlur}
+                  placeholder="Code"
                 />
                 <TouchableOpacity style={styles.lookupBtn} onPress={fetchSuppliers}>
                   <ThemedText style={styles.lookupBtnText}>...</ThemedText>
@@ -613,6 +794,8 @@ export default function PurchaseReturnScreen() {
                     ]}
                     value={inventoryCode}
                     onChangeText={setInventoryCode}
+                    onBlur={handleInventoryCodeBlur}
+                    placeholder="Code"
                   />
                   <TouchableOpacity
                     style={styles.lookupBtn}
@@ -664,7 +847,8 @@ export default function PurchaseReturnScreen() {
                     { textAlign: 'center', fontWeight: 'bold' },
                   ]}
                   value={pcs}
-                  onChangeText={setPcs}
+                  onChangeText={handlePcsChange}
+                  onBlur={handlePcsBlur}
                   keyboardType="numeric"
                   editable={purchaseType !== 'W'}
                 />
@@ -702,6 +886,37 @@ export default function PurchaseReturnScreen() {
           </View>
         </View>
       </ScrollView>
+
+      {/* Confirmation Modal */}
+      {confirmDialog && confirmDialog.visible && (
+        <Modal visible={true} transparent={true} animationType="fade">
+          <View style={styles.modalOverlay}>
+            <View style={[styles.modalContainer, { maxWidth: 440, padding: 20 }]}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
+                <Ionicons name="help-circle-outline" size={24} color="#B48218" style={{ marginRight: 8 }} />
+                <ThemedText style={{ fontSize: 16, fontWeight: 'bold', color: '#3B2D17' }}>Confirmation</ThemedText>
+              </View>
+              <ThemedText style={{ fontSize: 13, color: '#4A3B22', lineHeight: 20, marginBottom: 20 }}>
+                {confirmDialog.message}
+              </ThemedText>
+              <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 10 }}>
+                <TouchableOpacity
+                  style={[styles.modalCloseBtn, { paddingHorizontal: 16 }]}
+                  onPress={() => setConfirmDialog(null)}
+                >
+                  <ThemedText style={styles.modalCloseBtnText}>No</ThemedText>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.saveBtn, { paddingHorizontal: 16 }]}
+                  onPress={confirmDialog.onConfirm}
+                >
+                  <ThemedText style={styles.saveBtnText}>Yes</ThemedText>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
+      )}
 
       {/* Modern LOV Modal matching Jobsheet */}
       <Modal visible={lovVisible} transparent={true} animationType="fade">

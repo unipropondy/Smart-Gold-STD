@@ -88,6 +88,29 @@ router.get('/lov/catalogue', async (req, res) => {
     }
 });
 
+// GET /api/catalogue/validate-category/:code (Check if CategoryCode is valid matching objClsCategory.GetCategoryName)
+router.get('/validate-category/:code', async (req, res) => {
+    try {
+        const pool = req.pool;
+        const { code } = req.params;
+        if (!code || !code.trim()) {
+            return res.status(400).json({ success: false, message: "CategoryCode should not be blank." });
+        }
+        const result = await pool.request()
+            .input('code', mssql.VarChar, code.trim())
+            .query("SELECT TOP 1 CategoryCode, CategoryName FROM tblCategory WHERE RTRIM(LTRIM(CategoryCode)) = RTRIM(LTRIM(@code))");
+
+        if (result.recordset.length > 0) {
+            res.json({ success: true, data: result.recordset[0] });
+        } else {
+            res.json({ success: false, message: "Pleae enter valid CatagoryCode." });
+        }
+    } catch (error) {
+        console.error("Error validating category code:", error);
+        res.status(500).json({ success: false, message: "Server error", error: error.message });
+    }
+});
+
 // GET /api/catalogue (Retrieve all catalogues)
 router.get('/', async (req, res) => {
     try {
@@ -100,18 +123,77 @@ router.get('/', async (req, res) => {
     }
 });
 
+// GET /api/catalogue/:code (Fetch catalogue by code matching clsCatalogue.GetCatalogueCode)
+router.get('/:code', async (req, res) => {
+    try {
+        const pool = req.pool;
+        const { code } = req.params;
+        if (!code || !code.trim()) {
+            return res.status(400).json({ success: false, message: "Catalogue code is required" });
+        }
+
+        let result = await pool.request()
+            .input('code', mssql.VarChar, code.trim())
+            .query(`
+                SELECT a.*, b.CategoryName, b.ClassCode, b.NextInventoryCode, b.SizeFactor, c.ClassName, c.SalesType, c.PurchaseType
+                FROM tblCatalogue a WITH (NOLOCK)
+                LEFT JOIN tblCategory b WITH (NOLOCK) ON a.CategoryCode = b.CategoryCode
+                LEFT JOIN tblClass c WITH (NOLOCK) ON b.ClassCode = c.ClassCode
+                WHERE a.CatalogueCode = @code
+            `);
+
+        if (result.recordset && result.recordset.length > 0) {
+            return res.status(200).json({ success: true, data: result.recordset[0] });
+        }
+
+        const directResult = await pool.request()
+            .input('code', mssql.VarChar, code.trim())
+            .query(`
+                SELECT a.*, b.CategoryName, b.ClassCode, b.NextInventoryCode, b.SizeFactor
+                FROM tblCatalogue a WITH (NOLOCK)
+                LEFT JOIN tblCategory b WITH (NOLOCK) ON a.CategoryCode = b.CategoryCode
+                WHERE a.CatalogueCode = @code
+            `);
+
+        if (directResult.recordset && directResult.recordset.length > 0) {
+            return res.status(200).json({ success: true, data: directResult.recordset[0] });
+        }
+
+        return res.status(200).json({ success: false, message: "Invalid catalogue code!" });
+    } catch (error) {
+        console.error("Error fetching catalogue by code:", error);
+        return res.status(500).json({ success: false, message: "Server error", error: error.message });
+    }
+});
+
 // POST /api/catalogue (Insert new catalogue)
 router.post('/', async (req, res) => {
     try {
         const pool = req.pool;
         const { CatalogueCode, CatalogueName, CategoryCode, Remarks, IsActive } = req.body;
-        if (!CatalogueCode || !CatalogueName) {
-            return res.status(400).json({ success: false, message: "CatalogueCode and CatalogueName are required." });
+        
+        // Validation matching subValidateMe in frmCatalogue.vb
+        if (!CatalogueCode || !CatalogueCode.trim()) {
+            return res.status(400).json({ success: false, message: "CatalogueCode should not be blank." });
+        }
+        if (!CatalogueName || !CatalogueName.trim()) {
+            return res.status(400).json({ success: false, message: "CatalogueName should not be blank." });
+        }
+        if (!CategoryCode || !CategoryCode.trim()) {
+            return res.status(400).json({ success: false, message: "CategoryCode should not be blank." });
+        }
+
+        // Validate CategoryCode existence matching objClsCategory.GetCategoryName
+        const catCheck = await pool.request()
+            .input('CategoryCode', mssql.VarChar, CategoryCode.trim())
+            .query("SELECT TOP 1 CategoryCode FROM tblCategory WHERE RTRIM(LTRIM(CategoryCode)) = RTRIM(LTRIM(@CategoryCode))");
+        if (catCheck.recordset.length === 0) {
+            return res.status(400).json({ success: false, message: "Pleae enter valid CatagoryCode." });
         }
 
         // Check if exists
         const checkResult = await pool.request()
-            .input('CatalogueCode', mssql.VarChar, CatalogueCode)
+            .input('CatalogueCode', mssql.VarChar, CatalogueCode.trim())
             .query("SELECT CatalogueCode FROM tblCatalogue WHERE CatalogueCode = @CatalogueCode");
         if (checkResult.recordset.length > 0) {
             return res.status(400).json({ success: false, message: "CatalogueCode already exists." });
@@ -127,14 +209,14 @@ router.post('/', async (req, res) => {
             )
         `;
         await pool.request()
-            .input('CatalogueCode', mssql.VarChar, CatalogueCode)
-            .input('CatalogueName', mssql.VarChar, CatalogueName)
-            .input('CategoryCode', mssql.VarChar, CategoryCode || '')
-            .input('Remarks', mssql.VarChar, Remarks || '')
+            .input('CatalogueCode', mssql.VarChar, CatalogueCode.trim())
+            .input('CatalogueName', mssql.VarChar, CatalogueName.trim())
+            .input('CategoryCode', mssql.VarChar, CategoryCode.trim())
+            .input('Remarks', mssql.VarChar, (Remarks || '').trim())
             .input('IsActive', mssql.Bit, IsActive !== false ? 1 : 0)
             .query(query);
 
-        res.json({ success: true, message: "Catalogue added successfully" });
+        res.json({ success: true, message: "Catalogue detail saved sucssfully." });
     } catch (error) {
         console.error("Error inserting catalogue:", error);
         res.status(500).json({ success: false, message: "Server error", error: error.message });
@@ -146,8 +228,24 @@ router.put('/', async (req, res) => {
     try {
         const pool = req.pool;
         const { CatalogueCode, CatalogueName, CategoryCode, Remarks, IsActive } = req.body;
-        if (!CatalogueCode || !CatalogueName) {
-            return res.status(400).json({ success: false, message: "CatalogueCode and CatalogueName are required." });
+        
+        // Validation matching subValidateMe in frmCatalogue.vb
+        if (!CatalogueCode || !CatalogueCode.trim()) {
+            return res.status(400).json({ success: false, message: "CatalogueCode should not be blank." });
+        }
+        if (!CatalogueName || !CatalogueName.trim()) {
+            return res.status(400).json({ success: false, message: "CatalogueName should not be blank." });
+        }
+        if (!CategoryCode || !CategoryCode.trim()) {
+            return res.status(400).json({ success: false, message: "CategoryCode should not be blank." });
+        }
+
+        // Validate CategoryCode existence matching objClsCategory.GetCategoryName
+        const catCheck = await pool.request()
+            .input('CategoryCode', mssql.VarChar, CategoryCode.trim())
+            .query("SELECT TOP 1 CategoryCode FROM tblCategory WHERE RTRIM(LTRIM(CategoryCode)) = RTRIM(LTRIM(@CategoryCode))");
+        if (catCheck.recordset.length === 0) {
+            return res.status(400).json({ success: false, message: "Pleae enter valid CatagoryCode." });
         }
 
         const query = `
@@ -161,14 +259,14 @@ router.put('/', async (req, res) => {
             WHERE CatalogueCode = @CatalogueCode
         `;
         await pool.request()
-            .input('CatalogueCode', mssql.VarChar, CatalogueCode)
-            .input('CatalogueName', mssql.VarChar, CatalogueName)
-            .input('CategoryCode', mssql.VarChar, CategoryCode || '')
-            .input('Remarks', mssql.VarChar, Remarks || '')
+            .input('CatalogueCode', mssql.VarChar, CatalogueCode.trim())
+            .input('CatalogueName', mssql.VarChar, CatalogueName.trim())
+            .input('CategoryCode', mssql.VarChar, CategoryCode.trim())
+            .input('Remarks', mssql.VarChar, (Remarks || '').trim())
             .input('IsActive', mssql.Bit, IsActive !== false ? 1 : 0)
             .query(query);
 
-        res.json({ success: true, message: "Catalogue updated successfully" });
+        res.json({ success: true, message: "Catalogue detail saved sucssfully." });
     } catch (error) {
         console.error("Error updating catalogue:", error);
         res.status(500).json({ success: false, message: "Server error", error: error.message });
@@ -180,13 +278,26 @@ router.delete('/', async (req, res) => {
     try {
         const pool = req.pool;
         const { id } = req.query;
-        if (!id) {
+        if (!id || !id.trim()) {
             return res.status(400).json({ success: false, message: "ID parameter is required" });
         }
+
+        // Check if catalogue has inventory matching fncGetCatalogueTran in frmCatalogue.vb
+        const invCheck = await pool.request()
+            .input('CatalogueCode', mssql.VarChar, id.trim())
+            .query("SELECT TOP 1 InventoryCode FROM tblInventory WHERE CatalogueCode = @CatalogueCode");
+
+        if (invCheck.recordset.length > 0) {
+            return res.status(400).json({
+                success: false,
+                message: "Can Not Delete Catalogue , Beacuse This Catalogue Is Having Some Inventory"
+            });
+        }
+
         await pool.request()
-            .input('CatalogueCode', mssql.VarChar, id)
+            .input('CatalogueCode', mssql.VarChar, id.trim())
             .query("DELETE FROM tblCatalogue WHERE CatalogueCode = @CatalogueCode");
-        res.json({ success: true, message: "Catalogue deleted successfully" });
+        res.json({ success: true, message: "Catalogue detail deleted." });
     } catch (error) {
         console.error("Error deleting catalogue:", error);
         res.status(500).json({ success: false, message: "Server error", error: error.message });

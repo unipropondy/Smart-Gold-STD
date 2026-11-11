@@ -35,17 +35,22 @@ export default function PurchaseScreen() {
 
   const router = useRouter();
 
-  const Checkbox = ({ label, selected, onPress }: { label: string; selected: boolean; onPress: () => void }) => (
-    <TouchableOpacity style={styles.radioContainer} onPress={onPress}>
+  const Checkbox = ({ label, selected, onPress, disabled }: { label: string; selected: boolean; onPress: () => void; disabled?: boolean }) => (
+    <TouchableOpacity
+      style={[styles.radioContainer, disabled && { opacity: 0.6 }]}
+      onPress={onPress}
+      disabled={disabled}
+    >
       <View
         style={[
           styles.checkboxSquare,
-          { borderColor: borderColor, backgroundColor: selected ? accentColor : 'transparent' }
+          { borderColor: borderColor, backgroundColor: selected ? accentColor : 'transparent' },
+          disabled && { backgroundColor: selected ? '#A0A0A0' : '#EAEAEA', borderColor: '#CCC' }
         ]}
       >
         {selected && <Ionicons name="checkmark" size={14} color="#FFF" />}
       </View>
-      {label ? <ThemedText style={styles.radioLabel}>{label}</ThemedText> : null}
+      {label ? <ThemedText style={[styles.radioLabel, disabled && { color: '#888' }]}>{label}</ThemedText> : null}
     </TouchableOpacity>
   );
 
@@ -74,6 +79,26 @@ export default function PurchaseScreen() {
 
   const [details, setDetails] = useState<any[]>([]);
   const [jobSheetDetails, setJobSheetDetails] = useState<any[]>([]);
+  const [companyGstPerc, setCompanyGstPerc] = useState(9);
+
+  // Fetch company GST rate from company master
+  useEffect(() => {
+    const fetchCompanyGst = async () => {
+      try {
+        const res = await fetch(`${API_URL}/company`);
+        const data = await res.json();
+        if (data.success && data.data && data.data.length > 0) {
+          const compGst = parseFloat(data.data[0].GstPerc || data.data[0].GSTPerc || 0);
+          if (compGst > 0) {
+            setCompanyGstPerc(compGst);
+          }
+        }
+      } catch (e) {
+        console.log('Error fetching company GST rate:', e);
+      }
+    };
+    fetchCompanyGst();
+  }, []);
 
   // Auto / Manual toggle (F10 mode in purchase.txt)
   const [isAutoManual, setIsAutoManual] = useState(false);
@@ -469,27 +494,39 @@ export default function PurchaseScreen() {
     let itemCategoryCode = (item.CategoryCode || item.Categorycode || '').trim();
     const itemCatalogueCode = (item.CatalogueCode || item.Cataloguecode || '').trim();
 
-    // If item doesn't have CategoryCode, look it up from jobSheetDetails or fetch catalogue
+    if (!itemCatalogueCode) {
+      return;
+    }
+
+    // Validate catalogue exists in catalogue master or jobSheetDetails
+    let catObjMaster: any = null;
+    try {
+      const res = await fetch(`${API_URL}/catalogue/lov/catalogue`);
+      const json = await res.json();
+      if (json.success && Array.isArray(json.data)) {
+        catObjMaster = json.data.find(
+          (c: any) => (c.CatalogueCode || '').trim().toUpperCase() === itemCatalogueCode.toUpperCase()
+        );
+      }
+    } catch (e) {
+      console.error("Error looking up catalogue:", e);
+    }
+
+    if (!catObjMaster) {
+      showToast("Invalid catalogue code!", "error");
+      updateDetail('CatalogueCode', '');
+      return;
+    }
+
+    // If item doesn't have CategoryCode, look it up from jobSheetDetails or master
     if (!itemCategoryCode) {
       const matchInJS = jobSheetDetails.find(
         j => (j.CatalogueCode || '').trim().toUpperCase() === itemCatalogueCode.toUpperCase()
       );
       if (matchInJS && matchInJS.CategoryCode) {
         itemCategoryCode = matchInJS.CategoryCode.trim();
-      } else {
-        try {
-          const res = await fetch(`${API_URL}/catalogue/lov/catalogue`);
-          const json = await res.json();
-          if (json.success && Array.isArray(json.data)) {
-            const found = json.data.find((c: any) => (c.CatalogueCode || '').trim().toUpperCase() === itemCatalogueCode.toUpperCase());
-            if (found && found.CategoryCode) {
-              itemCategoryCode = found.CategoryCode.trim();
-              if (!item.CatalogueName) item.CatalogueName = found.CatalogueName;
-            }
-          }
-        } catch (e) {
-          console.error("Error looking up catalogue category:", e);
-        }
+      } else if (catObjMaster && catObjMaster.CategoryCode) {
+        itemCategoryCode = catObjMaster.CategoryCode.trim();
       }
     }
 
@@ -500,6 +537,7 @@ export default function PurchaseScreen() {
       );
       if (!isCatalogueInJS) {
         showToast("Please select the suitable catalogue for the selected job sheet!", "error");
+        updateDetail('CatalogueCode', '');
         return;
       }
     }
@@ -510,16 +548,17 @@ export default function PurchaseScreen() {
 
     let nextInvCode = jsDetail?.NextInventoryCode || '';
     let classCode = jsDetail?.ClassCode || '';
+    let purchaseType = '';
 
     // If NextInventoryCode is not yet available, fetch category directly to get NextInventoryCode and ClassCode
-    if (!nextInvCode && itemCategoryCode) {
+    if (itemCategoryCode) {
       try {
         const catRes = await fetch(`${API_URL}/category`);
         const catJson = await catRes.json();
         if (catJson.success && Array.isArray(catJson.data)) {
           const catObj = catJson.data.find((c: any) => (c.CategoryCode || '').trim().toUpperCase() === itemCategoryCode.toUpperCase());
           if (catObj) {
-            nextInvCode = catObj.NextInventoryCode || '';
+            if (!nextInvCode) nextInvCode = catObj.NextInventoryCode || '';
             if (catObj.ClassCode) classCode = catObj.ClassCode;
           }
         }
@@ -528,9 +567,24 @@ export default function PurchaseScreen() {
       }
     }
 
+    if (classCode) {
+      try {
+        const classRes = await fetch(`${API_URL}/class`);
+        const classJson = await classRes.json();
+        if (classJson.success && Array.isArray(classJson.data)) {
+          const matchedClass = classJson.data.find((cl: any) => (cl.ClassCode || '').trim().toUpperCase() === classCode.trim().toUpperCase());
+          if (matchedClass) {
+            purchaseType = (matchedClass.PurchaseType || '').trim().toUpperCase();
+          }
+        }
+      } catch (err) {
+        console.error("Error fetching class detail:", err);
+      }
+    }
+
     const jsCost = jsDetail?.CostPerGram ?? jsDetail?.CostperGram;
     const jsPCS = jsDetail?.PCS ?? jsDetail?.Pcs ?? jsDetail?.pcs;
-    const jsGoldLoss = jsDetail?.GoldLoss ?? jsDetail?.Goldloss;
+    const jsGoldLoss = jsDetail?.GoldLoss ?? jsDetail?.Goldloss ?? catObjMaster?.GoldLoss;
     const jsWeight = jsDetail?.Weight ?? jsDetail?.weight;
     const jsSize = jsDetail?.Size ?? jsDetail?.size;
     const jsPMC = jsDetail?.MC ?? jsDetail?.PMC ?? jsDetail?.pmc;
@@ -542,8 +596,9 @@ export default function PurchaseScreen() {
         CatalogueCode: itemCatalogueCode || prev.CatalogueCode || '',
         CategoryCode: itemCategoryCode || prev.CategoryCode || '',
         ClassCode: classCode || jsDetail?.ClassCode || prev.ClassCode || '',
-        InventoryDescription: jsDetail?.Description || prev.InventoryDescription || item.CatalogueName || item.Cataloguename || '',
-        Description: jsDetail?.Description || prev.Description || item.CatalogueName || item.Cataloguename || '',
+        PurchaseType: purchaseType || prev.PurchaseType || '',
+        InventoryDescription: jsDetail?.Description || prev.InventoryDescription || item.CatalogueName || item.Cataloguename || catObjMaster?.CatalogueName || '',
+        Description: jsDetail?.Description || prev.Description || item.CatalogueName || item.Cataloguename || catObjMaster?.CatalogueName || '',
         CostPerGram: jsCost !== undefined ? jsCost.toString() : (headerState.TaelCostPerGram || prev.CostPerGram || ''),
         InventoryCode: nextInvCode || prev.InventoryCode || '',
         BillWeight: catSummary?.BillWeight ? catSummary.BillWeight.toFixed(2) : '0.00',
@@ -567,31 +622,52 @@ export default function PurchaseScreen() {
     const trimmedCat = (catCode || '').trim();
     if (!trimmedCat) return;
 
+    // Check against category list
+    let catMasterObj = itemObj;
+    if (!catMasterObj) {
+      try {
+        const catRes = await fetch(`${API_URL}/category`);
+        const catJson = await catRes.json();
+        if (catJson.success && Array.isArray(catJson.data)) {
+          catMasterObj = catJson.data.find((c: any) => (c.CategoryCode || '').trim().toUpperCase() === trimmedCat.toUpperCase());
+        }
+      } catch (err) {
+        console.error("Error checking category master:", err);
+      }
+    }
+
+    if (!catMasterObj) {
+      showToast("Invalid Category Code!", "error");
+      updateDetail('CategoryCode', '');
+      return;
+    }
+
     if (jobSheetDetails.length > 0) {
       const isValid = jobSheetDetails.some(j => (j.CategoryCode || '').trim().toUpperCase() === trimmedCat.toUpperCase());
       if (!isValid) {
         showToast("Please select the suitable category for the selected job sheet!", "error");
+        updateDetail('CategoryCode', '');
         return;
       }
     }
 
     const jsDetail = jobSheetDetails.find(j => (j.CategoryCode || '').trim().toUpperCase() === trimmedCat.toUpperCase());
-    let nextInvCode = itemObj?.NextInventoryCode || jsDetail?.NextInventoryCode || '';
-    let classCode = itemObj?.ClassCode || jsDetail?.ClassCode || '';
+    let nextInvCode = catMasterObj?.NextInventoryCode || jsDetail?.NextInventoryCode || '';
+    let classCode = catMasterObj?.ClassCode || jsDetail?.ClassCode || '';
+    let purchaseType = '';
 
-    if (!nextInvCode) {
+    if (classCode) {
       try {
-        const catRes = await fetch(`${API_URL}/category`);
-        const catJson = await catRes.json();
-        if (catJson.success && Array.isArray(catJson.data)) {
-          const catObj = catJson.data.find((c: any) => (c.CategoryCode || '').trim().toUpperCase() === trimmedCat.toUpperCase());
-          if (catObj) {
-            nextInvCode = catObj.NextInventoryCode || '';
-            if (catObj.ClassCode) classCode = catObj.ClassCode;
+        const classRes = await fetch(`${API_URL}/class`);
+        const classJson = await classRes.json();
+        if (classJson.success && Array.isArray(classJson.data)) {
+          const matchedClass = classJson.data.find((cl: any) => (cl.ClassCode || '').trim().toUpperCase() === classCode.trim().toUpperCase());
+          if (matchedClass) {
+            purchaseType = (matchedClass.PurchaseType || '').trim().toUpperCase();
           }
         }
       } catch (err) {
-        console.error("Error fetching category next inventory code:", err);
+        console.error("Error fetching class detail:", err);
       }
     }
 
@@ -600,9 +676,86 @@ export default function PurchaseScreen() {
         ...prev,
         CategoryCode: trimmedCat,
         ...(classCode ? { ClassCode: classCode } : {}),
+        ...(purchaseType ? { PurchaseType: purchaseType } : {}),
         ...(nextInvCode ? { InventoryCode: nextInvCode } : {}),
         ...(jsDetail?.CostPerGram ? { CostPerGram: jsDetail.CostPerGram.toString() } : {}),
         ...(jsDetail?.Description ? { InventoryDescription: jsDetail.Description, Description: jsDetail.Description } : {})
+      };
+      return recalculateDetailCosts(updated);
+    });
+  };
+
+  const validateTrayIdOnBlur = async (trayId: string) => {
+    const trimmed = (trayId || '').trim();
+    if (!trimmed) return;
+    try {
+      const res = await fetch(`${API_URL}/traymaster`);
+      const json = await res.json();
+      if (json.success && Array.isArray(json.data)) {
+        const found = json.data.find((t: any) => {
+          const code = t.TrayID || t.TrayId || t.trayid || t.TRAYID || '';
+          return String(code).trim().toUpperCase() === trimmed.toUpperCase();
+        });
+        if (!found) {
+          showToast("Invalid tray ID!", "error");
+          updateDetail('TrayId', '');
+        } else {
+          updateDetail('TrayId', String(found.TrayID || found.TrayId || trimmed).trim());
+        }
+      }
+    } catch (e) {
+      console.error("Error validating tray ID:", e);
+    }
+  };
+
+  const validateSizeOnBlur = async (sizeCode: string) => {
+    const trimmed = (sizeCode || '').trim();
+    if (!trimmed) return;
+    try {
+      const res = await fetch(`${API_URL}/size`);
+      const json = await res.json();
+      if (json.success && Array.isArray(json.data)) {
+        const found = json.data.find((s: any) => {
+          const code = s.SizeCode || s.Sizecode || s.sizecode || s.SIZECODE || '';
+          return String(code).trim().toUpperCase() === trimmed.toUpperCase();
+        });
+        if (!found) {
+          showToast("Invalid Size Code!", "error");
+          updateDetail('Size', '');
+        } else {
+          updateDetail('Size', String(found.SizeCode || trimmed).trim());
+          if (found.SizeType) updateDetail('SizeType', found.SizeType.trim());
+        }
+      }
+    } catch (e) {
+      console.error("Error validating size code:", e);
+    }
+  };
+
+  const handleWeightOnBlur = async () => {
+    const num = parseFloat(currentDetail.Weight);
+    if (isNaN(num)) return;
+    const formatted = num.toFixed(2);
+    
+    // Auto fetch GoldLoss by weight
+    let newGoldLoss = currentDetail.GoldLoss;
+    if (num > 0) {
+      try {
+        const glRes = await fetch(`${API_URL}/purchase/goldloss/${num}`);
+        const glJson = await glRes.json();
+        if (glJson.success && glJson.goldLoss !== undefined && glJson.goldLoss !== null) {
+          newGoldLoss = parseFloat(glJson.goldLoss).toFixed(2);
+        }
+      } catch (err) {
+        console.error("Error fetching gold loss by weight:", err);
+      }
+    }
+
+    setCurrentDetail((prev: any) => {
+      const updated = {
+        ...prev,
+        Weight: formatted,
+        GoldLoss: newGoldLoss || prev.GoldLoss
       };
       return recalculateDetailCosts(updated);
     });
@@ -696,6 +849,31 @@ export default function PurchaseScreen() {
     }
   };
 
+  const fetchTaelPercents = async () => {
+    try {
+      const res = await fetch(`${API_URL}/taelpercent`);
+      const json = await res.json();
+      if (json.success && Array.isArray(json.data) && json.data.length > 0) {
+        openLov('Select TEAL %', json.data, ['TaelPercent', 'TaelPercent1'], (item) => {
+          updateHeader('TaelPercent', (item.TaelPercent || item.TaelPercent1 || '0.92').toString());
+        });
+      } else {
+        const fallback = [
+          { TaelPercent: '.92' },
+          { TaelPercent: '.925' },
+          { TaelPercent: '.93' },
+          { TaelPercent: '.935' },
+          { TaelPercent: '.999' }
+        ];
+        openLov('Select TEAL %', fallback, ['TaelPercent'], (item) => {
+          updateHeader('TaelPercent', item.TaelPercent);
+        });
+      }
+    } catch (e) {
+      showAlert("Error", "Error fetching TEAL percentages");
+    }
+  };
+
   const openLov = (title: string, data: any[], columns: string[], onSelect: (item: any) => void) => {
     setLovTitle(title);
     setLovData(data);
@@ -749,6 +927,16 @@ export default function PurchaseScreen() {
     if (!currentDetail.TrayId?.trim()) {
       showToast("Tray Id Cannot be Blank ....", "error");
       return false;
+    }
+    // Check SizeCode if category requires size
+    const catCode = (currentDetail.CategoryCode || '').trim();
+    const sizeCode = (currentDetail.Size || '').trim();
+    if (!sizeCode && catCode) {
+      const matchedCat = categorySummaryList.find(c => (c.CategoryCode || '').trim().toUpperCase() === catCode.toUpperCase());
+      if (matchedCat && matchedCat.SizeFactor) {
+        showToast("SizeCode Cannot be Empty", "error");
+        return false;
+      }
     }
     if (!currentDetail.InventoryDescription?.trim()) {
       showToast("Description Cannot be Blank ....", "error");
@@ -986,6 +1174,45 @@ export default function PurchaseScreen() {
   const savePurchase = async () => {
     if (!headerState.InvoiceNo?.trim()) {
       showToast("Invoice No is required", "error");
+      return;
+    }
+
+    if (!headerState.SupplierCode?.trim()) {
+      showToast("Enter supplier code.", "error");
+      return;
+    }
+
+    if (!headerState.Currency?.trim()) {
+      showToast("Enter currency code.", "error");
+      return;
+    }
+
+    const rateVal = parseFloat(headerState.Rate) || 0;
+    if (rateVal <= 0) {
+      showToast("Enter currency rate.", "error");
+      return;
+    }
+
+    if (!headerState.PayableGold && !headerState.PayableCash) {
+      showToast("Select payment type.", "error");
+      return;
+    }
+
+    const tealPercent = parseFloat(headerState.TaelPercent) || 0;
+    if (tealPercent <= 0) {
+      showToast("Enter TEAL Percent.", "error");
+      return;
+    }
+
+    const tealVal = parseFloat(headerState.TaelValue) || 0;
+    if (tealVal <= 0) {
+      showToast("Enter teal.", "error");
+      return;
+    }
+
+    const costPerGramVal = parseFloat(headerState.TaelCostPerGram) || 0;
+    if (costPerGramVal <= 0) {
+      showToast("Enter cost per gram.", "error");
       return;
     }
 
@@ -1230,7 +1457,8 @@ export default function PurchaseScreen() {
               <TouchableOpacity
                 style={[
                   styles.topActionBtn,
-                  { backgroundColor: '#F9F2E2', borderColor: '#B8903B' }
+                  { backgroundColor: '#F9F2E2', borderColor: '#B8903B' },
+                  isFormLocked && { opacity: 0.5 }
                 ]}
                 onPress={savePurchase}
                 disabled={isFormLocked}
@@ -1266,18 +1494,25 @@ export default function PurchaseScreen() {
                   <ThemedText style={styles.label}>Job Sheet No.</ThemedText>
                   <View style={{ width: 140, flexDirection: 'row' }}>
                     <TextInput
-                      style={[styles.input, { width: 106, borderTopRightRadius: 0, borderBottomRightRadius: 0, borderRightWidth: 0 }]}
+                      style={[
+                        styles.input,
+                        { width: 106, borderTopRightRadius: 0, borderBottomRightRadius: 0, borderRightWidth: 0 },
+                        (isFormLocked || Boolean(headerState.JobSheetNo)) && styles.readonlyInput
+                      ]}
                       value={headerState.JobSheetNo}
                       onChangeText={(t) => updateHeader('JobSheetNo', t)}
                       onBlur={() => {
                         if (headerState.JobSheetNo) loadJobSheetByNo(headerState.JobSheetNo);
                       }}
-                      editable={!isFormLocked}
+                      editable={!isFormLocked && !headerState.JobSheetNo}
                     />
                     <TouchableOpacity
-                      style={styles.lookupBtn}
+                      style={[
+                        styles.lookupBtn,
+                        (isFormLocked || Boolean(headerState.JobSheetNo)) && { opacity: 0.5 }
+                      ]}
                       onPress={fetchJobsheets}
-                      disabled={isFormLocked}
+                      disabled={isFormLocked || Boolean(headerState.JobSheetNo)}
                     >
                       <ThemedText style={styles.lookupBtnText}>...</ThemedText>
                     </TouchableOpacity>
@@ -1285,18 +1520,27 @@ export default function PurchaseScreen() {
 
                   <ThemedText style={[styles.labelRight, { width: 84 }]}>Invoice No</ThemedText>
                   <TextInput
-                    style={[styles.input, { flex: 1, minWidth: 120 }]}
+                    style={[
+                      styles.input,
+                      { flex: 1, minWidth: 120 },
+                      (isFormLocked || Boolean(headerState.JobSheetNo)) && styles.readonlyInput
+                    ]}
                     value={headerState.InvoiceNo}
                     onChangeText={(t) => updateHeader('InvoiceNo', t)}
-                    editable={!isFormLocked}
+                    editable={!isFormLocked && !headerState.JobSheetNo}
                   />
 
                   <ThemedText style={[styles.labelRight, { width: 92 }]}>Invoice Date</ThemedText>
                   <TextInput
-                    style={[styles.input, { flex: 1, minWidth: 100 }]}
+                    style={[
+                      styles.input,
+                      { flex: 1, minWidth: 100 },
+                      isFormLocked && styles.readonlyInput
+                    ]}
                     value={headerState.InvoiceDate}
                     onChangeText={(t) => updateHeader('InvoiceDate', t)}
                     placeholder="YYYY-MM-DD"
+                    editable={!isFormLocked}
                   />
                 </View>
 
@@ -1305,15 +1549,40 @@ export default function PurchaseScreen() {
                   <ThemedText style={styles.label}>Supplier Code</ThemedText>
                   <View style={{ width: 140, flexDirection: 'row' }}>
                     <TextInput
-                      style={[styles.input, { width: 106, borderTopRightRadius: 0, borderBottomRightRadius: 0, borderRightWidth: 0 }]}
+                      style={[
+                        styles.input,
+                        { width: 106, borderTopRightRadius: 0, borderBottomRightRadius: 0, borderRightWidth: 0 },
+                        (isFormLocked || Boolean(headerState.JobSheetNo)) && styles.readonlyInput
+                      ]}
                       value={headerState.SupplierCode}
                       onChangeText={(t) => updateHeader('SupplierCode', t)}
-                      editable={!isFormLocked}
+                      onBlur={async () => {
+                        const sCode = (headerState.SupplierCode || '').trim();
+                        if (!sCode) {
+                          showToast('Enter supplier code.', 'error');
+                          return;
+                        }
+                        try {
+                          const res = await fetch(`${API_URL}/supplier?code=${encodeURIComponent(sCode)}`);
+                          const sJson = await res.json();
+                          if (sJson.success && sJson.data) {
+                            updateHeader('SupplierName', sJson.data.SupplierName || '');
+                          } else {
+                            showToast('Invalid supplier code!', 'error');
+                            updateHeader('SupplierCode', '');
+                            updateHeader('SupplierName', '');
+                          }
+                        } catch (_) { }
+                      }}
+                      editable={!isFormLocked && !headerState.JobSheetNo}
                     />
                     <TouchableOpacity
-                      style={styles.lookupBtn}
+                      style={[
+                        styles.lookupBtn,
+                        (isFormLocked || Boolean(headerState.JobSheetNo)) && { opacity: 0.5 }
+                      ]}
                       onPress={fetchSuppliers}
-                      disabled={isFormLocked}
+                      disabled={isFormLocked || Boolean(headerState.JobSheetNo)}
                     >
                       <ThemedText style={styles.lookupBtnText}>...</ThemedText>
                     </TouchableOpacity>
@@ -1330,11 +1599,44 @@ export default function PurchaseScreen() {
                   <ThemedText style={styles.label}>Currency</ThemedText>
                   <View style={{ width: 140, flexDirection: 'row' }}>
                     <TextInput
-                      style={[styles.input, { width: 106, borderTopRightRadius: 0, borderBottomRightRadius: 0, borderRightWidth: 0 }]}
+                      style={[
+                        styles.input,
+                        { width: 106, borderTopRightRadius: 0, borderBottomRightRadius: 0, borderRightWidth: 0 },
+                        (isFormLocked || Boolean(headerState.JobSheetNo)) && styles.readonlyInput
+                      ]}
                       value={headerState.Currency}
                       onChangeText={(t) => updateHeader('Currency', t)}
+                      onBlur={async () => {
+                        const cCode = (headerState.Currency || '').trim();
+                        if (!cCode) {
+                          showToast('Enter currency code.', 'error');
+                          return;
+                        }
+                        try {
+                          const res = await fetch(`${API_URL}/currency?code=${encodeURIComponent(cCode)}`);
+                          const cJson = await res.json();
+                          if (cJson.success && cJson.data) {
+                            updateHeader('Currency', cJson.data.CurrencyCode || cCode);
+                            if (cJson.data.CurrencyRate != null) {
+                              updateHeader('Rate', String(cJson.data.CurrencyRate));
+                            }
+                          } else {
+                            showToast('Set Default Currency in Currency Master', 'error');
+                            updateHeader('Currency', '');
+                            updateHeader('Rate', '');
+                          }
+                        } catch (_) { }
+                      }}
+                      editable={!isFormLocked && !headerState.JobSheetNo}
                     />
-                    <TouchableOpacity style={styles.lookupBtn} onPress={fetchCurrencies}>
+                    <TouchableOpacity
+                      style={[
+                        styles.lookupBtn,
+                        (isFormLocked || Boolean(headerState.JobSheetNo)) && { opacity: 0.5 }
+                      ]}
+                      onPress={fetchCurrencies}
+                      disabled={isFormLocked || Boolean(headerState.JobSheetNo)}
+                    >
                       <ThemedText style={styles.lookupBtnText}>...</ThemedText>
                     </TouchableOpacity>
                   </View>
@@ -1346,10 +1648,20 @@ export default function PurchaseScreen() {
 
                   <ThemedText style={[styles.labelRight, { width: 70 }]}>Rate</ThemedText>
                   <TextInput
-                    style={[styles.input, { flex: 0.8, minWidth: 90 }]}
+                    style={[
+                      styles.input,
+                      { flex: 0.8, minWidth: 90 },
+                      isFormLocked && styles.readonlyInput
+                    ]}
                     value={headerState.Rate}
                     onChangeText={(t) => updateHeader('Rate', t)}
+                    onBlur={() => {
+                      if ((parseFloat(headerState.Rate) || 0) <= 0) {
+                        showToast('Enter currency rate.', 'error');
+                      }
+                    }}
                     keyboardType="numeric"
+                    editable={!isFormLocked}
                   />
                 </View>
 
@@ -1360,6 +1672,7 @@ export default function PurchaseScreen() {
                     <Checkbox
                       label="Gold"
                       selected={headerState.PayableGold}
+                      disabled={isFormLocked}
                       onPress={() => {
                         updateHeader('PayableGold', true);
                         updateHeader('PayableCash', false);
@@ -1368,6 +1681,7 @@ export default function PurchaseScreen() {
                     <Checkbox
                       label="Cash"
                       selected={headerState.PayableCash}
+                      disabled={isFormLocked}
                       onPress={() => {
                         updateHeader('PayableCash', true);
                         updateHeader('PayableGold', false);
@@ -1379,14 +1693,22 @@ export default function PurchaseScreen() {
                   <Checkbox
                     label=""
                     selected={headerState.GST}
-                    onPress={() => updateHeader('GST', !headerState.GST)}
+                    disabled={isFormLocked}
+                    onPress={() => {
+                      const willCheck = !headerState.GST;
+                      if (willCheck && companyGstPerc <= 0) {
+                        showToast('Set GST Percentage in Company Master', 'error');
+                      }
+                      updateHeader('GST', willCheck);
+                    }}
                   />
 
                   {/* 22K / 24K Pill Box */}
-                  <View style={styles.pillBox}>
+                  <View style={[styles.pillBox, isFormLocked && { opacity: 0.6 }]}>
                     <Checkbox
                       label="22K"
                       selected={headerState.Payable22K}
+                      disabled={isFormLocked}
                       onPress={() => {
                         updateHeader('Payable22K', true);
                         updateHeader('Payable24K', false);
@@ -1395,6 +1717,7 @@ export default function PurchaseScreen() {
                     <Checkbox
                       label="24K"
                       selected={headerState.Payable24K}
+                      disabled={isFormLocked}
                       onPress={() => {
                         updateHeader('Payable24K', true);
                         updateHeader('Payable22K', false);
@@ -1405,27 +1728,32 @@ export default function PurchaseScreen() {
                   {/* TEAL % */}
                   <View style={{ flexDirection: 'row', marginLeft: 12, alignItems: 'center' }}>
                     <ThemedText style={{ color: '#4A3B25', fontSize: 11, marginRight: 5, fontWeight: 'bold' }}>TEAL %</ThemedText>
-                    <TextInput
-                      style={[styles.input, { width: 50, marginRight: 8 }]}
-                      value={headerState.TaelPercent}
-                      onChangeText={(t) => updateHeader('TaelPercent', t)}
-                      keyboardType="numeric"
-                    />
+                    <View style={{ width: 76, flexDirection: 'row' }}>
+                      <TextInput
+                        style={[styles.input, styles.readonlyInput, { width: 50, borderTopRightRadius: 0, borderBottomRightRadius: 0, borderRightWidth: 0 }]}
+                        value={headerState.TaelPercent}
+                        editable={false}
+                      />
+                      <TouchableOpacity
+                        style={[styles.lookupBtn, { width: 26, opacity: 0.5 }]}
+                        disabled={true}
+                      >
+                        <ThemedText style={styles.lookupBtnText}>...</ThemedText>
+                      </TouchableOpacity>
+                    </View>
 
-                    <ThemedText style={{ color: '#4A3B25', fontSize: 11, marginRight: 5, fontWeight: 'bold' }}>TEAL</ThemedText>
+                    <ThemedText style={{ color: '#4A3B25', fontSize: 11, marginLeft: 8, marginRight: 5, fontWeight: 'bold' }}>TEAL</ThemedText>
                     <TextInput
-                      style={[styles.input, { width: 62, marginRight: 8 }]}
+                      style={[styles.input, styles.readonlyInput, { width: 62, marginRight: 8 }]}
                       value={headerState.TaelValue}
-                      onChangeText={(t) => updateHeader('TaelValue', t)}
-                      keyboardType="numeric"
+                      editable={false}
                     />
 
                     <ThemedText style={{ color: '#4A3B25', fontSize: 11, marginRight: 5, fontWeight: 'bold' }}>Cost/g</ThemedText>
                     <TextInput
-                      style={[styles.input, { width: 66 }]}
+                      style={[styles.input, styles.readonlyInput, { width: 66 }]}
                       value={headerState.TaelCostPerGram}
-                      onChangeText={(t) => updateHeader('TaelCostPerGram', t)}
-                      keyboardType="numeric"
+                      editable={false}
                     />
                   </View>
                 </View>
@@ -1434,9 +1762,14 @@ export default function PurchaseScreen() {
                 <View style={styles.row}>
                   <ThemedText style={styles.label}>Remarks</ThemedText>
                   <TextInput
-                    style={[styles.input, { flex: 1, minWidth: 598 }]}
+                    style={[
+                      styles.input,
+                      { flex: 1, minWidth: 598 },
+                      isFormLocked && styles.readonlyInput
+                    ]}
                     value={headerState.Remarks}
                     onChangeText={(t) => updateHeader('Remarks', t)}
+                    editable={!isFormLocked}
                   />
                 </View>
               </View>
@@ -1527,15 +1860,23 @@ export default function PurchaseScreen() {
                   )}
                   {selectedIndex !== null && (
                     <TouchableOpacity
-                      style={[styles.addLineBtn, { backgroundColor: '#C62828' }]}
+                      style={[
+                        styles.addLineBtn,
+                        { backgroundColor: '#C62828' },
+                        isFormLocked && { opacity: 0.5 }
+                      ]}
                       onPress={deleteSelectedDetail}
+                      disabled={isFormLocked}
                     >
                       <Ionicons name="trash-outline" size={14} color="#FFF" style={{ marginRight: 4 }} />
                       <ThemedText style={styles.addLineBtnText}>Delete</ThemedText>
                     </TouchableOpacity>
                   )}
                   <TouchableOpacity
-                    style={styles.addLineBtn}
+                    style={[
+                      styles.addLineBtn,
+                      isFormLocked && { opacity: 0.5 }
+                    ]}
                     onPress={() => {
                       setSelectedIndex(null);
                       clearCurrentDetail();
@@ -1755,6 +2096,7 @@ export default function PurchaseScreen() {
                         style={{ width: 94, padding: 2, fontSize: 11, color: textColor }}
                         value={currentDetail.TrayId}
                         onChangeText={(t) => updateDetail('TrayId', t)}
+                        onBlur={() => validateTrayIdOnBlur(currentDetail.TrayId)}
                       />
                       <TouchableOpacity
                         style={{ width: 24, backgroundColor: cardColor, borderLeftWidth: 1, borderColor: '#aaa', justifyContent: 'center', alignItems: 'center', flexShrink: 0 }}
@@ -1801,6 +2143,12 @@ export default function PurchaseScreen() {
                         style={{ width: 44, borderWidth: 1, borderColor: borderColor, padding: 1, fontSize: 10, textAlign: 'right' }}
                         value={currentDetail.PMC}
                         onChangeText={(t) => updateDetail('PMC', t)}
+                        onBlur={() => {
+                          const val = parseFloat(currentDetail.PMC);
+                          if (!isNaN(val)) {
+                            updateDetail('PMC', val.toFixed(2));
+                          }
+                        }}
                         keyboardType="numeric"
                       />
                       <Checkbox
@@ -1820,6 +2168,12 @@ export default function PurchaseScreen() {
                         style={{ width: 44, borderWidth: 1, borderColor: borderColor, padding: 1, fontSize: 10, textAlign: 'right' }}
                         value={currentDetail.SMC}
                         onChangeText={(t) => updateDetail('SMC', t)}
+                        onBlur={() => {
+                          const val = parseFloat(currentDetail.SMC);
+                          if (!isNaN(val)) {
+                            updateDetail('SMC', val.toFixed(2));
+                          }
+                        }}
                         keyboardType="numeric"
                         editable={!autoSMC}
                       />
@@ -1893,6 +2247,7 @@ export default function PurchaseScreen() {
                         style={{ flex: 1, padding: 2, fontSize: 11, color: textColor, textAlign: 'right' }}
                         value={currentDetail.Weight}
                         onChangeText={(t) => updateDetail('Weight', t)}
+                        onBlur={handleWeightOnBlur}
                         keyboardType="numeric"
                       />
                     </View>
@@ -1901,6 +2256,7 @@ export default function PurchaseScreen() {
                         style={{ width: 94, padding: 2, fontSize: 11, color: textColor, textAlign: 'right' }}
                         value={currentDetail.Size}
                         onChangeText={(t) => updateDetail('Size', t)}
+                        onBlur={() => validateSizeOnBlur(currentDetail.Size)}
                         keyboardType="numeric"
                       />
                       <TouchableOpacity
@@ -1915,6 +2271,10 @@ export default function PurchaseScreen() {
                         style={{ flex: 1, padding: 2, fontSize: 11, color: textColor, textAlign: 'right' }}
                         value={currentDetail.GoldLoss}
                         onChangeText={(t) => updateDetail('GoldLoss', t)}
+                        onBlur={() => {
+                          const val = parseFloat(currentDetail.GoldLoss);
+                          if (!isNaN(val)) updateDetail('GoldLoss', val.toFixed(2));
+                        }}
                         keyboardType="numeric"
                       />
                     </View>
@@ -1923,6 +2283,10 @@ export default function PurchaseScreen() {
                         style={{ flex: 1, padding: 2, fontSize: 11, color: textColor, textAlign: 'right' }}
                         value={currentDetail.CostPerGram}
                         onChangeText={(t) => updateDetail('CostPerGram', t)}
+                        onBlur={() => {
+                          const val = parseFloat(currentDetail.CostPerGram);
+                          if (!isNaN(val)) updateDetail('CostPerGram', val.toFixed(2));
+                        }}
                         keyboardType="numeric"
                       />
                     </View>
@@ -1940,12 +2304,17 @@ export default function PurchaseScreen() {
                         editable={false}
                       />
                     </View>
-                    <View style={{ width: 170, borderWidth: 1, borderColor: '#aaa', borderTopWidth: 0, borderLeftWidth: 0 }}>
+                    <View style={{ width: 170, borderWidth: 1, borderColor: '#aaa', borderTopWidth: 0, borderLeftWidth: 0, backgroundColor: (!salesPCS && currentDetail.PurchaseType !== 'P' && currentDetail.PurchaseType !== 'B') ? '#F8F5EE' : undefined }}>
                       <TextInput
-                        style={{ flex: 1, padding: 2, fontSize: 11, color: textColor, textAlign: 'right' }}
+                        style={{ flex: 1, padding: 2, fontSize: 11, color: (!salesPCS && currentDetail.PurchaseType !== 'P' && currentDetail.PurchaseType !== 'B') ? '#888' : textColor, textAlign: 'right' }}
                         value={currentDetail.PCS}
                         onChangeText={(t) => updateDetail('PCS', t)}
+                        onBlur={() => {
+                          const val = parseInt(currentDetail.PCS, 10);
+                          updateDetail('PCS', (!isNaN(val) && val > 0 ? val : 1).toString());
+                        }}
                         keyboardType="numeric"
+                        editable={salesPCS || currentDetail.PurchaseType === 'P' || currentDetail.PurchaseType === 'B'}
                       />
                     </View>
                     <View style={{ flex: 1, minWidth: 140, borderWidth: 1, borderColor: '#aaa', borderTopWidth: 0, borderLeftWidth: 0, backgroundColor: '#F8F5EE' }}>
@@ -1982,6 +2351,10 @@ export default function PurchaseScreen() {
                         style={{ flex: 1, padding: 2, fontSize: 11, color: textColor, textAlign: 'right' }}
                         value={currentDetail.StoneWeight}
                         onChangeText={(t) => updateDetail('StoneWeight', t)}
+                        onBlur={() => {
+                          const val = parseFloat(currentDetail.StoneWeight);
+                          if (!isNaN(val)) updateDetail('StoneWeight', val.toFixed(2));
+                        }}
                         keyboardType="numeric"
                       />
                     </View>
@@ -2100,8 +2473,13 @@ export default function PurchaseScreen() {
 
                 <View style={{ flexDirection: 'row', gap: 8 }}>
                   <TouchableOpacity
-                    style={[styles.actionBtn, { backgroundColor: '#F9F2E2', borderColor: '#cc9900' }]}
+                    style={[
+                      styles.actionBtn,
+                      { backgroundColor: '#F9F2E2', borderColor: '#cc9900' },
+                      isFormLocked && { opacity: 0.5 }
+                    ]}
                     onPress={addDetail}
+                    disabled={isFormLocked}
                   >
                     <ThemedText style={{ color: '#9E6D08', fontWeight: 'bold', textAlign: 'center' }}>
                       {selectedIndex !== null ? 'Update' : 'Add'}
@@ -2109,18 +2487,28 @@ export default function PurchaseScreen() {
                   </TouchableOpacity>
 
                   <TouchableOpacity
-                    style={[styles.actionBtn, { backgroundColor: cardColor, borderColor: '#aaa' }]}
+                    style={[
+                      styles.actionBtn,
+                      { backgroundColor: cardColor, borderColor: '#aaa' },
+                      isFormLocked && { opacity: 0.5 }
+                    ]}
                     onPress={() => {
                       setSelectedIndex(null);
                       clearCurrentDetail();
                     }}
+                    disabled={isFormLocked}
                   >
                     <ThemedText style={{ color: textColor, fontWeight: 'bold', textAlign: 'center' }}>Clear</ThemedText>
                   </TouchableOpacity>
 
                   <TouchableOpacity
-                    style={[styles.actionBtn, { backgroundColor: '#FFEBEE', borderColor: '#E57373' }]}
+                    style={[
+                      styles.actionBtn,
+                      { backgroundColor: '#FFEBEE', borderColor: '#E57373' },
+                      (isFormLocked || selectedIndex === null) && { opacity: 0.5 }
+                    ]}
                     onPress={deleteSelectedDetail}
+                    disabled={isFormLocked || selectedIndex === null}
                   >
                     <ThemedText style={{ color: '#C62828', fontWeight: 'bold', textAlign: 'center' }}>Delete</ThemedText>
                   </TouchableOpacity>

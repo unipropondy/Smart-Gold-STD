@@ -1,6 +1,7 @@
 import { ThemedText } from '@/components/themed-text';
 import { API_BASE_URL } from '@/constants/api';
 import { Ionicons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Stack, useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import {
@@ -8,6 +9,7 @@ import {
   Alert,
   FlatList,
   Modal,
+  Platform,
   ScrollView,
   StyleSheet,
   TextInput,
@@ -18,6 +20,49 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 const API_URL = `${API_BASE_URL}`;
+
+const getLoggedInUser = async () => {
+  let uid = '';
+  let uname = '';
+
+  // Check web localStorage / sessionStorage first
+  if (Platform.OS === 'web' && typeof window !== 'undefined') {
+    try {
+      uid = window.localStorage.getItem('userId') || window.localStorage.getItem('userCode') || '';
+      uname = window.localStorage.getItem('userName') || '';
+      if (!uid) {
+        const uStr = window.localStorage.getItem('user');
+        if (uStr) {
+          const uObj = JSON.parse(uStr);
+          uid = uObj.userCode || uObj.userId || uObj.userName || '';
+          uname = uObj.userName || '';
+        }
+      }
+      if (!uid) {
+        uid = window.sessionStorage.getItem('userId') || window.sessionStorage.getItem('userCode') || '';
+        uname = window.sessionStorage.getItem('userName') || '';
+      }
+    } catch (_) { }
+  }
+
+  // Fallback to AsyncStorage
+  if (!uid) {
+    try {
+      uid = (await AsyncStorage.getItem('userId')) || (await AsyncStorage.getItem('userCode')) || '';
+      uname = (await AsyncStorage.getItem('userName')) || '';
+      if (!uid) {
+        const uStr = await AsyncStorage.getItem('user');
+        if (uStr) {
+          const uObj = JSON.parse(uStr);
+          uid = uObj.userCode || uObj.userId || uObj.userName || '';
+          uname = uObj.userName || '';
+        }
+      }
+    } catch (_) { }
+  }
+
+  return { userId: uid || 'ADMIN', userName: uname || 'ADMIN' };
+};
 
 export default function PosScreen() {
   const router = useRouter();
@@ -149,9 +194,36 @@ export default function PosScreen() {
       .then(res => res.json())
       .then(json => {
         if (json.success && json.data) {
-          setAuditStats(json.data);
-          if (json.data.NextInvoiceNo && !headerState.InvoiceNo) {
-            updateHeader('InvoiceNo', json.data.NextInvoiceNo);
+          const stats = json.data;
+          const loc = stats.LocationCode || 'HQ';
+
+          // Format LastBillNo with LocationCode (e.g. HQ01000143)
+          if (stats.LastBillNo && stats.LastBillNo !== '0') {
+            const billStr = String(stats.LastBillNo).trim();
+            if (!billStr.startsWith(loc)) {
+              const numOnly = billStr.replace(/\D/g, '');
+              stats.LastBillNo = `${loc}${(numOnly || '0').padStart(8, '0')}`;
+            }
+          }
+
+          // Format NextInvoiceNo with LocationCode (e.g. HQ01000144)
+          if (stats.NextInvoiceNo) {
+            const strVal = String(stats.NextInvoiceNo).trim();
+            if (!strVal.startsWith(loc)) {
+              const numOnly = strVal.replace(/\D/g, '');
+              stats.NextInvoiceNo = `${loc}${(numOnly || '1').padStart(8, '0')}`;
+            }
+          }
+
+          // Ensure NextInvoiceNo is greater than LastBillNo if they match
+          if (stats.LastBillNo && stats.NextInvoiceNo && stats.NextInvoiceNo === stats.LastBillNo) {
+            const lastNum = parseInt(stats.LastBillNo.slice(loc.length).replace(/\D/g, ''), 10) || 0;
+            stats.NextInvoiceNo = `${loc}${String(lastNum + 1).padStart(8, '0')}`;
+          }
+
+          setAuditStats(stats);
+          if (stats.NextInvoiceNo && !headerState.InvoiceNo) {
+            updateHeader('InvoiceNo', stats.NextInvoiceNo);
           }
         }
       })
@@ -366,6 +438,112 @@ export default function PosScreen() {
     }
   };
 
+  const handleCustomerCodeBlur = async () => {
+    const rawCode = (headerState.CustomerCode || '').trim();
+    if (!rawCode || rawCode.toUpperCase() === 'CASH') {
+      updateHeader('CustomerCode', 'CASH');
+      updateHeader('CustomerName', 'CASH CUSTOMER');
+      return;
+    }
+
+    try {
+      const res = await fetch(`${API_URL}/pos/lov/customerByCode?code=${encodeURIComponent(rawCode)}`);
+      const json = await res.json();
+      if (json.success && json.data) {
+        const cust = json.data;
+        updateHeader('CustomerCode', cust.CustomerCode);
+        updateHeader('CustomerName', cust.CustomerName || '');
+        updateHeader('CustomerAddress', cust.Address1 || '');
+        if (cust.NricNo) updateHeader('PassportNo', cust.NricNo);
+        if (cust.CustomerType) updateHeader('CustomerType', cust.CustomerType);
+      } else {
+        showToast("Customer Not Found", 'error');
+        updateHeader('CustomerCode', 'CASH');
+        updateHeader('CustomerName', 'CASH CUSTOMER');
+      }
+    } catch (e) {
+      console.log('Error verifying customer code', e);
+    }
+  };
+
+  const loadInventoryByCode = async (code: string) => {
+    const cleanCode = (code || '').trim();
+    if (!cleanCode) return;
+
+    try {
+      const res = await fetch(`${API_URL}/pos/inventoryDetail?InventoryCode=${encodeURIComponent(cleanCode)}&LocationCode=${encodeURIComponent(headerState.LocationCode || 'HQ')}`);
+      let json: any = null;
+      try {
+        json = await res.json();
+      } catch (parseErr) {
+        json = null;
+      }
+
+      if (!res.ok || !json || !json.success) {
+        showToast((json && json.message) || "Inventory Not Found ...", 'error');
+        updateDetail('InventoryCode', '');
+        updateDetail('Description', '');
+        updateDetail('Class', '');
+        updateDetail('Weight', '');
+        updateDetail('CostPerGram', '');
+        updateDetail('SMC', '');
+        updateDetail('PCS', '1');
+        updateDetail('GoldLoss', '');
+        updateDetail('StoneWeight', '');
+        updateDetail('TotalCost', '');
+        updateDetail('DailyClassRate', '');
+        updateDetail('QtyOnHand', '0');
+        updateDetail('ClassSalesType', '');
+        return;
+      }
+
+      const item = json.data;
+      updateDetail('InventoryCode', item.InventoryCode);
+      updateDetail('Description', item.Description || '');
+      updateDetail('Class', item.ClassCode || '');
+      updateDetail('ClassSalesType', item.ClassSalesType || '');
+      updateDetail('QtyOnHand', String(item.QtyOnHand ?? '0'));
+
+      const stoneWt = parseFloat(item.StoneWeight) || 0;
+      let finalWeight = parseFloat(item.Weight) || 0;
+      // If stone weight exists and not pure piece sales, deduct stone weight from gold weight
+      if (stoneWt > 0 && (item.ClassSalesType || '').toUpperCase() !== 'P') {
+        finalWeight = Math.max(0, finalWeight - stoneWt);
+      }
+      updateDetail('Weight', String(finalWeight));
+      updateDetail('StoneWeight', String(stoneWt));
+      updateDetail('GoldLoss', item.GoldLoss?.toString() || '0');
+      updateDetail('CostPerGram', item.CostPerGram?.toString() || item.DailyClassRate?.toString() || '0');
+      updateDetail('SMC', item.SMC?.toString() || '0');
+      updateDetail('PMC', item.PMC?.toString() || '0');
+      updateDetail('TotalCost', item.TotalCost?.toString() || '0');
+      updateDetail('DailyClassRate', item.DailyClassRate?.toString() || '0');
+      if (item.MCDiscount) {
+        updateDetail('DetailDiscount', item.MCDiscount?.toString() || '0');
+      }
+
+      // PCS logic
+      const isPieceOrAssorted = (item.ClassSalesType || '').toUpperCase() === 'P' || (item.ClassSalesType || '').toUpperCase() === 'B';
+      if (isPieceOrAssorted) {
+        updateDetail('PCS', (typeof item.PCS === 'number' && item.PCS > 0) ? item.PCS.toString() : '1');
+      } else {
+        updateDetail('PCS', '1');
+      }
+
+      if ((!item.DailyClassRate || parseFloat(item.DailyClassRate) <= 0) && (item.ClassSalesType || '').toUpperCase() !== 'P') {
+        showToast("Market Rate Not Found for this Class. Please set market rate!", 'error');
+      }
+    } catch (e: any) {
+      showToast(e?.message || "Inventory Not Found ...", 'error');
+    }
+  };
+
+  const handleInventoryCodeBlur = async () => {
+    if (currentDetail.InventoryCode && currentDetail.InventoryCode.trim()) {
+      await loadInventoryByCode(currentDetail.InventoryCode.trim());
+    }
+  };
+
   const fetchPayModes = async () => {
     try {
       const res = await fetch(`${API_URL}/pos/lov/paymodes`);
@@ -485,39 +663,8 @@ export default function PosScreen() {
       const json = await res.json();
       if (json.success) {
         openLov('Select Inventory', json.data, ['InventoryCode', 'Description', 'Weight', 'CostPerGram', 'SMC', 'ClassCode'], async (item) => {
-          updateDetail('InventoryCode', item.InventoryCode);
-          updateDetail('Description', item.Description);
-          updateDetail('Weight', item.Weight?.toString() || '0');
-          updateDetail('CostPerGram', item.CostPerGram?.toString() || item.ClassRate?.toString() || '0');
-          updateDetail('SMC', item.SMC?.toString() || '0');
-          updateDetail('Class', item.ClassCode || '');
-          updateDetail('PCS', (typeof item.PCS === 'number' && item.PCS > 0) ? item.PCS.toString() : '1');
-          updateDetail('GoldLoss', item.GoldLoss?.toString() || '0');
-          updateDetail('StoneWeight', item.StoneWeight?.toString() || '0');
-          updateDetail('TotalCost', item.TotalCost?.toString() || '0');
-
-          if (item.ClassCode) {
-            try {
-              const mrRes = await fetch(`${API_URL}/pos/lov/market-rate/${item.ClassCode}`);
-              const mrJson = await mrRes.json();
-              if (mrJson.success && mrJson.data && mrJson.data.length > 0 && parseFloat(mrJson.data[0].Rate) > 0) {
-                updateDetail('DailyClassRate', mrJson.data[0].Rate?.toString() || '0');
-                if (!item.CostPerGram || item.CostPerGram === 0) {
-                  updateDetail('CostPerGram', mrJson.data[0].Rate?.toString() || '0');
-                }
-              } else {
-                showToast("Market Rate Not Found for this Class. Please set market rate!", 'error');
-              }
-              const mcRes = await fetch(`${API_URL}/pos/lov/mc-discount/${item.ClassCode}`);
-              const mcJson = await mcRes.json();
-              if (mcJson.success && mcJson.data.length > 0) {
-                updateDetail('DetailDiscount', mcJson.data[0].MCDiscount?.toString() || '0');
-              }
-            } catch (e) {
-              console.log('LOV fetch error', e);
-            }
-          } else {
-            showToast("Market Rate Not Found for this Class. Please set market rate!", 'error');
+          if (item.InventoryCode) {
+            await loadInventoryByCode(item.InventoryCode);
           }
         });
       }
@@ -553,11 +700,23 @@ export default function PosScreen() {
   };
 
   const addItem = () => {
-    if (!currentDetail.InventoryCode) {
+    if (!currentDetail.InventoryCode || !currentDetail.InventoryCode.trim()) {
       showToast("Validation Error: Please select an Item Code", 'error');
       return;
     }
-    const isPcsSales = currentDetail.Class && currentDetail.Class.toUpperCase() === 'P';
+
+    const trimmedInvCode = currentDetail.InventoryCode.trim().toUpperCase();
+    const isDuplicate = details.some((item, idx) => {
+      if (selectedIndex !== null && idx === selectedIndex) return false;
+      return (item.InventoryCode || '').trim().toUpperCase() === trimmedInvCode;
+    });
+
+    if (isDuplicate) {
+      showToast("Item already scanned for this invoice!", 'error');
+      return;
+    }
+
+    const isPcsSales = currentDetail.ClassSalesType === 'P' || (currentDetail.Class && currentDetail.Class.toUpperCase() === 'P');
     if (!isPcsSales && (!currentDetail.DailyClassRate || parseFloat(currentDetail.DailyClassRate) <= 0)) {
       showToast("Market Rate Not Found for this Class. Please set market rate!", 'error');
       return;
@@ -573,6 +732,12 @@ export default function PosScreen() {
     const pcsNum = parseInt(currentDetail.PCS, 10);
     if (isNaN(pcsNum) || pcsNum <= 0) {
       showToast("Validation Error: PCS must be a valid positive integer", 'error');
+      return;
+    }
+
+    const qoh = parseFloat(currentDetail.QtyOnHand);
+    if (!isNaN(qoh) && qoh > 0 && pcsNum > qoh) {
+      showToast(`Only ${qoh} PCS in stock for this inventory!`, 'error');
       return;
     }
 
@@ -612,7 +777,7 @@ export default function PosScreen() {
 
   const clearForm = () => {
     setHeaderState({
-      InvoiceNo: '',
+      InvoiceNo: auditStats.NextInvoiceNo || '',
       InvoiceDate: new Date().toISOString().split('T')[0],
       SalesManCode: headerState.SalesManCode || '',
       CustomerCode: 'CASH',
@@ -701,6 +866,9 @@ export default function PosScreen() {
 
     setLoading(true);
     try {
+      const loggedUser = await getLoggedInUser();
+      const currentUserId = loggedUser.userId || 'ADMIN';
+
       const res = await fetch(`${API_URL}/pos`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -717,7 +885,7 @@ export default function PosScreen() {
             SalesType: salesType
           },
           details,
-          userId: 'ADMIN',
+          userId: currentUserId,
           payModes: [{
             PayMode: paymentState.PayMode || (salesType === 'TRADEIN' ? 'TRADE-IN' : salesType),
             Amount: paymentState.GrandTotal,
@@ -791,7 +959,7 @@ export default function PosScreen() {
     showToast(`Net Total: $${paymentState.GrandTotal}`, 'info');
   };
 
-  const renderInputRow = (label: string, key: string, val: string, updateFn: any, lookupFn?: () => void, isNumeric = false, labelWidth?: number) => (
+  const renderInputRow = (label: string, key: string, val: string, updateFn: any, lookupFn?: () => void, isNumeric = false, labelWidth?: number, onBlurFn?: () => void, allowDirectEdit = false) => (
     <View style={styles.formRow}>
       <ThemedText style={[styles.formLabel, labelWidth ? { width: labelWidth } : null]} numberOfLines={1}>
         {label}
@@ -801,8 +969,10 @@ export default function PosScreen() {
           style={[styles.formInput, isNumeric && { textAlign: 'right' }]}
           value={val}
           onChangeText={(text) => updateFn(key, text)}
+          onBlur={onBlurFn}
+          onSubmitEditing={onBlurFn}
           keyboardType={isNumeric ? 'numeric' : 'default'}
-          editable={!lookupFn}
+          editable={!lookupFn || allowDirectEdit}
         />
         {lookupFn && (
           <TouchableOpacity style={styles.attachedLookupBtn} onPress={lookupFn} activeOpacity={0.7}>
@@ -1073,7 +1243,7 @@ export default function PosScreen() {
                     {renderInputRow("Sales Man", "SalesManCode", headerState.SalesManCode, updateHeader, undefined, false, 65)}
                   </View>
                   <View style={{ flex: 1 }}>
-                    {renderInputRow("Customer", "CustomerCode", headerState.CustomerCode, updateHeader, fetchCustomers, false, 60)}
+                    {renderInputRow("Customer", "CustomerCode", headerState.CustomerCode, updateHeader, fetchCustomers, false, 60, handleCustomerCodeBlur, true)}
                   </View>
                 </View>
 
@@ -1125,22 +1295,17 @@ export default function PosScreen() {
                   </View>
                 </View>
 
-                {/* Row 5: Remarks & Flexi */}
+                {/* Row 5: Remarks */}
                 <View style={styles.formGridRow}>
-                  <View style={{ flex: 1.2 }}>
-                    {renderInputRow("Remarks", "Remarks", headerState.Remarks, updateHeader, undefined, false, 60)}
-                  </View>
                   <View style={{ flex: 1 }}>
-                    {renderInputRow("Flexi Amt", "FlexiAmount", headerState.FlexiAmount, updateHeader, fetchFlexiSubscriptions, true, 55)}
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    {renderInputRow("Bonus", "FlexiBonus", headerState.FlexiBonus, updateHeader, undefined, true, 45)}
+                    {renderInputRow("Remarks", "Remarks", headerState.Remarks, updateHeader, undefined, false, 65)}
                   </View>
                 </View>
 
-                {/* Row 7: eTRS Radios & Checkboxes (Clean layout, no overlapping) */}
-                <View style={[styles.formGridRow, { borderBottomWidth: 0, paddingBottom: 0, justifyContent: 'space-between', flexWrap: 'wrap' }]}>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                {/* Row 6: eTRS Radios, Flexi Amount & Flexi Bonus (Matching frmgpos.vb Panel8 & txtFlexiAmount/txtFlexiBonus) */}
+                <View style={[styles.formGridRow, { alignItems: 'center' }]}>
+                  {/* eTRS Radio Group */}
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, borderWidth: 1, borderColor: '#D8C59A', borderRadius: 4, paddingHorizontal: 10, paddingVertical: 4, backgroundColor: '#FCFAF6' }}>
                     <RadioButton
                       label="For eTRS"
                       selected={headerState.eTRS === 'For eTRS'}
@@ -1152,7 +1317,7 @@ export default function PosScreen() {
                       }}
                     />
                     <RadioButton
-                      label="Not eTRS"
+                      label="Not For eTRS"
                       selected={headerState.eTRS === 'Not For eTRS'}
                       onPress={() => {
                         updateHeader('eTRS', 'Not For eTRS');
@@ -1161,14 +1326,22 @@ export default function PosScreen() {
                         }
                       }}
                     />
-                    <RadioButton
-                      label="Eligible"
-                      selected={headerState.eTRS === 'eTRS Eligible'}
-                      onPress={() => updateHeader('eTRS', 'eTRS Eligible')}
-                    />
                   </View>
 
-                  <View style={{ flexDirection: 'row', gap: 12, alignItems: 'center' }}>
+                  {/* Flexi Amount */}
+                  <View style={{ flex: 1, marginLeft: 12 }}>
+                    {renderInputRow("Flexi Amount", "FlexiAmount", headerState.FlexiAmount, updateHeader, fetchFlexiSubscriptions, true, 80)}
+                  </View>
+
+                  {/* Flexi Bonus */}
+                  <View style={{ flex: 1, marginLeft: 8 }}>
+                    {renderInputRow("Flexi Bonus", "FlexiBonus", headerState.FlexiBonus, updateHeader, undefined, true, 75)}
+                  </View>
+                </View>
+
+                {/* Row 7: Checkboxes matching frmgpos.vb (chkPrintMC, chkPrintImage, and TradeIn) */}
+                <View style={[styles.formGridRow, { borderBottomWidth: 0, paddingBottom: 0, justifyContent: 'flex-end', flexWrap: 'wrap' }]}>
+                  <View style={{ flexDirection: 'row', gap: 16, alignItems: 'center' }}>
                     <Checkbox label="Print MC" selected={headerState.PrintMC} onPress={() => updateHeader('PrintMC', !headerState.PrintMC)} />
                     <Checkbox label="Print Img" selected={headerState.PrintImage} onPress={() => updateHeader('PrintImage', !headerState.PrintImage)} />
                     <Checkbox label="Trade In" selected={paymentState.TradeIn} onPress={() => updatePayment('TradeIn', !paymentState.TradeIn)} />
@@ -1325,19 +1498,6 @@ export default function PosScreen() {
                 <ThemedText style={styles.totalLbl}>Net Value</ThemedText>
                 <ThemedText style={styles.totalVal}>$ {paymentState.NetValue}</ThemedText>
               </View>
-              <View style={styles.totalRow}>
-                <ThemedText style={styles.totalLbl}>PayMode</ThemedText>
-                <TouchableOpacity
-                  style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#FAF5EA', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 4, borderWidth: 1, borderColor: '#D8C59A' }}
-                  onPress={fetchPayModes}
-                  activeOpacity={0.7}
-                >
-                  <ThemedText style={{ fontSize: 11, fontWeight: 'bold', color: '#8D6409', marginRight: 4 }}>
-                    {paymentState.PayMode || 'CASH'}
-                  </ThemedText>
-                  <Ionicons name="chevron-down" size={12} color="#8D6409" />
-                </TouchableOpacity>
-              </View>
               <View style={[styles.totalRow, { borderBottomWidth: 0 }]}>
                 <ThemedText style={styles.totalLbl}>Tax (GST 9%)</ThemedText>
                 <ThemedText style={[styles.totalVal, { color: '#9E6D08' }]}>
@@ -1372,7 +1532,11 @@ export default function PosScreen() {
           <ThemedText style={styles.footerVal}>{auditStats.LastBillNo || '0'}</ThemedText>
         </View>
         <View style={styles.footerCol}>
-          <ThemedText style={styles.footerLabel}>Next Inv No</ThemedText>
+          <ThemedText style={styles.footerLabel}>Last Bill Amt</ThemedText>
+          <ThemedText style={styles.footerVal}>${auditStats.LastBillAmount || '0.00'}</ThemedText>
+        </View>
+        <View style={styles.footerCol}>
+          <ThemedText style={styles.footerLabel}>Next Invoice No</ThemedText>
           <ThemedText style={styles.footerVal}>{auditStats.NextInvoiceNo || '0'}</ThemedText>
         </View>
         <View style={styles.footerCol}>
@@ -1382,8 +1546,8 @@ export default function PosScreen() {
           </ThemedText>
         </View>
         <View style={styles.footerCol}>
-          <ThemedText style={styles.footerLabel}>Last Bill Amt</ThemedText>
-          <ThemedText style={styles.footerVal}>${auditStats.LastBillAmount || '0.00'}</ThemedText>
+          <ThemedText style={styles.footerLabel}>Return Amount</ThemedText>
+          <ThemedText style={styles.footerVal}>${paymentState.ReturnAmt || '0.00'}</ThemedText>
         </View>
       </View>
 
@@ -1465,6 +1629,8 @@ export default function PosScreen() {
                       style={[styles.imageMatchedInput, { flex: 1 }]}
                       value={currentDetail.InventoryCode}
                       onChangeText={(text) => updateDetail('InventoryCode', text)}
+                      onBlur={handleInventoryCodeBlur}
+                      onSubmitEditing={handleInventoryCodeBlur}
                       placeholder="Select..."
                       placeholderTextColor="#9E8D77"
                     />
@@ -1545,9 +1711,14 @@ export default function PosScreen() {
                 <View style={[styles.imageMatchedFieldCol, { width: 60 }]}>
                   <ThemedText style={[styles.imageMatchedFieldLabel, { textAlign: 'center' }]}>PCS</ThemedText>
                   <TextInput
-                    style={[styles.imageMatchedInput, { textAlign: 'center' }]}
+                    style={[
+                      styles.imageMatchedInput,
+                      { textAlign: 'center' },
+                      (currentDetail.ClassSalesType !== 'P' && currentDetail.ClassSalesType !== 'B' && (currentDetail.Class || '').toUpperCase() !== 'P') && styles.readonlyInputStyle
+                    ]}
                     value={currentDetail.PCS}
                     onChangeText={(text) => updateDetail('PCS', text)}
+                    editable={currentDetail.ClassSalesType === 'P' || currentDetail.ClassSalesType === 'B' || (currentDetail.Class || '').toUpperCase() === 'P'}
                     keyboardType="numeric"
                     placeholder="1"
                     placeholderTextColor="#9E8D77"

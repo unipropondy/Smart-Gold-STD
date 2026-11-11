@@ -30,29 +30,74 @@ router.post("/", async (req, res) => {
       return res.status(400).json({ success: false, message: "Invoice header is required" });
     }
 
+    // Validations matching frmgpos.vb fncValidate
+    if (!header.SalesManCode || !String(header.SalesManCode).trim()) {
+      return res.status(400).json({ success: false, message: "Validation Error: Please select or authorize Salesman" });
+    }
+    if (!header.CustomerCode || !String(header.CustomerCode).trim()) {
+      return res.status(400).json({ success: false, message: "Validation Error: Please enter Customer!" });
+    }
+    if (!details || !Array.isArray(details) || details.length === 0) {
+      return res.status(400).json({ success: false, message: "Validation Error: Enter items for sales!" });
+    }
+    const totalSalesNum = parseFloat(header.TotalSalesAmt !== undefined ? header.TotalSalesAmt : header.GrandTotal) || 0;
+    if (totalSalesNum < 0) {
+      return res.status(400).json({ success: false, message: "Validation Error: Can not do negative sales." });
+    }
+
+    // Line items validation
+    for (let i = 0; i < details.length; i++) {
+      const itm = details[i];
+      const invCode = (itm.InventoryCode || "").trim();
+      if (!invCode) {
+        return res.status(400).json({ success: false, message: `Validation Error: Item at line ${i + 1} has no Inventory Code!` });
+      }
+      const pcsVal = parseInt(itm.PCS, 10) || 0;
+      if (pcsVal < 1) {
+        return res.status(400).json({ success: false, message: `Validation Error: PCS should be greater than or equal to one for item ${invCode}!` });
+      }
+      const isPcsSales = itm.ClassSalesType === 'P' || (itm.Class && String(itm.Class).toUpperCase() === 'P');
+      if (!isPcsSales) {
+        const wt = parseFloat(itm.Weight) || 0;
+        if (wt <= 0) {
+          return res.status(400).json({ success: false, message: `Validation Error: Weight must be greater than 0 for item ${invCode}!` });
+        }
+      }
+    }
+
     const sysUser = userId || "SYSTEM";
     const curDate = new Date();
 
     await transaction.begin();
 
-    // Generate or fetch InvoiceNo
-    let invNo = header.InvoiceNo;
-    if (!invNo || !invNo.trim() || invNo.startsWith('INV-')) {
-      // 1. Try tblCompany (e.g. NextInvoiceNo or NextSalesOrderNo)
+    // Format and validate InvoiceNo
+    let invNo = header.InvoiceNo ? String(header.InvoiceNo).trim() : '';
+    let locCode = 'HQ';
+    try {
+      const compLoc = await new sql.Request(transaction).query("SELECT TOP 1 LocationCode FROM tblCompany");
+      if (compLoc.recordset.length > 0 && compLoc.recordset[0].LocationCode) {
+        locCode = String(compLoc.recordset[0].LocationCode).trim();
+      }
+    } catch (_) {}
+
+    if (!invNo || invNo.startsWith('INV-')) {
+      // 1. Try tblCompany (e.g. NextInvoice, NextInvoiceNo or NextSalesNo)
       let foundNextNo = null;
       try {
         const compRes = await new sql.Request(transaction).query(`
-          SELECT TOP 1 NextInvoiceNo, NextSalesNo, NextSalesBillNo FROM tblCompany
+          SELECT TOP 1 LocationCode, NextInvoice, NextInvoiceNo, NextSalesNo, NextSalesBillNo FROM tblCompany
         `);
         if (compRes.recordset.length > 0) {
           const row = compRes.recordset[0];
-          foundNextNo = row.NextInvoiceNo || row.NextSalesNo || row.NextSalesBillNo;
+          if (row.LocationCode) locCode = String(row.LocationCode).trim();
+          foundNextNo = row.NextInvoice || row.NextInvoiceNo || row.NextSalesNo || row.NextSalesBillNo;
           if (foundNextNo) {
-            const nextVal = parseInt(foundNextNo, 10);
-            if (!isNaN(nextVal)) {
+            const numPart = parseInt(String(foundNextNo).replace(/\D/g, ''), 10);
+            if (!isNaN(numPart)) {
               await new sql.Request(transaction).query(`
                 UPDATE tblCompany 
-                SET NextInvoiceNo = ${nextVal + 1}
+                SET NextInvoice = ${numPart + 1},
+                    NextInvoiceNo = ${numPart + 1}
               `);
             }
           }
@@ -65,14 +110,15 @@ router.post("/", async (req, res) => {
       if (!foundNextNo) {
         try {
           const invNumRes = await new sql.Request(transaction).query(`
-            SELECT TOP 1 NextInvoice FROM tblInvoiceNo WHERE Terminal = 'T1' OR LocationCode = 'HQ'
+            SELECT TOP 1 LocationCode, NextInvoice FROM tblInvoiceNo WHERE Terminal = 'T1' OR LocationCode = '${locCode}'
           `);
           if (invNumRes.recordset.length > 0 && invNumRes.recordset[0].NextInvoice) {
+            if (invNumRes.recordset[0].LocationCode) locCode = String(invNumRes.recordset[0].LocationCode).trim();
             foundNextNo = invNumRes.recordset[0].NextInvoice;
-            const nextVal = parseInt(foundNextNo, 10);
-            if (!isNaN(nextVal)) {
+            const numPart = parseInt(String(foundNextNo).replace(/\D/g, ''), 10);
+            if (!isNaN(numPart)) {
               await new sql.Request(transaction).query(`
-                UPDATE tblInvoiceNo SET NextInvoice = '${nextVal + 1}' WHERE Terminal = 'T1' OR LocationCode = 'HQ'
+                UPDATE tblInvoiceNo SET NextInvoice = '${numPart + 1}' WHERE Terminal = 'T1' OR LocationCode = '${locCode}'
               `);
             }
           }
@@ -85,18 +131,44 @@ router.post("/", async (req, res) => {
       if (!foundNextNo) {
         try {
           const maxRes = await new sql.Request(transaction).query(`
-            SELECT TOP 1 InvoiceNo FROM tblSalesHeader WHERE ISNUMERIC(InvoiceNo) = 1 ORDER BY CAST(InvoiceNo AS BIGINT) DESC
+            SELECT TOP 1 InvoiceNo FROM tblSalesHeader ORDER BY CreateDate DESC
           `);
           if (maxRes.recordset.length > 0 && maxRes.recordset[0].InvoiceNo) {
-            const maxVal = parseInt(maxRes.recordset[0].InvoiceNo, 10);
+            const maxVal = parseInt(String(maxRes.recordset[0].InvoiceNo).replace(/\D/g, ''), 10);
             foundNextNo = String(maxVal + 1);
           }
-        } catch (mErr) {
-          // Fallback if InvoiceNo not numeric
-        }
+        } catch (mErr) {}
       }
 
-      invNo = foundNextNo ? String(foundNextNo).trim() : `100${Date.now().toString().slice(-5)}`;
+      if (foundNextNo) {
+        const strVal = String(foundNextNo).trim();
+        if (strVal.startsWith(locCode)) {
+          const numPart = strVal.slice(locCode.length).replace(/\D/g, '');
+          invNo = `${locCode}${numPart.padStart(8, '0')}`;
+        } else {
+          const numPart = strVal.replace(/\D/g, '');
+          invNo = `${locCode}${(numPart || '1').padStart(8, '0')}`;
+        }
+      } else {
+        invNo = `${locCode}00000001`;
+      }
+    } else {
+      // User passed an InvoiceNo; ensure it is properly formatted with locationCode prefix and 8 digits
+      if (!invNo.startsWith(locCode)) {
+        const numPart = invNo.replace(/\D/g, '');
+        invNo = `${locCode}${(numPart || '1').padStart(8, '0')}`;
+      }
+      // Increment NextInvoice in tblCompany so the next bill does not collide
+      try {
+        const currentNum = parseInt(invNo.slice(locCode.length).replace(/\D/g, ''), 10);
+        if (!isNaN(currentNum)) {
+          await new sql.Request(transaction).query(`
+            UPDATE tblCompany 
+            SET NextInvoice = ${currentNum + 1},
+                NextInvoiceNo = ${currentNum + 1}
+          `);
+        }
+      } catch (_) {}
     }
 
     const request = new sql.Request(transaction);
@@ -276,6 +348,12 @@ router.post("/", async (req, res) => {
         vals.push("GETDATE()");
       }
       addField("CreateUser", sql.VarChar, sysUser);
+      addField("CreatedBy", sql.VarChar, sysUser);
+      addField("ModifyUser", sql.VarChar, sysUser);
+      if (hasCol("ModifyDate")) {
+        cols.push("ModifyDate");
+        vals.push("GETDATE()");
+      }
 
       await directHdrReq.query(`
         INSERT INTO tblSalesHeader (${cols.join(', ')})
@@ -412,6 +490,18 @@ router.post("/", async (req, res) => {
         addDetField("SortCode", sql.Int, i + 1);
         addDetField("SalesType", sql.VarChar, d.SalesType || salesTypeStr);
 
+        addDetField("CreateUser", sql.VarChar, sysUser);
+        addDetField("CreatedBy", sql.VarChar, sysUser);
+        addDetField("ModifyUser", sql.VarChar, sysUser);
+        if (hasDetCol("CreateDate")) {
+          dCols.push("CreateDate");
+          dVals.push("GETDATE()");
+        }
+        if (hasDetCol("ModifyDate")) {
+          dCols.push("ModifyDate");
+          dVals.push("GETDATE()");
+        }
+
         await directDetReq.query(`
           INSERT INTO tblSalesDetail (${dCols.join(', ')})
           VALUES (${dVals.join(', ')})
@@ -432,6 +522,63 @@ router.post("/", async (req, res) => {
           SET SalesBillNo = @SalesBillNo, SalesDate = @SalesDate, SalesCostPerGram = @SalesCostPerGram, 
               SalesMC = @SalesMC, SalesAmount = @SalesAmount
           WHERE InventoryCode = @InventoryCode
+        `);
+
+      // 1. Mandatory stock deduction in tblInventoryStock - Must succeed or throw
+      const stockReq = new sql.Request(transaction);
+      const stockUpdateResult = await stockReq
+        .input("InventoryCode", sql.VarChar, d.InventoryCode)
+        .input("PCS", sql.Numeric(18, 0), pcsVal)
+        .input("Weight", sql.Numeric(18, 3), parseFloat(d.Weight) || 0)
+        .query(`
+          UPDATE tblInventoryStock 
+          SET QtyOnHand = CASE WHEN ISNULL(QtyOnHand, 0) - @PCS < 0 THEN 0 ELSE ISNULL(QtyOnHand, 0) - @PCS END,
+              QtySold = ISNULL(QtySold, 0) + @PCS,
+              Weight = CASE WHEN ISNULL(Weight, 0) - @Weight < 0 THEN 0 ELSE ISNULL(Weight, 0) - @Weight END,
+              ModifyDate = GETDATE()
+          WHERE UPPER(LTRIM(RTRIM(InventoryCode))) = UPPER(LTRIM(RTRIM(@InventoryCode)))
+        `);
+
+      if (stockUpdateResult.rowsAffected && stockUpdateResult.rowsAffected[0] === 0) {
+        // If row didn't exist in tblInventoryStock, insert it to keep ledger consistent
+        try {
+          const insertStockReq = new sql.Request(transaction);
+          await insertStockReq
+            .input("InventoryCode", sql.VarChar, d.InventoryCode)
+            .input("PCS", sql.Numeric(18, 0), pcsVal)
+            .input("Weight", sql.Numeric(18, 3), parseFloat(d.Weight) || 0)
+            .query(`
+              INSERT INTO tblInventoryStock (InventoryCode, QtyOnHand, QtySold, Weight, ModifyDate)
+              VALUES (@InventoryCode, 0, @PCS, 0, GETDATE())
+            `);
+        } catch (isErr) {
+          console.warn("tblInventoryStock initial record create:", isErr.message);
+        }
+      }
+
+      // 2. Mandatory inventory movement record matching InventoryMovementSave (Status: 'SA')
+      const mvReq = new sql.Request(transaction);
+      await mvReq
+        .input("LocationCode", sql.VarChar, header.LocationCode || "HQ")
+        .input("InventoryCode", sql.VarChar, d.InventoryCode)
+        .input("Description", sql.VarChar, d.Description || "")
+        .input("RefNumber", sql.VarChar, invNo)
+        .input("RefDate", sql.SmallDateTime, header.InvoiceDate || curDate)
+        .input("PCS", sql.Numeric(18, 0), pcsVal)
+        .input("Weight", sql.Numeric(18, 3), parseFloat(d.Weight) || 0)
+        .input("PMC", sql.Numeric(18, 2), parseFloat(d.SMC) || 0)
+        .input("CostPerGram", sql.Numeric(18, 2), parseFloat(d.CostPerGram) || 0)
+        .input("TotalCost", sql.Numeric(18, 2), itemVal)
+        .input("CustomerCode", sql.VarChar, header.CustomerCode || "CASH")
+        .input("CreateUser", sql.VarChar, sysUser)
+        .query(`
+          INSERT INTO tblInventoryMovement (
+            LocationCode, InventoryCode, Description, Status, RefNumber, RefDate,
+            Qty, Weight, PMC, CostPerGram, TotalCost, SupplierCode, CreateUser, CreateDate
+          ) VALUES (
+            @LocationCode, @InventoryCode, @Description, 'SA', @RefNumber, @RefDate,
+            @PCS, @Weight, @PMC, @CostPerGram, @TotalCost, @CustomerCode, @CreateUser, GETDATE()
+          )
         `);
     }
 
@@ -520,6 +667,56 @@ router.post("/", async (req, res) => {
         }
     }
 
+    // ================= ADVANCE DEPOSIT REDEMPTION (Matching objSales.fncUpdateAdvDeposit) =================
+    if (header.Advance && String(header.Advance).trim() !== '' && parseFloat(header.Advance) > 0) {
+      try {
+        const advDepNo = (header.AdvDepositNo || header.DepositNo || '').trim();
+        const advReq = new sql.Request(transaction);
+        advReq.input("InvoiceNo", sql.VarChar, invNo);
+        advReq.input("SalesInvoiceDate", sql.SmallDateTime, header.InvoiceDate || curDate);
+        advReq.input("UserID", sql.VarChar, sysUser);
+
+        if (advDepNo) {
+          advReq.input("DepositNo", sql.VarChar, advDepNo);
+          await advReq.query(`
+            UPDATE tblCustomerDeposit 
+            SET DepositUsed = 'Y', InvoiceNo = @InvoiceNo, InvoiceDate = @SalesInvoiceDate,
+                ModifiedBy = @UserID, ModifiedDate = GETDATE()
+            WHERE DepositNo = @DepositNo
+          `);
+        } else if (header.CustomerCode) {
+          advReq.input("CustomerCode", sql.VarChar, header.CustomerCode.trim());
+          await advReq.query(`
+            UPDATE TOP (1) tblCustomerDeposit 
+            SET DepositUsed = 'Y', InvoiceNo = @InvoiceNo, InvoiceDate = @SalesInvoiceDate,
+                ModifiedBy = @UserID, ModifiedDate = GETDATE()
+            WHERE CustomerCode = @CustomerCode AND DepositUsed = 'N'
+          `);
+        }
+      } catch (advErr) {
+        console.warn("Advance deposit update warning:", advErr.message);
+      }
+    }
+
+    // ================= FLEXI SUBSCRIPTION REDEMPTION (Matching objSales.fncUpdatePayModeFlexiClosure) =================
+    if ((header.FlexiAmount && parseFloat(header.FlexiAmount) > 0) || (header.FlexiBonus && parseFloat(header.FlexiBonus) > 0) || header.SubscriptionID) {
+      try {
+        const subId = String(header.SubscriptionID || '').trim();
+        if (subId) {
+          const flexiReq = new sql.Request(transaction);
+          flexiReq.input("SubscriptionID", sql.VarChar, subId);
+          flexiReq.input("LocationCode", sql.VarChar, header.LocationCode || "HQ");
+          await flexiReq.query(`
+            UPDATE tblPayModeDetailForFlexiClosure 
+            SET IsProcessed = 'Y', ModifyDate = GETDATE()
+            WHERE SubscriptionID = @SubscriptionID AND LocationCode = @LocationCode
+          `);
+        }
+      } catch (flexiErr) {
+        console.warn("Flexi subscription closure update warning:", flexiErr.message);
+      }
+    }
+
     await transaction.commit();
     return res.status(200).json({ 
       success: true, 
@@ -539,28 +736,130 @@ router.post("/", async (req, res) => {
   }
 });
 
-// ================= DELETE INVOICE =================
+// ================= DELETE INVOICE (Matching objSalesReturn.BillCancel, sp_SalesBillCancel, sp_SalesBillCancelCustomerUpdate) =================
 router.delete("/:invoiceNo", async (req, res) => {
   const pool = req.pool;
   const transaction = new sql.Transaction(pool);
 
   try {
     const { invoiceNo } = req.params;
+    const sysUser = req.query.userId || req.body?.userId || "SYSTEM";
+    const locCode = req.query.locationCode || req.body?.locationCode || "HQ";
 
     await transaction.begin();
 
-    const request = new sql.Request(transaction);
-    await request
+    // 1. Fetch line items of this invoice to restore stock and record reversal movements
+    const getItemsReq = new sql.Request(transaction);
+    const itemsRes = await getItemsReq
+      .input("InvoiceNo", sql.VarChar, invoiceNo)
+      .query(`
+        SELECT InventoryCode, Description, PCS, Weight, SMC, Rate, CostPerGram, TotalValue 
+        FROM tblSalesDetail 
+        WHERE InvoiceNo = @InvoiceNo
+      `);
+
+    const invoiceItems = itemsRes.recordset;
+
+    // 2. Execute original stored procedures if available: sp_SalesBillCancelCustomerUpdate & sp_SalesBillCancel
+    try {
+      const spCustReq = new sql.Request(transaction);
+      await spCustReq
+        .input("InvoiceNo", sql.VarChar, invoiceNo)
+        .execute("sp_SalesBillCancelCustomerUpdate");
+
+      const spCancelReq = new sql.Request(transaction);
+      await spCancelReq
+        .input("InvoiceNo", sql.VarChar, invoiceNo)
+        .input("LocationCode", sql.VarChar, locCode)
+        .input("UserID", sql.VarChar, sysUser)
+        .execute("sp_SalesBillCancel");
+    } catch (spErr) {
+      console.warn("⚠️ Stored procedures sp_SalesBillCancel / CustomerUpdate fallback to standard cancellation:", spErr.message);
+    }
+
+    // 3. Restore Stock in tblInventoryStock and write 'SR' (Sales Return / Cancel) Movement record for each item
+    for (const item of invoiceItems) {
+      const invCode = (item.InventoryCode || '').trim();
+      if (invCode) {
+        const pcsVal = parseFloat(item.PCS) || 1;
+        const wtVal = parseFloat(item.Weight) || 0;
+
+        // Restore QtyOnHand and decrement QtySold in tblInventoryStock
+        const restoreStockReq = new sql.Request(transaction);
+        await restoreStockReq
+          .input("InventoryCode", sql.VarChar, invCode)
+          .input("PCS", sql.Numeric(18, 0), pcsVal)
+          .input("Weight", sql.Numeric(18, 3), wtVal)
+          .query(`
+            UPDATE tblInventoryStock 
+            SET QtyOnHand = ISNULL(QtyOnHand, 0) + @PCS,
+                QtySold = CASE WHEN ISNULL(QtySold, 0) - @PCS < 0 THEN 0 ELSE ISNULL(QtySold, 0) - @PCS END,
+                Weight = ISNULL(Weight, 0) + @Weight,
+                ModifyDate = GETDATE()
+            WHERE UPPER(LTRIM(RTRIM(InventoryCode))) = UPPER(LTRIM(RTRIM(@InventoryCode)))
+          `);
+
+        // Record reversal movement in tblInventoryMovement (Status: 'SR')
+        try {
+          const mvReq = new sql.Request(transaction);
+          await mvReq
+            .input("LocationCode", sql.VarChar, locCode)
+            .input("InventoryCode", sql.VarChar, invCode)
+            .input("Description", sql.VarChar, item.Description || "")
+            .input("RefNumber", sql.VarChar, invoiceNo)
+            .input("PCS", sql.Numeric(18, 0), pcsVal)
+            .input("Weight", sql.Numeric(18, 3), wtVal)
+            .input("PMC", sql.Numeric(18, 2), parseFloat(item.SMC) || 0)
+            .input("CostPerGram", sql.Numeric(18, 2), parseFloat(item.CostPerGram || item.Rate) || 0)
+            .input("TotalCost", sql.Numeric(18, 2), parseFloat(item.TotalValue) || 0)
+            .input("CreateUser", sql.VarChar, sysUser)
+            .query(`
+              INSERT INTO tblInventoryMovement (
+                LocationCode, InventoryCode, Description, Status, RefNumber, RefDate,
+                Qty, Weight, PMC, CostPerGram, TotalCost, CreateUser, CreateDate
+              ) VALUES (
+                @LocationCode, @InventoryCode, @Description, 'SR', @RefNumber, GETDATE(),
+                @PCS, @Weight, @PMC, @CostPerGram, @TotalCost, @CreateUser, GETDATE()
+              )
+            `);
+        } catch (_) {}
+      }
+    }
+
+    // 4. Mark tblInventory unsold
+    const clearInvReq = new sql.Request(transaction);
+    await clearInvReq
+      .input("InvoiceNo", sql.VarChar, invoiceNo)
+      .query(`
+        UPDATE tblInventory 
+        SET SalesBillNo = '', SalesDate = NULL, SalesCostPerGram = 0, SalesMC = 0, SalesAmount = 0 
+        WHERE SalesBillNo = @InvoiceNo
+      `);
+
+    // 5. Restore redeemed deposits or flexi closures used on this invoice
+    try {
+      const restDepReq = new sql.Request(transaction);
+      await restDepReq
+        .input("InvoiceNo", sql.VarChar, invoiceNo)
+        .query(`
+          UPDATE tblCustomerDeposit 
+          SET DepositUsed = 'N', InvoiceNo = '', InvoiceDate = NULL 
+          WHERE InvoiceNo = @InvoiceNo
+        `);
+    } catch (_) {}
+
+    // 6. Delete bill headers
+    const delSalesReq = new sql.Request(transaction);
+    await delSalesReq
       .input("InvoiceNo", sql.VarChar, invoiceNo)
       .query(`
         DELETE FROM tblSalesHeader WHERE InvoiceNo = @InvoiceNo;
         DELETE FROM tblSalesDetail WHERE InvoiceNo = @InvoiceNo;
         DELETE FROM tblPaymodeDetail WHERE InvoiceNo = @InvoiceNo;
-        UPDATE tblInventory SET SalesBillNo = '', SalesDate = NULL WHERE SalesBillNo = @InvoiceNo;
       `);
 
     await transaction.commit();
-    return res.status(200).json({ success: true, message: "Invoice voided successfully" });
+    return res.status(200).json({ success: true, message: `Invoice ${invoiceNo} cancelled and stock successfully restored!` });
   } catch (err) {
     await transaction.rollback();
     console.error("🔥 DELETE POS ERROR:", err);
@@ -655,6 +954,189 @@ router.get("/lov/customers", async (req, res) => {
         console.error("🔥 LOV Customers ERROR:", err);
         return res.status(500).json({ success: false, message: "Server Error", error: err.message });
     }
+});
+
+// ================= GET CUSTOMER BY CODE =================
+router.get("/lov/customerByCode", async (req, res) => {
+    try {
+        const { code } = req.query;
+        if (!code || !code.trim()) {
+            return res.status(400).json({ success: false, message: "Customer code required" });
+        }
+        const pool = req.pool;
+        const result = await pool.request()
+            .input("CustomerCode", sql.VarChar, code.trim())
+            .query(`
+                SELECT TOP 1
+                    CustomerCode, 
+                    CustomerName, 
+                    ISNULL(Address1, '') AS Address1, 
+                    ISNULL(Address2, '') AS Address2, 
+                    ISNULL(Address3, '') AS Address3, 
+                    ISNULL(NricNo, '') AS NricNo, 
+                    ISNULL(CustomerType, 'N') AS CustomerType
+                FROM tblCustomer
+                WHERE CustomerCode = @CustomerCode
+            `);
+        if (result.recordset.length > 0) {
+            return res.json({ success: true, data: result.recordset[0] });
+        }
+        return res.json({ success: false, message: "Customer Not Found" });
+    } catch (err) {
+        return res.status(500).json({ success: false, message: "Server Error", error: err.message });
+    }
+});
+
+// ================= GET INVENTORY DETAIL FOR CODE (Matches txtInventoryCode_LostFocus & fncGetInventory in frmgpos.vb) =================
+router.get("/inventoryDetail", async (req, res) => {
+  try {
+    const pool = req.pool;
+    const { InventoryCode, CustomerCode, LocationCode } = req.query;
+
+    if (!InventoryCode || !InventoryCode.trim()) {
+      return res.status(400).json({ success: false, message: "InventoryCode is required." });
+    }
+
+    const trimmedCode = InventoryCode.trim();
+
+    const result = await pool.request()
+      .input("InventoryCode", sql.VarChar, trimmedCode)
+      .query(`
+        SELECT TOP 1
+          a.InventoryCode,
+          ISNULL(a.Description, '') AS Description,
+          ISNULL(a.ClassCode, '') AS ClassCode,
+          ISNULL(a.Weight, 0) AS Weight,
+          ISNULL(a.GoldLoss, 0) AS GoldLoss,
+          ISNULL(a.CostPerGram, 0) AS CostPerGram,
+          ISNULL(a.SMC, 0) AS SMC,
+          ISNULL(a.PMC, 0) AS PMC,
+          ISNULL(b.PCs, ISNULL(b.QtyOnHand, 1)) AS PCS,
+          ISNULL(a.TotalCost, 0) AS TotalCost,
+          ISNULL(a.StoneWeight, 0) AS StoneWeight,
+          ISNULL(a.LocationCode, 'HQ') AS LocationCode,
+          ISNULL(a.SalesBillNo, '') AS SalesBillNo,
+          a.SalesDate,
+          ISNULL(a.OrderNo, '') AS OrderNo,
+          ISNULL(b.QtyOnHand, 1) AS QtyOnHand,
+          ISNULL(b.QtySold, 0) AS QtySold,
+          ISNULL(c.SalesType, 'W') AS ClassSalesType,
+          ISNULL(c.Rate, a.CostPerGram) AS ClassRate,
+          ISNULL(c.MCDiscount, 0) AS MCDiscount
+        FROM tblInventory a
+        LEFT JOIN tblInventoryStock b ON a.InventoryCode = b.InventoryCode
+        LEFT JOIN tblClass c ON a.ClassCode = c.ClassCode
+        WHERE UPPER(LTRIM(RTRIM(a.InventoryCode))) = UPPER(LTRIM(RTRIM(@InventoryCode)))
+      `);
+
+    if (result.recordset.length === 0) {
+      return res.status(200).json({ success: false, message: "Inventory Not Found ..." });
+    }
+
+    const item = result.recordset[0];
+
+    // 1. Check if already sold
+    const isSold = (item.SalesBillNo && item.SalesBillNo.trim() !== '' && item.SalesBillNo.trim() !== '0');
+    if (isSold) {
+      let dateStr = '';
+      if (item.SalesDate) {
+        try {
+          const d = new Date(item.SalesDate);
+          dateStr = ` on ${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`;
+        } catch (_) {}
+      }
+      return res.status(200).json({
+        success: false,
+        message: `Item Already Sold for Invoice ${item.SalesBillNo || ''}${dateStr}`.trim()
+      });
+    }
+
+    // 2. Check stock on hand (only if tblInventoryStock has a record with QtyOnHand <= 0 and item has been sold)
+    if (item.QtyOnHand !== null && parseFloat(item.QtyOnHand) <= 0 && parseFloat(item.QtySold) > 0) {
+      return res.status(200).json({ success: false, message: "No Stock for this Inventory!" });
+    }
+
+    // 3. Location check
+    if (LocationCode && item.LocationCode && item.LocationCode.trim().toUpperCase() !== LocationCode.trim().toUpperCase()) {
+      return res.status(200).json({
+        success: false,
+        message: `The selected Inventory belongs to the Location - ${item.LocationCode}!`
+      });
+    }
+
+    // 4. Installment status check (checks tblInstallmentEntryDetail matching frmgpos.vb)
+    try {
+      const insRes = await pool.request()
+        .input("InventoryCode", sql.VarChar, trimmedCode)
+        .query(`SELECT TOP 1 InsAgreementNo FROM tblInstallmentEntryDetail WHERE UPPER(LTRIM(RTRIM(InventoryCode))) = UPPER(LTRIM(RTRIM(@InventoryCode)))`);
+      if (insRes.recordset.length > 0) {
+        return res.status(200).json({
+          success: false,
+          message: `This Inventory is in Installment Status! ${insRes.recordset[0].InsAgreementNo || ''}`.trim()
+        });
+      }
+    } catch (_) {
+      // If table doesn't exist or query fails, skip gracefully
+    }
+
+    // 5. Check if ordered for some other customer
+    if (item.OrderNo && item.OrderNo.trim() !== '') {
+      try {
+        const orderRes = await pool.request()
+          .input("OrderNo", sql.VarChar, item.OrderNo.trim())
+          .query(`
+            SELECT TOP 1 CustomerCode, RateFixed, CostPerGram 
+            FROM tblInventoryOrderHeader 
+            WHERE OrderNo = @OrderNo
+          `);
+        if (orderRes.recordset.length > 0) {
+          const ord = orderRes.recordset[0];
+          const orderCust = (ord.CustomerCode || '').trim().toUpperCase();
+          const currentCust = (CustomerCode || '').trim().toUpperCase();
+          if (currentCust && currentCust !== orderCust) {
+            return res.status(200).json({
+              success: false,
+              message: "This inventory is ordered for some other customer. you Cant sale this now."
+            });
+          }
+          if (ord.RateFixed === 'Y' && parseFloat(ord.CostPerGram) > 0) {
+            item.CostPerGram = parseFloat(ord.CostPerGram);
+          }
+        }
+      } catch (_) {
+        // Table may differ or not exist, gracefully continue
+      }
+    }
+
+    // 6. Check today's market rate for class
+    let dailyRate = item.ClassRate;
+    if (item.ClassCode) {
+      try {
+        const curDate = new Date().toISOString().slice(0, 10);
+        const rateRes = await pool.request()
+          .input("ClassCode", sql.VarChar, item.ClassCode)
+          .input("SalesDate", sql.Date, curDate)
+          .query(`
+            SELECT TOP 1 Rate 
+            FROM tblClassRate 
+            WHERE ClassCode = @ClassCode 
+            AND @SalesDate BETWEEN FromDate AND ToDate
+            ORDER BY FromDate DESC
+          `);
+        if (rateRes.recordset.length > 0 && parseFloat(rateRes.recordset[0].Rate) > 0) {
+          dailyRate = parseFloat(rateRes.recordset[0].Rate);
+        }
+      } catch (_) {}
+    }
+
+    item.DailyClassRate = dailyRate;
+    item.ClassRate = dailyRate;
+
+    return res.status(200).json({ success: true, data: item });
+  } catch (err) {
+    console.error("🔥 Inventory Detail Error:", err);
+    return res.status(200).json({ success: false, message: err.message || "Inventory Not Found ...", error: err.message });
+  }
 });
 
 // ================= GET INVENTORY FOR POS =================
@@ -764,53 +1246,107 @@ router.get("/audit/stats", async (req, res) => {
     try {
         const pool = req.pool;
 
-        let nextInvoiceNo = '';
+        let locationCode = 'HQ';
+        let rawNextInvoiceNo = '';
+
+        // 1. Fetch LocationCode and NextInvoice / NextInvoiceNo from tblCompany
         try {
-            const nextInvResult = await pool.request().query(`
-                SELECT TOP 1 NextInvoice FROM tblInvoiceNo WHERE Terminal = 'T1' OR LocationCode = 'HQ'
+            const compRes = await pool.request().query(`
+                SELECT TOP 1 LocationCode, NextInvoice, NextInvoiceNo, NextSalesNo FROM tblCompany
             `);
-            if (nextInvResult.recordset.length > 0 && nextInvResult.recordset[0].NextInvoice) {
-                nextInvoiceNo = nextInvResult.recordset[0].NextInvoice;
+            if (compRes.recordset.length > 0) {
+                const comp = compRes.recordset[0];
+                if (comp.LocationCode) locationCode = String(comp.LocationCode).trim();
+                rawNextInvoiceNo = comp.NextInvoice || comp.NextInvoiceNo || comp.NextSalesNo || '';
             }
-        } catch (e) {
-            // tblInvoiceNo may not exist; try tblCompany or MAX tblSalesHeader
+        } catch (ce) {}
+
+        // 2. If not found in tblCompany, check tblInvoiceNo
+        if (!rawNextInvoiceNo) {
             try {
-                const compRes = await pool.request().query(`
-                    SELECT TOP 1 NextInvoiceNo, NextSalesNo FROM tblCompany
+                const nextInvResult = await pool.request().query(`
+                    SELECT TOP 1 LocationCode, NextInvoice FROM tblInvoiceNo WHERE Terminal = 'T1' OR LocationCode = '${locationCode}'
                 `);
-                if (compRes.recordset.length > 0) {
-                    nextInvoiceNo = compRes.recordset[0].NextInvoiceNo || compRes.recordset[0].NextSalesNo || '';
-                }
-            } catch (e2) {}
-            
-            if (!nextInvoiceNo) {
-                try {
-                    const maxRes = await pool.request().query(`
-                        SELECT TOP 1 InvoiceNo FROM tblSalesHeader WHERE ISNUMERIC(InvoiceNo) = 1 ORDER BY CAST(InvoiceNo AS BIGINT) DESC
-                    `);
-                    if (maxRes.recordset.length > 0 && maxRes.recordset[0].InvoiceNo) {
-                        nextInvoiceNo = String(parseInt(maxRes.recordset[0].InvoiceNo, 10) + 1);
+                if (nextInvResult.recordset.length > 0 && nextInvResult.recordset[0].NextInvoice) {
+                    if (nextInvResult.recordset[0].LocationCode) {
+                        locationCode = String(nextInvResult.recordset[0].LocationCode).trim();
                     }
-                } catch (e3) {}
+                    rawNextInvoiceNo = nextInvResult.recordset[0].NextInvoice;
+                }
+            } catch (e) {}
+        }
+
+        // Query the last created bill from tblSalesHeader (as per frmgpos.vb / clsSalesMan.GetLastBillDetail)
+        let lastBill = {};
+        try {
+            const lastBillResult = await pool.request().query(`
+                SELECT TOP 1 A.InvoiceNo, A.NetTotal, A.SalesManCode, B.SalesManName 
+                FROM tblSalesHeader A 
+                LEFT JOIN tblSalesMan B ON A.SalesManCode = B.SalesManCode 
+                ORDER BY A.CreateDate DESC
+            `);
+            if (lastBillResult.recordset.length > 0) {
+                lastBill = lastBillResult.recordset[0];
+            }
+        } catch (lbe) {
+            try {
+                const fallbackRes = await pool.request().query(`
+                    SELECT TOP 1 InvoiceNo, SalesManCode, NetTotal 
+                    FROM tblSalesHeader 
+                    ORDER BY CreateDate DESC
+                `);
+                if (fallbackRes.recordset.length > 0) {
+                    lastBill = fallbackRes.recordset[0];
+                }
+            } catch (fe) {}
+        }
+
+        // Format LastBillNo with LocationCode (e.g., HQ01000143)
+        let formattedLastBillNo = '';
+        if (lastBill && lastBill.InvoiceNo) {
+            const rawBill = String(lastBill.InvoiceNo).trim();
+            if (rawBill.startsWith(locationCode)) {
+                const numPart = rawBill.slice(locationCode.length).replace(/\D/g, '');
+                formattedLastBillNo = `${locationCode}${numPart.padStart(8, '0')}`;
+            } else {
+                const numPart = rawBill.replace(/\D/g, '');
+                formattedLastBillNo = `${locationCode}${(numPart || '0').padStart(8, '0')}`;
             }
         }
 
-        const lastBillResult = await pool.request().query(`
-            SELECT TOP 1 InvoiceNo, SalesManCode, NetTotal 
-            FROM tblSalesHeader 
-            ORDER BY CreateDate DESC
-        `);
-        const lastBill = lastBillResult.recordset.length > 0 ? lastBillResult.recordset[0] : {};
+        // 3. Next invoice number logic:
+        // In legacy system: NextInvoice = LastBillNo + 1
+        let formattedNextInvoiceNo = '';
+        if (rawNextInvoiceNo) {
+            const strVal = String(rawNextInvoiceNo).trim();
+            if (strVal.startsWith(locationCode)) {
+                const numPart = strVal.slice(locationCode.length).replace(/\D/g, '');
+                formattedNextInvoiceNo = `${locationCode}${numPart.padStart(8, '0')}`;
+            } else {
+                const numPart = strVal.replace(/\D/g, '');
+                formattedNextInvoiceNo = `${locationCode}${(numPart || '1').padStart(8, '0')}`;
+            }
+        }
+
+        // If rawNextInvoiceNo equals the last bill or is missing, compute it as lastBill + 1
+        if (formattedLastBillNo) {
+            if (!formattedNextInvoiceNo || formattedNextInvoiceNo === formattedLastBillNo) {
+                const lastNum = parseInt(formattedLastBillNo.slice(locationCode.length).replace(/\D/g, ''), 10) || 0;
+                formattedNextInvoiceNo = `${locationCode}${String(lastNum + 1).padStart(8, '0')}`;
+            }
+        } else if (!formattedNextInvoiceNo) {
+            formattedNextInvoiceNo = `${locationCode}00000001`;
+        }
 
         return res.status(200).json({
             success: true,
             data: {
-                LocationCode: 'HQ',
+                LocationCode: locationCode,
                 TerminalCode: 'T1',
-                NextInvoiceNo: nextInvoiceNo || '',
-                LastSalesMan: lastBill.SalesManCode || '0',
-                LastBillNo: lastBill.InvoiceNo || '0',
-                LastBillAmount: lastBill.NetTotal ? Number(lastBill.NetTotal).toFixed(2) : '0.00'
+                NextInvoiceNo: formattedNextInvoiceNo,
+                LastSalesMan: lastBill.SalesManName || lastBill.SalesManCode || '0',
+                LastBillNo: formattedLastBillNo || lastBill.InvoiceNo || '0',
+                LastBillAmount: lastBill.NetTotal !== undefined && lastBill.NetTotal !== null ? Number(lastBill.NetTotal).toFixed(2) : '0.00'
             }
         });
     } catch (err) {

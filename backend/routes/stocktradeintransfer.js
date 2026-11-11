@@ -285,17 +285,38 @@ router.get("/fetch", async (req, res) => {
     const pool = await getPool(req);
     const cleanNo = transferNo.trim();
 
-    // Check Header using SELECT TOP 1 * and CONVERT(VARCHAR(50), TransferNo)
-    // to avoid "Error converting data type varchar to numeric"
-    const headerQuery = `
-      SELECT TOP 1 *
-      FROM tblInventoryTradeInTransferHeader
-      WHERE RTRIM(LTRIM(CONVERT(VARCHAR(50), TransferNo))) = @TransferNo
-    `;
+    // Check column type for TransferNo in Header to avoid conversion errors
+    const headerColTypes = await getTableColumnTypes(pool, 'tblInventoryTradeInTransferHeader');
+    const isHeaderTransferNoNumeric = isNumericType(headerColTypes['transferno']);
 
-    const headerRes = await pool.request()
-      .input("TransferNo", sql.VarChar(50), cleanNo)
-      .query(headerQuery);
+    const headerReq = pool.request();
+    let headerQuery = '';
+
+    if (isHeaderTransferNoNumeric) {
+      const numMatch = cleanNo.match(/\d+/g);
+      const numVal = numMatch ? parseInt(numMatch[numMatch.length - 1], 10) : null;
+      if (numVal !== null && !isNaN(numVal)) {
+        headerQuery = `
+          SELECT TOP 1 *
+          FROM tblInventoryTradeInTransferHeader
+          WHERE TransferNo = @TransferNoNum
+        `;
+        headerReq.input("TransferNoNum", sql.BigInt, numVal);
+      } else {
+        return res.json({ success: false, message: "Transfer number does not exist." });
+      }
+    } else {
+      headerQuery = `
+        SELECT TOP 1 *
+        FROM tblInventoryTradeInTransferHeader
+        WHERE RTRIM(LTRIM(TransferNo)) = @TransferNo
+           OR RTRIM(LTRIM(TransferNo)) = @TransferNoWithoutPrefix
+      `;
+      headerReq.input("TransferNo", sql.VarChar(50), cleanNo);
+      headerReq.input("TransferNoWithoutPrefix", sql.VarChar(50), cleanNo.replace(/^[A-Za-z]+-?[A-Za-z]*/, ''));
+    }
+
+    const headerRes = await headerReq.query(headerQuery);
 
     if (headerRes.recordset.length === 0) {
       return res.json({ success: false, message: "Transfer number does not exist." });
@@ -393,8 +414,19 @@ router.get("/past-list", async (req, res) => {
     }
 
     if (search && search.trim()) {
-      query += ` AND (RTRIM(LTRIM(CONVERT(VARCHAR(50), TransferNo))) LIKE @Search OR RTRIM(ToLocation) LIKE @Search OR RTRIM(Remarks) LIKE @Search)`;
-      request.input("Search", sql.VarChar(100), `%${search.trim()}%`);
+      const headerColTypes = await getTableColumnTypes(pool, 'tblInventoryTradeInTransferHeader');
+      const isHeaderTransferNoNumeric = isNumericType(headerColTypes['transferno']);
+      const searchTrim = search.trim();
+      const numMatch = searchTrim.match(/\d+/g);
+      const numVal = numMatch ? parseInt(numMatch[numMatch.length - 1], 10) : null;
+
+      if (isHeaderTransferNoNumeric && numVal !== null && !isNaN(numVal)) {
+        query += ` AND (TransferNo = @SearchNum OR RTRIM(ToLocation) LIKE @Search OR RTRIM(Remarks) LIKE @Search)`;
+        request.input("SearchNum", sql.BigInt, numVal);
+      } else {
+        query += ` AND (RTRIM(ToLocation) LIKE @Search OR RTRIM(Remarks) LIKE @Search)`;
+      }
+      request.input("Search", sql.VarChar(100), `%${searchTrim}%`);
     }
 
     query += ` ORDER BY TransferDate DESC`;
@@ -553,12 +585,20 @@ router.post("/transfer", async (req, res) => {
       getTableColumns(pool, 'tblInventoryMovement')
     ]);
 
+    const isHeaderTransferNoNumeric = isNumericType(headerColTypes['transferno']);
+    const isDetailTransferNoNumeric = isNumericType(detailColTypes['transferno']);
+    const isMovRefNoNumeric = isNumericType(movementColTypes['referenceno']);
+
+    const finalTransferNoHeader = isHeaderTransferNoNumeric ? nextNo : transferNo;
+    const finalTransferNoDetail = isDetailTransferNoNumeric ? nextNo : transferNo;
+    const finalTransferNoMov = isMovRefNoNumeric ? nextNo : transferNo;
+
     const fromLocStatusVal = isNumericType(headerColTypes['fromlocstatus']) ? 2 : "2";
     const toLocStatusVal = isNumericType(headerColTypes['tolocstatus']) ? 0 : "0";
 
     // 2. Insert into tblInventoryTradeInTransferHeader
     const headerObj = {
-      TransferNo: transferNo,
+      TransferNo: finalTransferNoHeader,
       TransferDate: !isNaN(tDate.getTime()) ? tDate : new Date(),
       FromLocation: loc,
       ToLocation: toLocation.trim(),
@@ -613,7 +653,7 @@ router.post("/transfer", async (req, res) => {
       const sizeStringVal = String(rawSize || '').trim();
 
       const detailObj = {
-        TransferNo: transferNo,
+        TransferNo: finalTransferNoDetail,
         InventoryCode: invCode,
         ClassCode: (item.ClassCode || '').trim(),
         CategoryCode: (item.CategoryCode || '').trim(),
@@ -703,7 +743,7 @@ router.post("/transfer", async (req, res) => {
           InventoryCode: invCode,
           Description: itemDesc,
           TransType: 'TO',
-          TransNo: transferNo,
+          TransNo: finalTransferNoMov,
           TransDate: new Date(),
           Qty: itemQty,
           Weight: itemWeight,
