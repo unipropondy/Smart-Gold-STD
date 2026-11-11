@@ -1359,6 +1359,7 @@ export default function TransferOutScreen() {
                     value={transferNo}
                     onChangeText={setTransferNo}
                     onBlur={() => transferNo && !isLocked && fetchTransferDetails(transferNo)}
+                    onSubmitEditing={() => transferNo && !isLocked && fetchTransferDetails(transferNo)}
                     placeholder="Auto-generated"
                     placeholderTextColor="#9E8D77"
                     editable={!isLocked}
