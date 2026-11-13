@@ -400,4 +400,198 @@ router.delete("/", async (req, res) => {
   }
 });
 
+// 5. GET Print Data matching frmDeposit.vb subPrintInstallment
+// Crystal Report: Reports/rptDeposit_HN.rpt
+// Selection: {tblDepositSave.DepositNo} = @DepositNo
+// PaymodeDetail: sPayModeDetail from tblPaymodeDetail (objSales.GetPayModeDetail)
+// Formula Fields: CompAddress1, CompAddress2, CompAddress3, Customer1, Customer2, Customer3, PaymodeDetail
+router.get("/print-data", async (req, res) => {
+  const depositNo = (req.query.depositNo || req.query.invoiceNo || "").trim();
+  if (!depositNo) {
+    return res.status(400).json({ success: false, message: "Deposit Number is required for printing." });
+  }
+
+  try {
+    const pool = await getPool(req);
+
+    // 1. Fetch Company Information
+    const compResult = await pool.request().query(`
+      SELECT TOP 1 Name, Address1, Address2, City, State, Country, Phone, Fax, CompanyShortCode, CurrencySign
+      FROM tblCompany
+    `);
+    const compRow = compResult.recordset[0] || {};
+    const company = {
+      name: (compRow.Name || "SMART").trim(),
+      address1: (compRow.Address1 || "").trim(),
+      address2: (compRow.Address2 || "").trim(),
+      city: (compRow.City || "").trim(),
+      state: (compRow.State || "").trim(),
+      country: (compRow.Country || "").trim(),
+      phone: (compRow.Phone || "").trim(),
+      fax: (compRow.Fax || "").trim(),
+      companyShortCode: (compRow.CompanyShortCode || "HN").trim(),
+      currencySign: (compRow.CurrencySign || "SGD").trim(),
+    };
+
+    // 2. Fetch Deposit Record (tblDepositSave joined with tblCustomer)
+    const depReq = pool.request();
+    depReq.input("DepositNo", sql.VarChar(50), depositNo);
+    const depResult = await depReq.query(`
+      SELECT 
+        d.DepositNo, d.DepositDate, d.CustomerCode, d.CustomerName as DepCustomerName,
+        d.SalesmanCode, d.TotalAmount, d.DepositAmount, d.AmountPaid, d.Remarks,
+        d.DepositUsed, d.InventoryCode, d.InventoryCode1, d.InventoryCode2,
+        d.CreateUser, d.CreateDate,
+        c.CustomerName as CustMasterName, c.Address1 as CustAddress1, c.Address2 as CustAddress2,
+        c.Address3 as CustAddress3, c.Phone1, c.Mobile, c.CustomerType
+      FROM tblDepositSave d
+      LEFT JOIN tblCustomer c ON RTRIM(LTRIM(c.CustomerCode)) = RTRIM(LTRIM(d.CustomerCode))
+      WHERE RTRIM(LTRIM(d.DepositNo)) = @DepositNo
+    `);
+
+    if (!depResult.recordset.length) {
+      return res.status(404).json({
+        success: false,
+        message: `Deposit record "${depositNo}" not found in database.`,
+      });
+    }
+
+    const row = depResult.recordset[0];
+
+    // 3. Fetch Linked Deposit Payment Details (tblDepositDetailSave)
+    const detailReq = pool.request();
+    detailReq.input("DepositNo", sql.VarChar(50), depositNo);
+    const detailResult = await detailReq.query(`
+      SELECT DepositNo, DepositPaymentNO, AmtPaid, Remarks, CreateUser, CreateDate, DepositPaymentDate
+      FROM tblDepositDetailSave
+      WHERE RTRIM(LTRIM(DepositNo)) = @DepositNo
+      ORDER BY CreateDate ASC
+    `);
+    const history = detailResult.recordset.map((h) => ({
+      DepositPaymentNo: (h.DepositPaymentNO || "").trim(),
+      AmtPaid: parseFloat(h.AmtPaid) || 0,
+      Remarks: (h.Remarks || "").trim(),
+      CreateUser: (h.CreateUser || "").trim(),
+      CreateDate: h.CreateDate,
+      DepositPaymentDate: h.DepositPaymentDate,
+    }));
+
+    // 4. Fetch PayMode Details using original objSales.GetPayModeDetail logic:
+    // SELECT PayMode, Amount FROM tblPaymodeDetail WHERE InvoiceNo = @DepositNo (and linked payment vouchers)
+    const pmReq = pool.request();
+    pmReq.input("DepositNo", sql.VarChar(50), depositNo);
+    const pmResult = await pmReq.query(`
+      SELECT PayMode, Amount, SlipNo, InvoiceNo
+      FROM tblPayModeDetail
+      WHERE RTRIM(LTRIM(InvoiceNo)) = @DepositNo
+         OR RTRIM(LTRIM(InvoiceNo)) IN (
+              SELECT RTRIM(LTRIM(DepositPaymentNO)) FROM tblDepositDetailSave WHERE RTRIM(LTRIM(DepositNo)) = @DepositNo
+         )
+      ORDER BY CreateDate ASC
+    `);
+
+    const payModes = pmResult.recordset.map((p) => ({
+      payMode: (p.PayMode || "").trim(),
+      amount: parseFloat(p.Amount) || 0,
+      slipNo: (p.SlipNo || "").trim(),
+      invoiceNo: (p.InvoiceNo || "").trim(),
+    }));
+
+    // Construct original VB.NET sPayModeDetail string:
+    // sPayModeDetail = sPayModeDetail & " " & Trim(dsClass.Tables(0).Rows(i)("PayMode") & "") & "             " & Trim(dsClass.Tables(0).Rows(i)("Amount") & "")
+    let sPayModeDetail = "";
+    if (payModes.length > 0) {
+      for (const pm of payModes) {
+        sPayModeDetail += (sPayModeDetail ? "   " : "") + `${pm.payMode}             ${pm.amount.toFixed(2)}`;
+      }
+    } else {
+      const depAmt = parseFloat(row.DepositAmount) || 0;
+      sPayModeDetail = `CASH             ${depAmt.toFixed(2)}`;
+    }
+
+    // 5. Fetch Gold Rates (Rate1, Rate2, Rate3 from tblClass)
+    const ratesResult = await pool.request().query(`
+      SELECT ClassCode, Rate FROM tblClass WHERE ClassCode IN ('24K', '22K', '835', '999', '916', '18K', 'SIL')
+    `);
+    const ratesMap = {};
+    ratesResult.recordset.forEach((r) => {
+      ratesMap[(r.ClassCode || "").trim().toUpperCase()] = r.Rate;
+    });
+
+    const rates = {
+      rate999: ratesMap["24K"] !== undefined ? ratesMap["24K"] : (ratesMap["999"] || 190),
+      rate916: ratesMap["22K"] !== undefined ? ratesMap["22K"] : (ratesMap["916"] || 176),
+      rate835: ratesMap["835"] !== undefined ? ratesMap["835"] : (ratesMap["18K"] || 0),
+    };
+
+    // 6. Linked Inventory Descriptions if any
+    const invCodes = [
+      (row.InventoryCode || "").trim(),
+      (row.InventoryCode1 || "").trim(),
+      (row.InventoryCode2 || "").trim(),
+    ].filter(Boolean);
+
+    let inventoryItems = [];
+    if (invCodes.length > 0) {
+      const invReq = pool.request();
+      const codeList = invCodes.map((c) => `'${c.replace(/'/g, "''")}'`).join(",");
+      const invRes = await invReq.query(`
+        SELECT InventoryCode, Description, Weight, TotalCost
+        FROM tblInventory
+        WHERE RTRIM(LTRIM(InventoryCode)) IN (${codeList})
+      `);
+      inventoryItems = invRes.recordset.map((item) => ({
+        inventoryCode: (item.InventoryCode || "").trim(),
+        description: (item.Description || "").trim(),
+        totalWeight: parseFloat(item.Weight) || 0,
+        totalCost: parseFloat(item.TotalCost) || 0,
+      }));
+    }
+
+    const deposit = {
+      DepositNo: (row.DepositNo || "").trim(),
+      DepositDate: row.DepositDate,
+      CustomerCode: (row.CustomerCode || "").trim(),
+      CustomerName: (row.CustMasterName || row.DepCustomerName || "").trim(),
+      Address1: (row.CustAddress1 || "").trim(),
+      Address2: (row.CustAddress2 || "").trim(),
+      Address3: (row.CustAddress3 || "").trim(),
+      Phone: (row.Mobile || row.Phone1 || "").trim(),
+      CustomerType: (row.CustomerType || "").trim(),
+      SalesmanCode: (row.SalesmanCode || "").trim(),
+      TotalAmount: parseFloat(row.TotalAmount) || 0,
+      DepositAmount: parseFloat(row.DepositAmount) || 0,
+      AmountPaid: parseFloat(row.AmountPaid) || 0,
+      Remarks: (row.Remarks || "").trim(),
+      DepositUsed: (row.DepositUsed || "N").trim(),
+      InventoryCode: (row.InventoryCode || "").trim(),
+      InventoryCode1: (row.InventoryCode1 || "").trim(),
+      InventoryCode2: (row.InventoryCode2 || "").trim(),
+      CreateUser: (row.CreateUser || "").trim(),
+      CreateDate: row.CreateDate,
+    };
+
+    res.json({
+      success: true,
+      data: {
+        company,
+        deposit,
+        history,
+        payModes,
+        sPayModeDetail,
+        rates,
+        inventoryItems,
+      },
+    });
+
+  } catch (err) {
+    console.error("Deposit Print Data Error:", err);
+    res.status(500).json({
+      success: false,
+      message: "Failed to retrieve deposit print data.",
+      error: err.message,
+    });
+  }
+});
+
 module.exports = router;

@@ -349,6 +349,7 @@ router.post("/pay", async (req, res) => {
       success: true,
       message: "Transaction Saved Successfully",
       installmentNo: activeInsNo,
+      invoiceNo: activeInsNo,
       isFullySettled
     });
   } catch (err) {
@@ -358,7 +359,161 @@ router.post("/pay", async (req, res) => {
   }
 });
 
-module.exports = router;
+// 6. GET Print & RePrint Data matching frmInstallmentPayment.vb subPrintInstallment
+// Selection Formula: {tblInstallmentDetail.InstallmentNo} = sInvoiceNo
+// Reports: rptInstallmentPayment_AJ.rpt / rptInstallmentPayment_MD.rpt / rptInstallmentPayment_MJ.rpt
+router.get("/print-data", async (req, res) => {
+  const installmentNo = (req.query.installmentNo || req.query.billNo || "").trim();
+  if (!installmentNo) {
+    return res.status(400).json({ success: false, message: "Please provide an Installment Number." });
+  }
+
+  try {
+    const pool = await getPool(req);
+
+    // 1. Fetch Company Information (tblCompany)
+    const compResult = await pool.request().query(`
+      SELECT TOP 1 Name, Address1, Address2, City, State, Country, Phone, Fax, CompanyShortCode, CurrencySign
+      FROM tblCompany
+    `);
+    const compRow = compResult.recordset[0] || {};
+    const company = {
+      name: (compRow.Name || "SMART").trim(),
+      address1: (compRow.Address1 || "").trim(),
+      address2: (compRow.Address2 || "").trim(),
+      city: (compRow.City || "").trim(),
+      state: (compRow.State || "").trim(),
+      country: (compRow.Country || "").trim(),
+      phone: (compRow.Phone || "").trim(),
+      fax: (compRow.Fax || "").trim(),
+      companyShortCode: (compRow.CompanyShortCode || "MJ").trim(),
+      currencySign: (compRow.CurrencySign || "SGD").trim(),
+    };
+
+    // 2. Fetch Installment Detail joined with Agreement Header and Customer
+    const detailReq = pool.request();
+    detailReq.input("InstallmentNo", sql.VarChar(50), installmentNo);
+    const detailResult = await detailReq.query(`
+      SELECT 
+        d.InstallmentNo, d.InsAgreementNo, d.InstallmentAmt, d.AmtPaid, d.InsPaid, d.Remarks as DetailRemarks,
+        d.CreateUser, d.CreateDate,
+        h.InvoiceNo, h.InvoiceDate, h.CustomerCode, h.Name as HeaderCustomerName,
+        h.Address1 as HeaderAddress1, h.Address2 as HeaderAddress2, h.Address3 as HeaderAddress3,
+        h.TotalCost, h.DepositAmt, h.AmtPaid as HeaderAmtPaid, h.TotalInstallment, h.InsPaid as HeaderInsPaid,
+        h.Remarks as HeaderRemarks, h.LocationCode, h.SalesMan,
+        c.CustomerName, c.Address1 as CustAddress1, c.Address2 as CustAddress2, c.Address3 as CustAddress3,
+        c.Phone1, c.Mobile, c.CustomerType
+      FROM tblInstallmentDetail d
+      LEFT JOIN tblInstallmentEntryHeader h ON RTRIM(LTRIM(h.InsAgreementNo)) = RTRIM(LTRIM(d.InsAgreementNo))
+      LEFT JOIN tblCustomer c ON RTRIM(LTRIM(c.CustomerCode)) = RTRIM(LTRIM(h.CustomerCode))
+      WHERE RTRIM(LTRIM(d.InstallmentNo)) = @InstallmentNo
+    `);
+
+    if (!detailResult.recordset.length) {
+      return res.status(404).json({
+        success: false,
+        message: `Installment Payment record for "${installmentNo}" not found in database.`,
+      });
+    }
+
+    const row = detailResult.recordset[0];
+    const agreementNo = (row.InsAgreementNo || "").trim();
+
+    // 3. Fetch Full Installment History for this agreement
+    let history = [];
+    if (agreementNo) {
+      const histReq = pool.request();
+      histReq.input("InsAgreementNo", sql.VarChar(50), agreementNo);
+      const histResult = await histReq.query(`
+        SELECT InstallmentNo, CreateDate, InsPaid, InstallmentAmt, AmtPaid, Remarks, CreateUser
+        FROM tblInstallmentDetail
+        WHERE RTRIM(LTRIM(InsAgreementNo)) = @InsAgreementNo
+        ORDER BY CreateDate ASC, InstallmentNo ASC
+      `);
+      history = histResult.recordset.map((h) => ({
+        InstallmentNo: (h.InstallmentNo || "").trim(),
+        CreateDate: h.CreateDate,
+        InsPaid: h.InsPaid || 1,
+        InstallmentAmt: parseFloat(h.InstallmentAmt) || 0,
+        AmtPaid: parseFloat(h.AmtPaid) || 0,
+        Remarks: (h.Remarks || "").trim(),
+        CreateUser: (h.CreateUser || "").trim(),
+      }));
+    }
+
+    // 4. Fetch Gold Rates (Rate1, Rate2, Rate3 from tblClass)
+    const ratesResult = await pool.request().query(`
+      SELECT ClassCode, Rate FROM tblClass WHERE ClassCode IN ('24K', '22K', '835', '999', '916', '18K', 'SIL')
+    `);
+    const ratesMap = {};
+    ratesResult.recordset.forEach((r) => {
+      ratesMap[(r.ClassCode || "").trim().toUpperCase()] = r.Rate;
+    });
+
+    const rates = {
+      rate999: ratesMap["24K"] !== undefined ? ratesMap["24K"] : (ratesMap["999"] || 190),
+      rate916: ratesMap["22K"] !== undefined ? ratesMap["22K"] : (ratesMap["916"] || 176),
+      rate835: ratesMap["835"] !== undefined ? ratesMap["835"] : (ratesMap["18K"] || 0),
+    };
+
+    // 5. Fetch PayMode Details (tblPayModeDetail) if recorded
+    const payModeReq = pool.request();
+    payModeReq.input("InvoiceNo", sql.VarChar(50), installmentNo);
+    const payModeResult = await payModeReq.query(`
+      SELECT PayMode, Amount FROM tblPayModeDetail WHERE RTRIM(LTRIM(InvoiceNo)) = @InvoiceNo
+    `);
+    const payModes = payModeResult.recordset.map((p) => ({
+      payMode: (p.PayMode || "").trim(),
+      amount: parseFloat(p.Amount) || 0,
+    }));
+
+    // Construct response
+    const payment = {
+      InstallmentNo: (row.InstallmentNo || "").trim(),
+      InsAgreementNo: agreementNo,
+      InstallmentAmt: parseFloat(row.InstallmentAmt) || 0,
+      AmtPaid: parseFloat(row.AmtPaid) || 0,
+      InsPaid: row.InsPaid || 1,
+      Remarks: (row.DetailRemarks || "").trim(),
+      CreateUser: (row.CreateUser || "").trim(),
+      CreateDate: row.CreateDate,
+      // Agreement Header Details
+      CustomerCode: (row.CustomerCode || "").trim(),
+      CustomerName: (row.CustomerName || row.HeaderCustomerName || "").trim(),
+      CustomerAddress1: (row.CustAddress1 || row.HeaderAddress1 || "").trim(),
+      CustomerAddress2: (row.CustAddress2 || row.HeaderAddress2 || "").trim(),
+      CustomerAddress3: (row.CustAddress3 || row.HeaderAddress3 || "").trim(),
+      CustomerPhone: (row.Mobile || row.Phone1 || "").trim(),
+      CustomerType: (row.CustomerType || "").trim(),
+      TotalCost: parseFloat(row.TotalCost) || 0,
+      DepositAmt: parseFloat(row.DepositAmt) || 0,
+      HeaderAmtPaid: parseFloat(row.HeaderAmtPaid) || 0,
+      TotalInstallment: row.TotalInstallment || 0,
+      HeaderInsPaid: row.HeaderInsPaid || 0,
+      HeaderRemarks: (row.HeaderRemarks || "").trim(),
+      LocationCode: (row.LocationCode || "").trim(),
+      SalesMan: (row.SalesMan || "").trim(),
+    };
+
+    res.json({
+      success: true,
+      data: {
+        company,
+        payment,
+        history,
+        rates,
+        payModes,
+      },
+    });
+  } catch (err) {
+    console.error("Installment Print Data Error:", err);
+    res.status(500).json({
+      success: false,
+      message: "Failed to retrieve installment print data.",
+      error: err.message,
+    });
+  }
+});
 
 module.exports = router;
 

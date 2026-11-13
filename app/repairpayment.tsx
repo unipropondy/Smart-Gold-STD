@@ -1,8 +1,9 @@
 import { ThemedText } from '@/components/themed-text';
 import { API_BASE_URL } from '@/constants/api';
 import { useThemeColors } from '@/hooks/useThemeColors';
+import { UNIPRO_LOGO_DATA_URI } from '@/utils/uniproLogo';
 import { Ionicons } from '@expo/vector-icons';
-import { Stack, useRouter } from 'expo-router';
+import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -24,10 +25,13 @@ const API_URL = `${API_BASE_URL}/repairpayment`;
 export default function RepairPaymentScreen() {
   const themeColors = useThemeColors();
   const router = useRouter();
+  const params = useLocalSearchParams();
 
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+
+  const repairNoInputRef = useRef<any>(null);
 
   // Form State
   const [repairNo, setRepairNo] = useState('');
@@ -114,28 +118,644 @@ export default function RepairPaymentScreen() {
     setHistoryList([]);
   };
 
-  const handleReprint = async () => {
-    const targetNo = (reprintRepairNo || repairNo || '').trim();
-    if (!targetNo) {
-      showToast('Please enter Repair No to reprint', 'error');
+  // Handle return from payingmode after save
+  useEffect(() => {
+    if (params?.paymentSuccess === 'true') {
+      const savedNo = (params.repairNo as string) || (params.savedInvoiceNo as string) || repairNo;
+      if (savedNo && savedNo.trim()) {
+        const cleanNo = savedNo.trim();
+        subPrintRepair(cleanNo, false);
+        fetchBalance(cleanNo);
+      }
+    }
+  }, [params?.paymentSuccess]);
+
+  // Original subPrintRepair implementation (matching VB.NET subPrintRepair in frmRepairPayment)
+  // Crystal Report: rptRepairInvoice_AJ.rpt
+  // Selection: {tblInventoryRepairHeader.RepairNo} = sInvoiceNo
+  // Copies: 2
+  const subPrintRepair = async (targetInvoiceNo: string, isReprintMode: boolean = false) => {
+    const sInvoiceNo = (targetInvoiceNo || '').trim();
+    if (!sInvoiceNo) {
+      showToast('Please enter OrderNo.', 'error');
+      repairNoInputRef.current?.focus?.();
       return;
     }
-    setLoading(true);
+
     try {
-      const res = await fetch(`${API_URL}/reprint/${encodeURIComponent(targetNo)}`);
+      setLoading(true);
+
+      let company: any = { name: '', address1: '', address2: '', country: '', phone: '', fax: '' };
+      let header: any = null;
+      let details: any[] = [];
+      let payments: any[] = [];
+      let rates: any = { rate999: '', rate916: '', rate835: '' };
+
+      // 1. Fetch actual data from backend SQL Server
+      const res = await fetch(`${API_URL}/print-data?repairNo=${encodeURIComponent(sInvoiceNo)}`);
       const json = await res.json();
-      if (json.success) {
-        showToast(`Repair voucher for ${targetNo} found. Printing receipt...`, 'success');
-        setIsReprintModalVisible(false);
-        setReprintRepairNo('');
+
+      if (json.success && json.data) {
+        company = json.data.company || company;
+        header = json.data.header || {};
+        details = json.data.details || [];
+        payments = json.data.payments || [];
+        rates = json.data.rates || rates;
       } else {
-        showToast(json.message || 'Repair docket not found for reprinting', 'error');
+        showToast(json.message || `Repair docket ${sInvoiceNo} not found for print.`, 'error');
+        setLoading(false);
+        return;
       }
-    } catch (err) {
-      showToast('Error loading receipt', 'error');
+
+      // Singapore Print Date & Time (Asia/Singapore)
+      const now = new Date();
+      const sgDateStr = now.toLocaleDateString('en-GB', {
+        timeZone: 'Asia/Singapore',
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+      });
+      const sgTimeStr = now.toLocaleTimeString('en-US', {
+        timeZone: 'Asia/Singapore',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: true,
+      });
+
+      const sCompanyname = (company.name || 'SMART GOLD').trim();
+      const sAddress = [company.address1, company.address2, company.country].filter(Boolean).join(' ');
+      const sPhone = (company.phone || '').trim();
+      const sFax = (company.fax || '').trim();
+      const isDuplicateCopy = Boolean(isReprintMode && company.companyShortCode === 'HN');
+      const sReportTitle = isDuplicateCopy ? 'Duplicate Copy' : 'REPAIR INVOICE / REPAIR DOCKET';
+
+      // Customer info mapping (formula fields: Customer1, Customer2, Customer3)
+      const sCustomerName = (header.CustomerName || customerName || '').trim();
+      const sCustomerCode = (header.CustomerCode || customerCode || '').trim();
+      const sCustomerAddress1 = (header.CustomerAddress1 || header.Address1 || '').trim();
+      const sCustomerAddress2 = (header.CustomerAddress2 || header.Address2 || '').trim();
+      const sCustomerAddress3 = (header.CustomerAddress3 || header.Address3 || '').trim();
+      const sCustomerPhone = (header.CustomerPhone || header.Phone || '').trim();
+
+      // Financial figures
+      const totalEstimatedCost = parseFloat(header.TotalCostEstimated ?? estimatedCost) || 0;
+      const advancePaidAmt = parseFloat(header.AdvancePaid ?? advancePaid) || 0;
+
+      // Calculate total paid across payment history
+      let totalInstallmentsPaid = 0;
+      payments.forEach((p: any) => {
+        totalInstallmentsPaid += parseFloat(p.AmountPaid) || 0;
+      });
+      const grandTotalPaid = advancePaidAmt + totalInstallmentsPaid;
+      const balanceDue = totalEstimatedCost - grandTotalPaid;
+
+      // Format date helper
+      const formatDate = (val: any) => {
+        if (!val) return '-';
+        const d = new Date(val);
+        if (isNaN(d.getTime())) return String(val).split('T')[0] || '-';
+        return d.toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' });
+      };
+
+      const repairDateFormatted = formatDate(header.RepairDate || new Date());
+      const deliveryDateFormatted = formatDate(header.DeliveryDate || header.DateOfDelivery);
+
+      // Build Details Table Rows
+      let detailRowsHtml = '';
+      if (details.length > 0) {
+        details.forEach((item: any, idx: number) => {
+          const itemNo = item.LineNo || item.OrderInventoryCode || idx + 1;
+          const desc = item.Description || item.RepairDescription || '-';
+          const weight = parseFloat(item.WeightEstimated || item.Weight || 0).toFixed(3);
+          const cost = parseFloat(item.EstimatedCost || item.Cost || item.TotalCost || 0).toFixed(2);
+          detailRowsHtml += `
+            <tr>
+              <td style="text-align: center;">${itemNo}</td>
+              <td style="text-align: left; font-weight: 600;">${desc}</td>
+              <td style="text-align: right;">${weight}</td>
+              <td style="text-align: right; font-weight: 700;">$${cost}</td>
+            </tr>
+          `;
+        });
+      } else {
+        detailRowsHtml = `
+          <tr>
+            <td style="text-align: center;">1</td>
+            <td style="text-align: left; font-weight: 600;">REPAIR / SERVICE CHARGES</td>
+            <td style="text-align: right;">0.000</td>
+            <td style="text-align: right; font-weight: 700;">$${totalEstimatedCost.toFixed(2)}</td>
+          </tr>
+        `;
+      }
+
+      // Build Payment History Breakdown
+      let paymentHistoryHtml = '';
+      if (payments.length > 0) {
+        let pRows = '';
+        payments.forEach((p: any, pIdx: number) => {
+          const pNo = p.RepairPaymentNo || `P-${pIdx + 1}`;
+          const pDate = formatDate(p.CreateDate);
+          const pAmt = parseFloat(p.AmountPaid || 0).toFixed(2);
+          const pRem = p.Remarks || 'REPAIR PAYMENT';
+          pRows += `
+            <tr>
+              <td style="text-align: center;">${pNo}</td>
+              <td style="text-align: center;">${pDate}</td>
+              <td style="text-align: left;">${pRem}</td>
+              <td style="text-align: right; font-weight: 600;">$${pAmt}</td>
+            </tr>
+          `;
+        });
+        paymentHistoryHtml = `
+          <div style="margin-top: 10px;">
+            <div style="font-size: 11px; font-weight: 700; color: #5c4a28; text-transform: uppercase; margin-bottom: 3px; letter-spacing: 0.5px;">
+              Settlement / Payment Transactions:
+            </div>
+            <table class="report-table" style="font-size: 10.5px;">
+              <thead>
+                <tr>
+                  <th style="width: 25%; text-align: center;">Receipt / Payment No</th>
+                  <th style="width: 20%; text-align: center;">Date</th>
+                  <th style="width: 35%; text-align: left;">Remarks</th>
+                  <th style="width: 20%; text-align: right;">Amount Paid</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${pRows}
+              </tbody>
+            </table>
+          </div>
+        `;
+      }
+
+      // Single copy page markup generator
+      const generatePageMarkup = (copyLabel: string) => `
+        <div class="page-sheet">
+          <!-- TOP HEADER SECTION -->
+          <div class="header-row">
+            <div class="header-left">
+              <img src="${UNIPRO_LOGO_DATA_URI}" alt="UNIPRO" class="unipro-logo-img" />
+            </div>
+
+            <div class="header-center">
+              <div class="company-title">${sCompanyname}</div>
+              ${sAddress ? `<div class="company-address">${sAddress}</div>` : ''}
+              ${sPhone ? `<div class="company-address" style="margin-top: 2px;">TEL: ${sPhone}${sFax ? ` &nbsp; FAX: ${sFax}` : ''}</div>` : ''}
+            </div>
+
+            <div class="header-right">
+              <div class="page-num-text">PAGE : 1</div>
+              <div class="copy-tag">${copyLabel}</div>
+            </div>
+          </div>
+
+          <!-- REPORT TITLE BAR -->
+          <div class="title-bar">
+            <span class="report-title-text">${sReportTitle}</span>
+          </div>
+
+          <!-- PRINT TIMESTAMP -->
+          <div class="timestamp-row">
+            <span>Printed: ${sgDateStr}, ${sgTimeStr}</span>
+          </div>
+
+          <!-- DOCKET METADATA SECTION -->
+          <div class="meta-section">
+            <table class="meta-table">
+              <tr>
+                <td class="meta-lbl" style="width: 15%;">Repair No</td>
+                <td class="meta-val" style="width: 35%; font-weight: 700; color: #996515;">: &nbsp; ${sInvoiceNo}</td>
+                <td class="meta-lbl" style="width: 16%;">Repair Date</td>
+                <td class="meta-val" style="width: 34%;">: &nbsp; ${repairDateFormatted}</td>
+              </tr>
+              <tr>
+                <td class="meta-lbl">Cust Code</td>
+                <td class="meta-val">: &nbsp; ${sCustomerCode || '-'}</td>
+                <td class="meta-lbl">Target Delivery</td>
+                <td class="meta-val">: &nbsp; ${deliveryDateFormatted}</td>
+              </tr>
+              <tr>
+                <td class="meta-lbl">Customer Name</td>
+                <td class="meta-val" style="font-weight: 700;">: &nbsp; ${sCustomerName || '-'}</td>
+                <td class="meta-lbl">Customer Phone</td>
+                <td class="meta-val">: &nbsp; ${sCustomerPhone || '-'}</td>
+              </tr>
+              <tr>
+                <td class="meta-lbl">Customer Address</td>
+                <td class="meta-val" colspan="3">: &nbsp; ${[sCustomerAddress1, sCustomerAddress2, sCustomerAddress3].filter(Boolean).join(', ') || '-'}</td>
+              </tr>
+              ${header.Remarks ? `
+              <tr>
+                <td class="meta-lbl">Remarks</td>
+                <td class="meta-val" colspan="3">: &nbsp; ${header.Remarks}</td>
+              </tr>
+              ` : ''}
+            </table>
+          </div>
+
+          <!-- REPAIR ITEMS TABLE -->
+          <div class="table-container">
+            <table class="report-table">
+              <thead>
+                <tr>
+                  <th style="width: 10%; text-align: center;">Item #</th>
+                  <th style="width: 55%; text-align: left;">Item Description / Service Work</th>
+                  <th style="width: 15%; text-align: right;">Weight (g)</th>
+                  <th style="width: 20%; text-align: right;">Estimated Cost</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${detailRowsHtml}
+              </tbody>
+            </table>
+          </div>
+
+          <!-- SETTLEMENT SUMMARY & FINANCIALS -->
+          <div style="display: flex; gap: 16px; margin-top: 10px; align-items: flex-start;">
+            <div style="flex: 1.2;">
+              ${paymentHistoryHtml}
+            </div>
+
+            <div style="flex: 1; border: 1px solid #c9b084; background: #fffdf8; padding: 8px 12px; border-radius: 4px;">
+              <div style="font-size: 11px; font-weight: 700; color: #5c4a28; text-transform: uppercase; margin-bottom: 6px; letter-spacing: 0.5px; border-bottom: 1px solid #e0d0b0; padding-bottom: 3px;">
+                Financial Settlement Summary
+              </div>
+              <table style="width: 100%; font-size: 11px; font-family: Cambria, Georgia, serif;">
+                <tr>
+                  <td style="padding: 2px 0; color: #4a3b22;">Total Estimated Cost:</td>
+                  <td style="padding: 2px 0; text-align: right; font-weight: 700;">$${totalEstimatedCost.toFixed(2)}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 2px 0; color: #4a3b22;">Advance Paid:</td>
+                  <td style="padding: 2px 0; text-align: right; color: #2e7d32; font-weight: 600;">$${advancePaidAmt.toFixed(2)}</td>
+                </tr>
+                ${totalInstallmentsPaid > 0 ? `
+                <tr>
+                  <td style="padding: 2px 0; color: #4a3b22;">Subsequent Payments:</td>
+                  <td style="padding: 2px 0; text-align: right; color: #2e7d32; font-weight: 600;">$${totalInstallmentsPaid.toFixed(2)}</td>
+                </tr>
+                ` : ''}
+                <tr style="border-top: 1px dashed #c9b084;">
+                  <td style="padding: 4px 0 2px; font-weight: 700; color: #3b2d17;">Total Amount Paid:</td>
+                  <td style="padding: 4px 0 2px; text-align: right; font-weight: 700; color: #2e7d32;">$${grandTotalPaid.toFixed(2)}</td>
+                </tr>
+                <tr style="border-top: 1px solid #996515;">
+                  <td style="padding: 4px 0 2px; font-weight: 700; color: #996515; font-size: 12px;">Balance Due:</td>
+                  <td style="padding: 4px 0 2px; text-align: right; font-weight: 700; color: ${balanceDue > 0 ? '#b71c1c' : '#2e7d32'}; font-size: 12px;">$${(balanceDue > 0 ? balanceDue : 0).toFixed(2)}</td>
+                </tr>
+              </table>
+            </div>
+          </div>
+
+          <!-- SIGNATURE BOXES (Customer & Authorized Store Officer) -->
+          <div class="sig-section">
+            <div class="sig-box">
+              <div class="sig-line"></div>
+              <div class="sig-label">Customer Signature</div>
+            </div>
+
+            <div class="sig-box">
+              <div class="sig-line"></div>
+              <div class="sig-label">Authorized Signature / Store Officer</div>
+            </div>
+          </div>
+
+          <!-- PINNED FOOTER -->
+          <div class="footer-pinned">
+            <div class="footer-rule"></div>
+            <div class="footer-gen-text">*** System Generated Report ***</div>
+            <div class="footer-brand-text">Powered by Unipro SG</div>
+          </div>
+        </div>
+      `;
+
+      // Full HTML with 2 copies (matching CR.PrintToPrinter(2, True, 0, 0))
+      const printHtml = `
+        <!DOCTYPE html>
+        <html>
+          <head>
+            <meta charset="utf-8" />
+            <title>${sReportTitle} - ${sInvoiceNo}</title>
+            <style>
+              @page {
+                size: A4 portrait;
+                margin: 0 !important;
+              }
+              html, body {
+                margin: 0;
+                padding: 0;
+                background-color: #f7f5f0;
+                font-family: Cambria, Georgia, "Times New Roman", serif !important;
+                color: #3b2d17;
+                -webkit-print-color-adjust: exact !important;
+                print-color-adjust: exact !important;
+              }
+              .page-sheet {
+                width: 210mm;
+                min-height: 297mm;
+                margin: 15px auto;
+                background: #ffffff;
+                padding: 10mm 12mm;
+                box-sizing: border-box;
+                display: flex;
+                flex-direction: column;
+                font-family: Cambria, Georgia, "Times New Roman", serif !important;
+                box-shadow: 0 4px 14px rgba(0,0,0,0.08);
+                page-break-after: always;
+              }
+              .page-sheet:last-child {
+                page-break-after: auto;
+              }
+
+              /* HEADER SECTION */
+              .header-row {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                margin-bottom: 6px;
+                position: relative;
+              }
+              .header-left {
+                width: 140px;
+                display: flex;
+                align-items: center;
+              }
+              .header-left img.unipro-logo-img {
+                max-height: 48px;
+                max-width: 135px;
+                object-fit: contain;
+                display: block;
+              }
+              .header-center {
+                flex: 1;
+                text-align: center;
+                padding: 0 10px;
+              }
+              .company-title {
+                font-family: Cambria, Georgia, "Times New Roman", serif !important;
+                font-size: 24px;
+                font-weight: 700;
+                color: #996515;
+                letter-spacing: 2px;
+                text-transform: uppercase;
+                margin-bottom: 3px;
+                line-height: 1.15;
+              }
+              .company-address {
+                font-family: Cambria, Georgia, "Times New Roman", serif !important;
+                font-size: 11px;
+                color: #4a3b22;
+                font-weight: 700;
+                letter-spacing: 0.5px;
+                text-transform: uppercase;
+                line-height: 1.3;
+              }
+              .header-right {
+                width: 140px;
+                text-align: right;
+                display: flex;
+                flex-direction: column;
+                justify-content: center;
+                align-items: flex-end;
+              }
+              .page-num-text {
+                font-size: 12px;
+                font-weight: 700;
+                color: #3b2d17;
+                letter-spacing: 0.5px;
+              }
+              .copy-tag {
+                display: inline-block;
+                margin-top: 4px;
+                padding: 2px 8px;
+                background-color: #f6ecdc;
+                border: 1px solid #d4af37;
+                border-radius: 3px;
+                font-size: 10px;
+                font-weight: 700;
+                color: #7d5e19;
+                letter-spacing: 0.8px;
+                text-transform: uppercase;
+              }
+
+              /* TITLE BAR */
+              .title-bar {
+                text-align: center;
+                margin: 6px 0 2px;
+                padding: 3px 0;
+              }
+              .report-title-text {
+                font-family: Cambria, Georgia, "Times New Roman", serif !important;
+                font-size: 14px;
+                font-weight: 700;
+                color: #5c4a28;
+                letter-spacing: 1.5px;
+                text-decoration: underline;
+                text-underline-offset: 3px;
+                text-transform: uppercase;
+              }
+
+              /* PRINT TIMESTAMP */
+              .timestamp-row {
+                text-align: right;
+                font-size: 10px;
+                color: #6d5b3d;
+                font-style: italic;
+                margin-bottom: 6px;
+              }
+
+              /* METADATA CARD */
+              .meta-section {
+                border: 1px solid #bfa573;
+                border-radius: 4px;
+                background-color: #fffefb;
+                padding: 6px 10px;
+                margin-bottom: 10px;
+              }
+              .meta-table {
+                width: 100%;
+                border-collapse: collapse;
+              }
+              .meta-table td {
+                padding: 2px 4px;
+                font-size: 11.5px;
+                vertical-align: top;
+                line-height: 1.3;
+              }
+              .meta-lbl {
+                font-weight: 700;
+                color: #4a3b22;
+              }
+              .meta-val {
+                color: #2b1f0e;
+              }
+
+              /* TABLE CONTAINER */
+              .table-container {
+                margin-bottom: 6px;
+              }
+              table.report-table {
+                width: 100%;
+                border-collapse: collapse;
+                border: 1px solid #bfa573;
+              }
+              table.report-table th {
+                background-color: #f6ecdc;
+                color: #4a3b22;
+                font-weight: 700;
+                font-size: 11px;
+                padding: 5px 6px;
+                border: 1px solid #bfa573;
+                text-transform: uppercase;
+                letter-spacing: 0.5px;
+              }
+              table.report-table td {
+                padding: 5px 6px;
+                font-size: 11px;
+                border: 1px solid #e8dcb8;
+                color: #2b1f0e;
+                vertical-align: middle;
+              }
+              table.report-table tbody tr:nth-child(even) {
+                background-color: #fffdf9;
+              }
+
+              /* SIGNATURE SECTION */
+              .sig-section {
+                margin-top: 30px;
+                display: flex;
+                justify-content: space-between;
+                padding: 0 20px;
+              }
+              .sig-box {
+                width: 220px;
+                text-align: center;
+              }
+              .sig-line {
+                border-bottom: 1px dotted #5c4a28;
+                height: 36px;
+                margin-bottom: 4px;
+              }
+              .sig-label {
+                font-size: 11px;
+                font-weight: 700;
+                color: #4a3b22;
+                text-transform: uppercase;
+                letter-spacing: 0.5px;
+              }
+
+              /* PINNED FOOTER */
+              .footer-pinned {
+                margin-top: auto;
+                padding-top: 10px;
+                text-align: center;
+              }
+              .footer-rule {
+                border-top: 1px solid #c9b084;
+                margin-bottom: 4px;
+              }
+              .footer-gen-text {
+                font-size: 10px;
+                color: #7d6847;
+                letter-spacing: 1px;
+                font-style: italic;
+              }
+              .footer-brand-text {
+                font-size: 9px;
+                color: #9e8d72;
+                letter-spacing: 0.5px;
+                margin-top: 1px;
+              }
+
+              /* PRINT OPTIMIZATION */
+              @media print {
+                body {
+                  background: none !important;
+                }
+                .page-sheet {
+                  width: 100% !important;
+                  min-height: 297mm !important;
+                  height: 100% !important;
+                  margin: 0 !important;
+                  padding: 10mm 12mm 10mm 12mm !important;
+                  box-shadow: none !important;
+                  box-sizing: border-box !important;
+                  display: flex !important;
+                  flex-direction: column !important;
+                  page-break-after: always !important;
+                }
+                .page-sheet:last-child {
+                  page-break-after: auto !important;
+                }
+              }
+            </style>
+          </head>
+          <body>
+            ${generatePageMarkup('CUSTOMER COPY')}
+            ${generatePageMarkup('OFFICE COPY')}
+            <script>
+              window.onload = function() {
+                setTimeout(function() {
+                  window.print();
+                }, 300);
+              };
+            </script>
+          </body>
+        </html>
+      `;
+
+      if (Platform.OS === 'web' && typeof window !== 'undefined') {
+        const printWindow = window.open('', '_blank', 'width=900,height=750');
+        if (printWindow) {
+          printWindow.document.open();
+          printWindow.document.write(printHtml);
+          printWindow.document.close();
+          showToast('Repair Invoice report preview opened', 'success');
+        } else {
+          const blob = new Blob([printHtml], { type: 'text/html;charset=utf-8;' });
+          const url = URL.createObjectURL(blob);
+          const win = window.open(url, '_blank');
+          if (!win) {
+            showToast('Popup blocker prevented opening print preview. Please allow popups.', 'error');
+          } else {
+            showToast('Repair Invoice report preview opened', 'success');
+          }
+        }
+      } else {
+        showToast('Print preview generated.', 'success');
+      }
+
+    } catch (err: any) {
+      console.error('Print Error:', err);
+      showToast('Error generating print preview: ' + (err.message || 'Error'), 'error');
     } finally {
       setLoading(false);
     }
+  };
+
+  // RePrint button click handler (matching frmRepairPayment btnPrint_Click)
+  // If txtOrderNo.Text.Trim = "" Then MsgBox("Please enter OrderNo.") : txtOrderNo.Focus() : Exit Sub
+  // If Trim(txtOrderNo.Text) <> "" Then Call subPrintRepair(Trim(txtOrderNo.Text))
+  const handlePrintClick = () => {
+    const cleanNo = (repairNo || '').trim();
+    if (!cleanNo) {
+      showToast('Please enter OrderNo.', 'error');
+      repairNoInputRef.current?.focus?.();
+      return;
+    }
+    subPrintRepair(cleanNo, true);
+  };
+
+  // Modal RePrint submit handler (if user enters repair no into modal)
+  const handleReprintSubmit = async () => {
+    const targetNo = (reprintRepairNo || repairNo || '').trim();
+    if (!targetNo) {
+      showToast('Please enter OrderNo.', 'error');
+      return;
+    }
+    setIsReprintModalVisible(false);
+    setReprintRepairNo('');
+    subPrintRepair(targetNo, true);
   };
 
   const handleOpenRepairLookup = async () => {
@@ -294,11 +914,9 @@ export default function RepairPaymentScreen() {
 
           <TouchableOpacity
             style={[styles.actionBtn, styles.reprintBtn]}
-            onPress={() => {
-              setReprintRepairNo(repairNo);
-              setIsReprintModalVisible(true);
-            }}
+            onPress={handlePrintClick}
             activeOpacity={0.8}
+            disabled={saving || loading}
           >
             <Ionicons name="print-outline" size={14} color="#5C4A28" />
             <ThemedText style={styles.clearBtnText}>RePrint</ThemedText>
@@ -363,6 +981,7 @@ export default function RepairPaymentScreen() {
                   <ThemedText style={styles.inlineFieldLabel}>Repair No *</ThemedText>
                   <View style={styles.inputWithLookup}>
                     <TextInput
+                      ref={repairNoInputRef}
                       style={[styles.formInput, styles.inputAttached, { flex: 1 }]}
                       value={repairNo}
                       onChangeText={setRepairNo}
@@ -752,7 +1371,7 @@ export default function RepairPaymentScreen() {
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={[styles.actionBtn, styles.saveBtn, { paddingHorizontal: 16, height: 36 }]}
-                  onPress={handleReprint}
+                  onPress={handleReprintSubmit}
                 >
                   <Ionicons name="print-outline" size={15} color="#9E6D08" />
                   <ThemedText style={styles.saveBtnText}>Print</ThemedText>

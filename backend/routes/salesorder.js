@@ -385,6 +385,107 @@ router.post("/", async (req, res) => {
   }
 });
 
+// GET Sales Order Print Data matching subPrintSalesOrder(sTransferNo) in frmSalesOrder.vb
+router.get("/print-data/:salesOrderNo", async (req, res) => {
+  try {
+    const { salesOrderNo } = req.params;
+    const cleanNo = (salesOrderNo || "").trim();
+
+    if (!cleanNo) {
+      return res.status(400).json({ success: false, message: "SalesOrder Number Should not be Empty" });
+    }
+
+    const pool = req.pool || (await poolPromise);
+
+    // 1. Fetch Company details matching clsCompany1.getCompanyName
+    const compRes = await pool.request().query("SELECT TOP 1 * FROM tblCompany");
+    const rawCompany = compRes.recordset[0] || {};
+    const company = {
+      name: String(rawCompany.Name || rawCompany.CompanyName || "").trim(),
+      address1: String(rawCompany.Address1 || "").trim(),
+      address2: String(rawCompany.Address2 || "").trim(),
+      city: String(rawCompany.City || "").trim(),
+      state: String(rawCompany.State || "").trim(),
+      country: String(rawCompany.Country || "").trim(),
+      phone: String(rawCompany.Phone || "").trim(),
+      fax: String(rawCompany.Fax || "").trim(),
+      companyShortCode: String(rawCompany.CompanyShortCode || "").trim(),
+      currencySign: String(rawCompany.CurrencySign || "SGD").trim()
+    };
+
+    // 2. Fetch Header Information
+    const headerRes = await pool.request()
+      .input("SalesOrderNo", sql.VarChar, cleanNo)
+      .query(`
+        SELECT h.*, s.SupplierName
+        FROM tblSalesOrderHeader h
+        LEFT JOIN tblSupplier s ON h.SupplierCode = s.SupplierCode
+        WHERE h.SalesOrderNo = @SalesOrderNo
+      `);
+
+    const header = headerRes.recordset.length > 0 ? headerRes.recordset[0] : null;
+
+    // 3. Fetch Detail Information using the exact selection formula:
+    // {tblSalesOrderDetail.SalesOrderNo} = sTransferNo
+    const detailRes = await pool.request()
+      .input("SalesOrderNo", sql.VarChar, cleanNo)
+      .query(`
+        SELECT 
+          d.*,
+          c.CategoryName,
+          ct.CatalogueName
+        FROM tblSalesOrderDetail d
+        LEFT JOIN tblCategory c ON d.CategoryCode = c.CategoryCode
+        LEFT JOIN tblCatalogue ct ON d.CatalogueCode = ct.CatalogueCode
+        WHERE d.SalesOrderNo = @SalesOrderNo
+        ORDER BY d.CategoryCode ASC, d.CatalogueCode ASC
+      `);
+
+    const details = detailRes.recordset;
+
+    if (!header && details.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: `No Sales Order records found for Sales Order No: ${cleanNo}`
+      });
+    }
+
+    // Formulas matching VB.NET Crystal Reports:
+    // CompAddress1: sCompanyname
+    // CompAddress2: Address1 & " " & Address2 & " " & Country
+    // CompAddress3: sPhone
+    // CompAddress4: sFax
+    // ReportTitle: "Transfer Note"
+    // RPTSELECTION: sSelectFld
+    const compAddress1 = company.name;
+    const compAddress2 = [company.address1, company.address2, company.country].filter(Boolean).join(" ");
+    const compAddress3 = company.phone;
+    const compAddress4 = company.fax;
+    const reportTitle = "Transfer Note";
+    const rptSelection = "";
+
+    res.json({
+      success: true,
+      data: {
+        company,
+        formulas: {
+          CompAddress1: compAddress1,
+          CompAddress2: compAddress2,
+          CompAddress3: compAddress3,
+          CompAddress4: compAddress4,
+          ReportTitle: reportTitle,
+          RPTSELECTION: rptSelection
+        },
+        header: header || { SalesOrderNo: cleanNo },
+        details: details || []
+      }
+    });
+  } catch (err) {
+    console.error("Fetch Sales Order print data error:", err);
+    res.status(500).json({ success: false, message: "Database Error", error: err.message });
+  }
+});
+
 // DELETE Sales Order
 router.delete("/:salesOrderNo", async (req, res) => {
   const pool = req.pool || (await poolPromise);

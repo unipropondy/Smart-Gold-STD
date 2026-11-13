@@ -109,7 +109,7 @@ router.post("/save", async (req, res) => {
     `);
 
     await transaction.commit();
-    res.json({ success: true, message: "PayOut detail saved successfully.", data: payOutNo });
+    res.json({ success: true, message: "PayOut detail saved successfully.", data: payOutNo, payoutNo: payOutNo });
 
   } catch (err) {
     console.error("Save Payout Transaction Error:", err);
@@ -119,6 +119,119 @@ router.post("/save", async (req, res) => {
       console.error("Rollback failed:", rErr);
     }
     res.status(500).json({ success: false, message: "Database transaction failed", error: err.message });
+  }
+});
+
+// 3. GET /api/payout/print-data?payoutNo=...
+// Crystal Report: Reports/rptPayOut.rpt
+// Selection: {tblPayoutdetail.PayOutNo} = @PayOutNo
+// Formula Fields: CompAddress1, CompAddress2, CompAddress3
+router.get("/print-data", async (req, res) => {
+  const payoutNo = (req.query.payoutNo || req.query.invoiceNo || "").trim();
+  if (!payoutNo) {
+    return res.status(400).json({ success: false, message: "PayOut Number is required." });
+  }
+
+  try {
+    const pool = await getPool(req);
+
+    // 1. Fetch Company Information matching objClsCompany.getCompanyName
+    const compResult = await pool.request().query(`
+      SELECT TOP 1 Name, Address1, Address2, City, State, Country, Phone, Fax, CompanyShortCode, CurrencySign
+      FROM tblCompany
+    `);
+    const compRow = compResult.recordset[0] || {};
+    const company = {
+      name: (compRow.Name || "SMART").trim(),
+      address1: (compRow.Address1 || "").trim(),
+      address2: (compRow.Address2 || "").trim(),
+      city: (compRow.City || "").trim(),
+      state: (compRow.State || "").trim(),
+      country: (compRow.Country || "").trim(),
+      phone: (compRow.Phone || "").trim(),
+      fax: (compRow.Fax || "").trim(),
+      companyShortCode: (compRow.CompanyShortCode || "MJ").trim(),
+      currencySign: (compRow.CurrencySign || "SGD").trim(),
+    };
+
+    // 2. Fetch PayOut Detail matching {tblPayoutdetail.PayOutNo} = sInvoiceNo
+    const payoutReq = pool.request();
+    payoutReq.input("PayOutNo", sql.VarChar(50), payoutNo);
+    const payoutResult = await payoutReq.query(`
+      SELECT 
+        PayOutNo, PayOutDate, Code, Description, PayOutDescription,
+        Amount, Remarks, CreateUser, CreateDate, ModifyUser, ModifyDate
+      FROM tblPayOutDetail
+      WHERE RTRIM(LTRIM(PayOutNo)) = @PayOutNo
+    `);
+
+    if (!payoutResult.recordset.length) {
+      return res.status(404).json({
+        success: false,
+        message: `PayOut record "${payoutNo}" not found in database.`,
+      });
+    }
+
+    const row = payoutResult.recordset[0];
+
+    // 3. Fetch linked Paymode if recorded in tblPayModeDetail
+    const pmReq = pool.request();
+    pmReq.input("InvoiceNo", sql.VarChar(50), payoutNo);
+    const pmResult = await pmReq.query(`
+      SELECT PayMode, Amount, SlipNo
+      FROM tblPayModeDetail
+      WHERE RTRIM(LTRIM(InvoiceNo)) = @InvoiceNo
+    `);
+    const payModes = pmResult.recordset.map((p) => ({
+      payMode: (p.PayMode || "").trim(),
+      amount: Math.abs(parseFloat(p.Amount) || 0),
+      slipNo: (p.SlipNo || "").trim(),
+    }));
+
+    // 4. Fetch Gold Rates (Rate1, Rate2, Rate3 from tblClass) for standard gold strip
+    const ratesResult = await pool.request().query(`
+      SELECT ClassCode, Rate FROM tblClass WHERE ClassCode IN ('24K', '22K', '835', '999', '916', '18K', 'SIL')
+    `);
+    const ratesMap = {};
+    ratesResult.recordset.forEach((r) => {
+      ratesMap[(r.ClassCode || "").trim().toUpperCase()] = r.Rate;
+    });
+
+    const rates = {
+      rate999: ratesMap["24K"] !== undefined ? ratesMap["24K"] : (ratesMap["999"] || 190),
+      rate916: ratesMap["22K"] !== undefined ? ratesMap["22K"] : (ratesMap["916"] || 176),
+      rate835: ratesMap["835"] !== undefined ? ratesMap["835"] : (ratesMap["18K"] || 0),
+    };
+
+    const payout = {
+      PayOutNo: (row.PayOutNo || "").trim(),
+      PayOutDate: row.PayOutDate || row.CreateDate,
+      Code: (row.Code || "").trim(),
+      Description: (row.Description || "").trim(),
+      PayOutDescription: (row.PayOutDescription || "").trim(),
+      Amount: parseFloat(row.Amount) || 0,
+      Remarks: (row.Remarks || "").trim(),
+      CreateUser: (row.CreateUser || "sys").trim(),
+      CreateDate: row.CreateDate,
+    };
+
+    res.json({
+      success: true,
+      data: {
+        company,
+        payout,
+        payModes,
+        rates,
+      },
+    });
+
+  } catch (err) {
+    console.error("PayOut Print Data Error:", err);
+    res.status(500).json({
+      success: false,
+      message: "Failed to retrieve payout print data.",
+      error: err.message,
+    });
   }
 });
 

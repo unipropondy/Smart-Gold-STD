@@ -324,7 +324,7 @@ router.post("/proceed", async (req, res) => {
     );
 
     await transaction.commit();
-    res.json({ success: true, message: "Tradein Gold Issued Sucessfully" });
+    res.json({ success: true, message: "Tradein Gold Issued Sucessfully", tradeIssueNo: sIssueNo });
 
   } catch (err) {
     try {
@@ -332,6 +332,143 @@ router.post("/proceed", async (req, res) => {
     } catch (rbErr) {}
     console.error("TradeIn Issue Save Error:", err);
     res.status(500).json({ success: false, message: "Error in save", error: err.message });
+  }
+});
+
+// 6. GET /api/tradeinissue/print-data
+// Original Crystal Report: rptTradeInGoldIssue.rpt / rptTradeInGoldIssue_HN.rpt
+// Selection: {tblTradeIssueHistory.TradeIssueNo} = @TradeIssueNo
+// Title: "Trade In Issue Report For " & sTradeInIssueNo
+router.get("/print-data", async (req, res) => {
+  try {
+    const { issueNo } = req.query;
+    if (!issueNo || !issueNo.trim()) {
+      return res.status(400).json({ success: false, message: "Trade Issue Number is required for print." });
+    }
+
+    const pool = await getPool(req);
+    const cleanNo = issueNo.trim();
+
+    // 1. Fetch Company Information matching objClsCompany.getCompanyName
+    const compRes = await pool.request().query("SELECT TOP 1 * FROM tblCompany");
+    const rawCompany = compRes.recordset[0] || {};
+    const company = {
+      name: String(rawCompany.Name || rawCompany.CompanyName || '').trim(),
+      address1: String(rawCompany.Address1 || '').trim(),
+      address2: String(rawCompany.Address2 || '').trim(),
+      city: String(rawCompany.City || '').trim(),
+      state: String(rawCompany.State || '').trim(),
+      country: String(rawCompany.Country || '').trim(),
+      phone: String(rawCompany.Phone || '').trim(),
+      fax: String(rawCompany.Fax || '').trim(),
+      companyShortCode: String(rawCompany.CompanyShortCode || '').trim().toUpperCase(),
+    };
+
+    // 2. Query tblTradeIssueHistoryHeader
+    let header = null;
+    try {
+      const qHdr = `
+        SELECT TOP 1 
+          h.*,
+          RTRIM(LTRIM(ISNULL(s.SupplierName, ''))) AS SupplierName,
+          RTRIM(LTRIM(ISNULL(s.Address1, ''))) AS SupplierAddress1,
+          RTRIM(LTRIM(ISNULL(s.Address2, ''))) AS SupplierAddress2
+        FROM tblTradeIssueHistoryHeader h
+        LEFT JOIN tblSupplier s ON RTRIM(LTRIM(h.SupplierCode)) = RTRIM(LTRIM(s.SupplierCode))
+        WHERE RTRIM(LTRIM(h.TradeIssueNo)) = @TradeIssueNo
+      `;
+      const resHdr = await pool.request().input("TradeIssueNo", sql.VarChar(50), cleanNo).query(qHdr);
+      if (resHdr.recordset.length > 0) {
+        header = resHdr.recordset[0];
+      }
+    } catch (eHdr) {}
+
+    // 3. Query tblTradeIssueHistory (used by rptTradeInGoldIssue selection formula)
+    let historyRows = [];
+    try {
+      const qHist = `
+        SELECT 
+          th.*,
+          RTRIM(LTRIM(ISNULL(s.SupplierName, ''))) AS SupplierName,
+          RTRIM(LTRIM(ISNULL(s.Address1, ''))) AS SupplierAddress1,
+          RTRIM(LTRIM(ISNULL(s.Address2, ''))) AS SupplierAddress2
+        FROM tblTradeIssueHistory th
+        LEFT JOIN tblSupplier s ON RTRIM(LTRIM(th.SupplierCode)) = RTRIM(LTRIM(s.SupplierCode))
+        WHERE RTRIM(LTRIM(th.TradeIssueNo)) = @TradeIssueNo
+        ORDER BY th.CreateDate ASC
+      `;
+      const resHist = await pool.request().input("TradeIssueNo", sql.VarChar(50), cleanNo).query(qHist);
+      historyRows = resHist.recordset;
+    } catch (eHist) {}
+
+    // If no header row found in tblTradeIssueHistoryHeader, build header from tblTradeIssueHistory
+    if (!header && historyRows.length > 0) {
+      const first = historyRows[0];
+      let sumWeight = 0;
+      let sumPrice = 0;
+      historyRows.forEach(r => {
+        sumWeight += parseFloat(r.TotalWeight || r.IssuedWeight || 0);
+        sumPrice += parseFloat(r.TotalCost || r.Amount || 0);
+      });
+
+      header = {
+        TradeIssueNo: cleanNo,
+        TradeIssueDate: first.CreateDate,
+        SupplierCode: first.SupplierCode,
+        SupplierName: first.SupplierName,
+        SupplierAddress1: first.SupplierAddress1,
+        SupplierAddress2: first.SupplierAddress2,
+        TotalNoOfBills: historyRows.length,
+        TotalWeight: sumWeight,
+        CostPerGram: parseFloat(first.CostPerGram || 0),
+        TotalPrice: sumPrice,
+        Remarks: first.Remarks || '',
+      };
+    }
+
+    // 4. Query linked bills from tblTradeInHeader if any were assigned to this TradeIssueNo
+    let tradeBills = [];
+    try {
+      const qBills = `
+        SELECT 
+          InvoiceNo,
+          InventoryCode,
+          CustomerCode,
+          CustomerName,
+          CostPerGram,
+          TotalWeight,
+          IssuedWeight,
+          BalanceWeight,
+          TotalCost,
+          Amount,
+          Remarks,
+          CreateDate
+        FROM tblTradeInHeader
+        WHERE RTRIM(LTRIM(TradeIssueNo)) = @TradeIssueNo
+        ORDER BY InvoiceNo ASC
+      `;
+      const resBills = await pool.request().input("TradeIssueNo", sql.VarChar(50), cleanNo).query(qBills);
+      tradeBills = resBills.recordset;
+    } catch (eBills) {}
+
+    if (!header && historyRows.length === 0 && tradeBills.length === 0) {
+      return res.status(404).json({ success: false, message: `Trade In Issue record not found for: ${cleanNo}` });
+    }
+
+    res.json({
+      success: true,
+      data: {
+        company,
+        reportTitle: `Trade In Issue Report For ${cleanNo}`,
+        header: header || { TradeIssueNo: cleanNo },
+        history: historyRows,
+        tradeBills: tradeBills,
+      }
+    });
+
+  } catch (error) {
+    console.error("Trade In Issue Print Data Error:", error);
+    res.status(500).json({ success: false, message: "Error fetching trade issue print data: " + error.message });
   }
 });
 

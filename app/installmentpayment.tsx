@@ -1,8 +1,9 @@
 import { ThemedText } from '@/components/themed-text';
 import { API_BASE_URL } from '@/constants/api';
 import { useThemeColors } from '@/hooks/useThemeColors';
+import { UNIPRO_LOGO_DATA_URI } from '@/utils/uniproLogo';
 import { Ionicons } from '@expo/vector-icons';
-import { Stack, useRouter } from 'expo-router';
+import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useEffect, useState, useRef } from 'react';
 import {
   ActivityIndicator,
@@ -25,9 +26,12 @@ const FLEXI_API_URL = `${API_BASE_URL}/paymententry/flexi`;
 export default function InstallmentPaymentScreen() {
   const themeColors = useThemeColors();
   const router = useRouter();
+  const params = useLocalSearchParams();
 
   const [loading, setLoading] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+
+  const reprintInputRef = useRef<any>(null);
 
   // Form State
   const [agreementNo, setAgreementNo] = useState('');
@@ -289,14 +293,656 @@ export default function InstallmentPaymentScreen() {
     }
   };
 
-  const handleReprintBill = () => {
-    if (!reprintBillNo || reprintBillNo.trim() === '') {
-      showToast('Please enter the Installment Bill No to RePrint!', 'error');
+  // Original Print Function matching subPrintInstallment(ByVal sInvoiceNo As String) in frmInstallmentPayment.vb
+  // Company specific report:
+  // If Trim(sCompanyShortCode) = "AJ" Then rptInstallmentPayment_AJ.rpt
+  // ElseIf Trim(sCompanyShortCode) = "MD" Then rptInstallmentPayment_MD.rpt
+  // ElseIf Trim(sCompanyShortCode) = "MJ" Then rptInstallmentPayment_MJ.rpt
+  // Selection: {tblInstallmentDetail.InstallmentNo} = sInvoiceNo
+  // Copies: 2 (Customer Copy and Office Copy)
+  const subPrintInstallment = async (targetInstallmentNo: string, isReprintMode: boolean = false) => {
+    const sInvoiceNo = (targetInstallmentNo || '').trim();
+    if (!sInvoiceNo) {
       return;
     }
-    showToast(`RePrinting Installment Bill: ${reprintBillNo}`, 'success');
-    setIsReprintModalVisible(false);
+
+    try {
+      setLoading(true);
+
+      let company: any = { name: '', address1: '', address2: '', city: '', state: '', country: '', phone: '', fax: '', companyShortCode: '' };
+      let payment: any = null;
+      let history: any[] = [];
+      let rates: any = { rate999: '', rate916: '', rate835: '' };
+      let payModes: any[] = [];
+
+      // 1. Fetch actual data from backend SQL Server
+      const res = await fetch(`${API_URL}/print-data?installmentNo=${encodeURIComponent(sInvoiceNo)}`);
+      const json = await res.json();
+
+      if (json.success && json.data) {
+        company = json.data.company || company;
+        payment = json.data.payment || {};
+        history = json.data.history || [];
+        rates = json.data.rates || rates;
+        payModes = json.data.payModes || [];
+      } else {
+        showToast(json.message || `Installment payment voucher ${sInvoiceNo} not found for print.`, 'error');
+        setLoading(false);
+        return;
+      }
+
+      // Singapore Print Date & Time (Asia/Singapore)
+      const now = new Date();
+      const sgDateStr = now.toLocaleDateString('en-GB', {
+        timeZone: 'Asia/Singapore',
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+      });
+      const sgTimeStr = now.toLocaleTimeString('en-US', {
+        timeZone: 'Asia/Singapore',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: true,
+      });
+
+      // Original Formula Field Values from frmInstallmentPayment.vb:
+      // CompAddress1: CompName
+      // CompAddress2: Address1 & " " & Address2 & " " & Country
+      // CompAddress3: PhoneNo & " " & FaxNo
+      // Customer1: txtCustomerName.Text
+      // Customer2: txtAddress1.Text
+      // Customer3: txtAddress2.Text
+      // Rate1: s999
+      // Rate2: s916
+      // Rate3: s835
+      const sCompanyName = (company.name || 'SMART').trim();
+      const sCompAddress2 = [company.address1, company.address2, company.country].filter(Boolean).join(' ');
+      const sCompAddress3 = [company.phone, company.fax].filter(Boolean).join(' ');
+
+      const sCustomerName = (payment.CustomerName || customerName || '').trim();
+      const sCustomerCode = (payment.CustomerCode || customerCode || '').trim();
+      const sCustomerAddress1 = (payment.CustomerAddress1 || address || '').trim();
+      const sCustomerAddress2 = (payment.CustomerAddress2 || '').trim();
+      const sCustomerPhone = (payment.CustomerPhone || '').trim();
+
+      const s999 = rates.rate999 || '-';
+      const s916 = rates.rate916 || '-';
+      const s835 = rates.rate835 || '-';
+
+      const sAgreementNo = (payment.InsAgreementNo || agreementNo || '').trim();
+      const sInstallmentNo = (payment.InstallmentNo || sInvoiceNo).trim();
+      const currentAmtPaid = parseFloat(payment.AmtPaid) || 0;
+      const currentInsAmt = parseFloat(payment.InstallmentAmt) || 0;
+      const totalAgreementCost = parseFloat(payment.TotalCost) || parseFloat(salesAmount) || 0;
+      const depositAmt = parseFloat(payment.DepositAmt) || parseFloat(depositAmount) || 0;
+
+      // Compute total installment payments made to date from history
+      let totalInstallmentsPaid = 0;
+      history.forEach((h: any) => {
+        totalInstallmentsPaid += parseFloat(h.AmtPaid) || 0;
+      });
+      const grandTotalPaid = depositAmt + totalInstallmentsPaid;
+      const balanceDue = totalAgreementCost - grandTotalPaid;
+
+      // Format date helper
+      const formatDate = (val: any) => {
+        if (!val) return '-';
+        const d = new Date(val);
+        if (isNaN(d.getTime())) return String(val).split('T')[0] || '-';
+        return d.toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' });
+      };
+
+      const paymentDateFormatted = formatDate(payment.CreateDate || new Date());
+
+      // Print copy count: 2 copies (Customer Copy and Office Copy)
+      // Crystal Report Title:
+      // AJ: rptInstallmentPayment_AJ.rpt | MD: rptInstallmentPayment_MD.rpt | MJ: rptInstallmentPayment_MJ.rpt
+      const sReportTitle = isReprintMode ? 'INSTALLMENT PAYMENT RECEIPT (DUPLICATE COPY)' : 'INSTALLMENT PAYMENT RECEIPT';
+
+      // Generate HTML for each copy
+      const generatePageMarkup = (copyLabel: string) => {
+        return `
+          <div class="page-sheet">
+            <!-- BRAND / HEADER -->
+            <div class="report-header">
+              <div class="header-brand">
+                <img src="${UNIPRO_LOGO_DATA_URI}" alt="Logo" class="brand-logo" />
+                <div class="brand-details">
+                  <div class="company-name">${sCompanyName}</div>
+                  <div class="company-address">${sCompAddress2}</div>
+                  ${sCompAddress3 ? `<div class="company-address">${sCompAddress3}</div>` : ''}
+                </div>
+              </div>
+              <div class="header-meta">
+                <div class="report-badge">${sReportTitle}</div>
+                <div class="copy-tag">${copyLabel}</div>
+                <div class="doc-no">VOUCHER NO: <span>${sInstallmentNo}</span></div>
+                <div class="meta-date">Date: ${paymentDateFormatted} &nbsp;|&nbsp; ${sgTimeStr}</div>
+              </div>
+            </div>
+
+            <!-- GOLD RATES BANNER (Formula Fields: Rate1, Rate2, Rate3) -->
+            <div class="gold-rate-strip">
+              <div class="rate-cell"><span class="rate-lbl">Gold 999:</span> <span class="rate-val">$${s999}/g</span></div>
+              <div class="rate-divider">|</div>
+              <div class="rate-cell"><span class="rate-lbl">Gold 916 (22K):</span> <span class="rate-val">$${s916}/g</span></div>
+              <div class="rate-divider">|</div>
+              <div class="rate-cell"><span class="rate-lbl">Gold 835 (20K):</span> <span class="rate-val">$${s835}/g</span></div>
+            </div>
+
+            <!-- TWO-COLUMN INFO: CUSTOMER vs INSTALLMENT AGREEMENT -->
+            <div class="info-grid">
+              <!-- Customer Box (Formula Fields: Customer1, Customer2, Customer3) -->
+              <div class="info-card">
+                <div class="card-title">CUSTOMER DETAILS</div>
+                <div class="info-row"><span class="info-lbl">Customer:</span> <span class="info-val font-bold">${sCustomerName || 'CASH CUSTOMER'}</span></div>
+                <div class="info-row"><span class="info-lbl">Cust Code:</span> <span class="info-val">${sCustomerCode || '-'}</span></div>
+                <div class="info-row"><span class="info-lbl">Address 1:</span> <span class="info-val">${sCustomerAddress1 || '-'}</span></div>
+                ${sCustomerAddress2 ? `<div class="info-row"><span class="info-lbl">Address 2:</span> <span class="info-val">${sCustomerAddress2}</span></div>` : ''}
+                ${sCustomerPhone ? `<div class="info-row"><span class="info-lbl">Contact:</span> <span class="info-val">${sCustomerPhone}</span></div>` : ''}
+              </div>
+
+              <!-- Installment Agreement Box -->
+              <div class="info-card">
+                <div class="card-title">AGREEMENT SPECIFICATION</div>
+                <div class="info-row"><span class="info-lbl">Agreement No:</span> <span class="info-val font-bold">${sAgreementNo}</span></div>
+                <div class="info-row"><span class="info-lbl">Installment Paid:</span> <span class="info-val">${payment.InsPaid || 1} installment(s)</span></div>
+                <div class="info-row"><span class="info-lbl">Installment Amt:</span> <span class="info-val font-bold">$ ${currentInsAmt.toFixed(2)}</span></div>
+                <div class="info-row"><span class="info-lbl">Pay Mode:</span> <span class="info-val font-bold">${payModes.length > 0 ? payModes.map((p: any) => p.payMode).join(', ') : 'CASH'}</span></div>
+                <div class="info-row"><span class="info-lbl">Remarks:</span> <span class="info-val">${payment.Remarks || '-'}</span></div>
+              </div>
+            </div>
+
+            <!-- CURRENT PAYMENT VOUCHER HIGHLIGHT -->
+            <div class="current-payment-card">
+              <div class="payment-title">PAYMENT RECEIVED THIS VOUCHER</div>
+              <div class="payment-amount">$ ${currentAmtPaid.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+            </div>
+
+            <!-- PAYMENT HISTORY / ACCUMULATED LEDGER -->
+            <div class="section-heading">INSTALLMENT PAYMENT HISTORY / STATEMENT</div>
+            <table class="receipt-table">
+              <thead>
+                <tr>
+                  <th style="width: 8%; text-align: center;">#</th>
+                  <th style="width: 25%; text-align: left;">Installment Voucher</th>
+                  <th style="width: 20%; text-align: center;">Date</th>
+                  <th style="width: 15%; text-align: center;">Ins Paid</th>
+                  <th style="width: 17%; text-align: right;">Installment Amt ($)</th>
+                  <th style="width: 15%; text-align: right;">Amount Paid ($)</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${
+                  history.length > 0
+                    ? history
+                        .map(
+                          (h: any, idx: number) => `
+                        <tr class="${h.InstallmentNo === sInstallmentNo ? 'highlight-row' : ''}">
+                          <td style="text-align: center;">${idx + 1}</td>
+                          <td style="text-align: left; font-weight: 600;">${h.InstallmentNo} ${h.InstallmentNo === sInstallmentNo ? '*(This Voucher)*' : ''}</td>
+                          <td style="text-align: center;">${formatDate(h.CreateDate)}</td>
+                          <td style="text-align: center;">${h.InsPaid || 1}</td>
+                          <td style="text-align: right;">$${parseFloat(h.InstallmentAmt || 0).toFixed(2)}</td>
+                          <td style="text-align: right; font-weight: 700;">$${parseFloat(h.AmtPaid || 0).toFixed(2)}</td>
+                        </tr>
+                      `
+                        )
+                        .join('')
+                    : `<tr><td colspan="6" style="text-align: center; color: #888; padding: 10px;">Initial Deposit Voucher: $${depositAmt.toFixed(2)}</td></tr>`
+                }
+              </tbody>
+            </table>
+
+            <!-- SUMMARY FINANCIAL BALANCES -->
+            <div class="summary-box">
+              <div class="summary-row">
+                <span class="sum-lbl">Total Agreement Value:</span>
+                <span class="sum-val font-bold">$ ${totalAgreementCost.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+              </div>
+              <div class="summary-row">
+                <span class="sum-lbl">Initial Deposit Paid:</span>
+                <span class="sum-val">$ ${depositAmt.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+              </div>
+              <div class="summary-row">
+                <span class="sum-lbl">Total Installments Paid To Date:</span>
+                <span class="sum-val font-bold" style="color: #0F5132;">$ ${totalInstallmentsPaid.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+              </div>
+              <div class="summary-divider"></div>
+              <div class="summary-row grand-total-row">
+                <span class="sum-lbl font-bold" style="font-size: 13px;">REMAINING BALANCE DUE:</span>
+                <span class="sum-val font-bold" style="font-size: 15px; color: ${balanceDue <= 0.01 ? '#0F5132' : '#842029'};">
+                  $ ${balanceDue > 0 ? balanceDue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '0.00 (FULLY SETTLED)'}
+                </span>
+              </div>
+            </div>
+
+            <!-- SIGNATURE SECTION -->
+            <div class="signature-section">
+              <div class="sign-card">
+                <div class="sign-header">CUSTOMER ACKNOWLEDGEMENT</div>
+                <div class="sign-row">Customer Name: ${sCustomerName || '...............................'}</div>
+                <div class="sign-row" style="margin-top: 14px;">Signature: ....................................................</div>
+              </div>
+              <div class="sign-card">
+                <div class="sign-header">AUTHORIZED STORE OFFICER</div>
+                <div class="sign-row">Received By: ${payment.CreateUser || 'Staff'}</div>
+                <div class="sign-row" style="margin-top: 14px;">Signature: ....................................................</div>
+              </div>
+            </div>
+
+            <!-- FOOTER -->
+            <div class="report-footer">
+              <div class="footer-divider"></div>
+              <div class="footer-gen-text">*** System Generated Installment Payment Receipt ***</div>
+              <div class="footer-powered">Powered by Unipro SG</div>
+            </div>
+          </div>
+        `;
+      };
+
+      // 2 copies (Customer Copy and Office Copy) matching CR.PrintToPrinter(2, True, 0, 0)
+      const printPagesHtml = `
+        ${generatePageMarkup('CUSTOMER COPY')}
+        ${generatePageMarkup('OFFICE COPY')}
+      `;
+
+      const printHtml = `
+        <!DOCTYPE html>
+        <html>
+          <head>
+            <meta charset="utf-8" />
+            <title>Installment Payment Receipt - ${sInstallmentNo}</title>
+            <style>
+              @page {
+                size: A4 portrait;
+                margin: 0;
+              }
+              *, *:before, *:after {
+                box-sizing: border-box;
+              }
+              body {
+                font-family: 'Segoe UI', Tahoma, Arial, sans-serif;
+                margin: 0;
+                padding: 0;
+                background-color: #525659;
+                color: #222;
+                -webkit-print-color-adjust: exact;
+                print-color-adjust: exact;
+              }
+              .page-sheet {
+                background: #FFFFFF;
+                width: 210mm;
+                min-height: 297mm;
+                margin: 10mm auto;
+                padding: 12mm 15mm;
+                box-shadow: 0 4px 15px rgba(0, 0, 0, 0.35);
+                display: flex;
+                flex-direction: column;
+                justify-content: space-between;
+              }
+              .report-header {
+                display: flex;
+                justify-content: space-between;
+                align-items: flex-start;
+                border-bottom: 2px solid #8D6409;
+                padding-bottom: 8px;
+              }
+              .header-brand {
+                display: flex;
+                align-items: center;
+                gap: 12px;
+                max-width: 58%;
+              }
+              .brand-logo {
+                width: 55px;
+                height: 55px;
+                object-fit: contain;
+              }
+              .company-name {
+                font-size: 18px;
+                font-weight: 800;
+                color: #5C4A28;
+                letter-spacing: 0.5px;
+                text-transform: uppercase;
+              }
+              .company-address {
+                font-size: 10px;
+                color: #555;
+                line-height: 1.35;
+                margin-top: 2px;
+              }
+              .header-meta {
+                text-align: right;
+              }
+              .report-badge {
+                font-size: 13px;
+                font-weight: 800;
+                color: #8D6409;
+                letter-spacing: 0.6px;
+                text-transform: uppercase;
+              }
+              .copy-tag {
+                display: inline-block;
+                background: #FDF4D9;
+                color: #7D5E19;
+                font-size: 9px;
+                font-weight: 700;
+                padding: 2px 8px;
+                border-radius: 4px;
+                margin-top: 3px;
+                border: 1px solid #E6D29F;
+              }
+              .doc-no {
+                font-size: 12px;
+                font-weight: 700;
+                color: #111;
+                margin-top: 4px;
+              }
+              .doc-no span {
+                color: #8D6409;
+                font-family: monospace;
+                font-size: 13px;
+              }
+              .meta-date {
+                font-size: 10px;
+                color: #666;
+                margin-top: 2px;
+              }
+
+              /* GOLD RATE STRIP */
+              .gold-rate-strip {
+                display: flex;
+                justify-content: center;
+                align-items: center;
+                gap: 16px;
+                background: #FAF6EB;
+                border: 1px solid #E6D7AD;
+                padding: 5px 12px;
+                margin: 8px 0;
+                border-radius: 4px;
+                font-size: 10px;
+              }
+              .rate-lbl {
+                font-weight: 600;
+                color: #6E5316;
+              }
+              .rate-val {
+                font-weight: 800;
+                color: #222;
+                margin-left: 4px;
+              }
+              .rate-divider {
+                color: #D4C3A3;
+              }
+
+              /* TWO-COLUMN INFO */
+              .info-grid {
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: 12px;
+                margin-bottom: 8px;
+              }
+              .info-card {
+                background: #FAF8F4;
+                border: 1px solid #E5DFD4;
+                border-radius: 4px;
+                padding: 8px 10px;
+              }
+              .card-title {
+                font-size: 10px;
+                font-weight: 700;
+                color: #7D5E19;
+                border-bottom: 1px solid #E5DFD4;
+                padding-bottom: 3px;
+                margin-bottom: 4px;
+                text-transform: uppercase;
+              }
+              .info-row {
+                font-size: 10px;
+                line-height: 1.4;
+                display: flex;
+              }
+              .info-lbl {
+                width: 32%;
+                color: #666;
+                font-weight: 500;
+              }
+              .info-val {
+                width: 68%;
+                color: #222;
+              }
+              .font-bold {
+                font-weight: 700;
+              }
+
+              /* CURRENT PAYMENT CARD */
+              .current-payment-card {
+                background: #EBF7EE;
+                border: 1.5px solid #A3D9B1;
+                border-radius: 6px;
+                padding: 8px 14px;
+                text-align: center;
+                margin: 6px 0 10px 0;
+              }
+              .payment-title {
+                font-size: 11px;
+                font-weight: 700;
+                color: #0F5132;
+                letter-spacing: 0.5px;
+                text-transform: uppercase;
+              }
+              .payment-amount {
+                font-size: 22px;
+                font-weight: 800;
+                color: #0F5132;
+                margin-top: 2px;
+                font-family: monospace;
+              }
+
+              .section-heading {
+                font-size: 11px;
+                font-weight: 700;
+                color: #5C4A28;
+                text-transform: uppercase;
+                margin: 6px 0 4px 0;
+                border-bottom: 1px solid #D4C3A3;
+                padding-bottom: 2px;
+              }
+
+              /* TABLE */
+              .receipt-table {
+                width: 100%;
+                border-collapse: collapse;
+                margin-bottom: 8px;
+                font-size: 10px;
+              }
+              .receipt-table th {
+                background: #F1ECE0;
+                color: #4A3A1E;
+                font-weight: 700;
+                padding: 5px 6px;
+                border: 1px solid #D8CFC0;
+              }
+              .receipt-table td {
+                padding: 5px 6px;
+                border: 1px solid #E5DFD4;
+                color: #222;
+              }
+              .highlight-row {
+                background-color: #FFF9E6;
+              }
+
+              /* SUMMARY */
+              .summary-box {
+                margin-left: auto;
+                width: 65%;
+                background: #FAF8F4;
+                border: 1px solid #E5DFD4;
+                border-radius: 4px;
+                padding: 8px 12px;
+                margin-bottom: 10px;
+              }
+              .summary-row {
+                display: flex;
+                justify-content: space-between;
+                font-size: 10px;
+                line-height: 1.5;
+              }
+              .summary-divider {
+                border-top: 1px dashed #C9BC9F;
+                margin: 4px 0;
+              }
+              .grand-total-row {
+                padding-top: 2px;
+              }
+
+              /* SIGNATURE */
+              .signature-section {
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: 20px;
+                margin-top: 8px;
+              }
+              .sign-card {
+                border: 1px dashed #B8AB91;
+                border-radius: 4px;
+                padding: 8px 10px;
+                font-size: 10px;
+                background: #FFFEFC;
+              }
+              .sign-header {
+                font-weight: 700;
+                color: #5C4A28;
+                border-bottom: 1px solid #EDE6D8;
+                padding-bottom: 3px;
+                margin-bottom: 6px;
+                font-size: 9px;
+              }
+              .sign-row {
+                color: #333;
+                line-height: 1.3;
+              }
+
+              /* FOOTER */
+              .report-footer {
+                margin-top: 8px;
+                text-align: center;
+              }
+              .footer-divider {
+                border-top: 1px solid #E0D7C5;
+                margin-bottom: 4px;
+              }
+              .footer-gen-text {
+                font-size: 9px;
+                color: #777;
+                font-style: italic;
+              }
+              .footer-powered {
+                font-size: 8px;
+                color: #999;
+                margin-top: 1px;
+              }
+
+              @media print {
+                body {
+                  background: none !important;
+                }
+                .page-sheet {
+                  width: 100% !important;
+                  min-height: 297mm !important;
+                  height: 100% !important;
+                  margin: 0 !important;
+                  padding: 10mm 12mm !important;
+                  box-shadow: none !important;
+                  display: flex !important;
+                  flex-direction: column !important;
+                  page-break-after: always !important;
+                }
+                .page-sheet:last-child {
+                  page-break-after: auto !important;
+                }
+              }
+            </style>
+          </head>
+          <body>
+            ${printPagesHtml}
+            <script>
+              window.onload = function() {
+                setTimeout(function() {
+                  window.print();
+                }, 300);
+              };
+            </script>
+          </body>
+        </html>
+      `;
+
+      if (Platform.OS === 'web' && typeof window !== 'undefined') {
+        const printWindow = window.open('', '_blank', 'width=900,height=750');
+        if (printWindow) {
+          printWindow.document.open();
+          printWindow.document.write(printHtml);
+          printWindow.document.close();
+          showToast('Installment Payment receipt preview opened', 'success');
+        } else {
+          const blob = new Blob([printHtml], { type: 'text/html;charset=utf-8;' });
+          const url = URL.createObjectURL(blob);
+          const win = window.open(url, '_blank');
+          if (!win) {
+            showToast('Popup blocker prevented opening print preview. Please allow popups.', 'error');
+          } else {
+            showToast('Installment Payment receipt preview opened', 'success');
+          }
+        }
+      } else {
+        showToast('Print preview generated.', 'success');
+      }
+    } catch (err: any) {
+      console.error('Print Installment Receipt Error:', err);
+      showToast(err.message || 'Failed to print installment payment receipt', 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Handle return from payingmode after save
+  useEffect(() => {
+    if (params?.paymentSuccess === 'true') {
+      const savedPaymentNo = (params.installmentNo as string) || (params.savedInvoiceNo as string) || (params.paymentNo as string);
+      if (savedPaymentNo && savedPaymentNo.trim()) {
+        const cleanNo = savedPaymentNo.trim();
+        subPrintInstallment(cleanNo, false);
+      }
+      if (agreementNo && agreementNo.trim()) {
+        fetchAgreement();
+      }
+    }
+  }, [params?.paymentSuccess]);
+
+  // RePrint button handler matching original btnRePrint_Click:
+  // Clears txtRePrintBillNo, opens modal, focuses on input
+  const handleOpenReprintModal = () => {
     setReprintBillNo('');
+    setIsReprintModalVisible(true);
+    setTimeout(() => {
+      if (reprintInputRef.current) {
+        reprintInputRef.current.focus();
+      }
+    }, 150);
+  };
+
+  // RePrint OK click handler matching original btnRePrintOK_Click:
+  // If txtRePrintBillNo.Text.Trim = "" Then Exit Sub
+  // subPrintInstallment(Trim(txtRePrintBillNo.Text)) with bReprint = True
+  const handleReprintSubmit = () => {
+    const cleanNo = reprintBillNo.trim();
+    if (!cleanNo) {
+      return;
+    }
+    setIsReprintModalVisible(false);
+    subPrintInstallment(cleanNo, true);
   };
 
   const latestState = useRef({ agreementNo, totalAmount, noOfInstallment, installmentAmount, customerCode });
@@ -407,7 +1053,7 @@ export default function InstallmentPaymentScreen() {
 
           <TouchableOpacity
             style={[styles.actionBtn, styles.reprintBtn]}
-            onPress={() => setIsReprintModalVisible(true)}
+            onPress={handleOpenReprintModal}
             activeOpacity={0.8}
           >
             <Ionicons name="print-outline" size={14} color="#5C4A28" />
@@ -1074,9 +1720,11 @@ export default function InstallmentPaymentScreen() {
                 Enter the Installment Bill No to RePrint:
               </ThemedText>
               <TextInput
+                ref={reprintInputRef}
                 style={[styles.formInput, { height: 32, fontSize: 13, marginBottom: 14 }]}
                 value={reprintBillNo}
                 onChangeText={setReprintBillNo}
+                onSubmitEditing={handleReprintSubmit}
                 placeholder="e.g. IN-101"
                 placeholderTextColor="#9E8D77"
                 autoFocus
@@ -1090,7 +1738,7 @@ export default function InstallmentPaymentScreen() {
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={[styles.actionBtn, styles.saveBtn]}
-                  onPress={handleReprintBill}
+                  onPress={handleReprintSubmit}
                 >
                   <ThemedText style={styles.saveBtnText}>Print</ThemedText>
                 </TouchableOpacity>

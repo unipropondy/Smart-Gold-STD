@@ -129,6 +129,7 @@ router.get(["/nextNo", "/next-number"], async (req, res) => {
       FROM tblCompany
     `);
 
+    
     if (result.recordset.length > 0) {
       const company = result.recordset[0];
 

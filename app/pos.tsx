@@ -171,6 +171,13 @@ export default function PosScreen() {
   const [salesmanPassword, setSalesmanPassword] = useState('');
   const [verifyingPassword, setVerifyingPassword] = useState(false);
 
+  // Reprint Modal State (PnlReprint in VB: txtRePrintBillNo, btnReprintOK, btnReprintCancel)
+  const [reprintModalVisible, setReprintModalVisible] = useState(false);
+  const [reprintBillNo, setReprintBillNo] = useState('');
+
+  // Save & Print Confirmation State (MsgBox: "Do you want to print ?")
+  const [printConfirmInvoiceNo, setPrintConfirmInvoiceNo] = useState<string | null>(null);
+
   const verifySalesmanPassword = async () => {
     if (!salesmanPassword) {
       showToast('Validation Error: Please enter a password', 'error');
@@ -995,12 +1002,489 @@ export default function PosScreen() {
     );
   };
 
-  const handleRePrint = () => {
-    if (!headerState.InvoiceNo) {
-      showToast("Please select an Invoice No first", 'info');
+  // subPrintBill: Migrated Crystal Report printing logic from frmGPOS.vb
+  // Reports: rptSalesInvoice_MJ.rpt, rptSalesInvoiceStandard_MJ.rpt, rptSalesInvoiceNoGST_MJ.rpt,
+  //          rptSalesInvoice_FH.rpt, rptSalesInvoice_SSJ.rpt, rptSalesInvoice_RJ.rpt, rptSalesInvoice_ESP.rpt, etc.
+  // Selection Formula: {tblSalesHeader.InvoiceNo} = sInvoiceNo
+  // Formula Fields: CompAddress1, CompAddress2, CompAddress3, Customer1, Customer2, Customer3, Rate1, Rate2, Rate3, Rate4
+  const subPrintBill = async (sInvoiceNo: string, isReprint: boolean = false) => {
+    const trimmedNo = (sInvoiceNo || '').trim();
+    if (!trimmedNo) {
+      showToast('Validation Error: Invoice number is required for printing', 'error');
       return;
     }
-    showToast(`RePrinting Invoice: ${headerState.InvoiceNo}`, 'success');
+
+    try {
+      setLoading(true);
+      const res = await fetch(`${API_URL}/pos/print-data?invoiceNo=${encodeURIComponent(trimmedNo)}`);
+      const json = await res.json();
+
+      if (!json.success || !json.data) {
+        showToast(json.message || `Invoice "${trimmedNo}" not found for printing`, 'error');
+        return;
+      }
+
+      const { company, rates, header, items, payments } = json.data;
+
+      // Extract details
+      const compName = (company?.name || 'SMART').trim();
+      const compAddr1 = (company?.address1 || '').trim();
+      const compAddr2 = [company?.address2, company?.city, company?.country].filter(Boolean).join(' ');
+      const compContact = [
+        company?.phone ? `Tel: ${company?.phone}` : '',
+        company?.fax ? `Fax: ${company?.fax}` : ''
+      ].filter(Boolean).join(' | ');
+
+      const custName = (header.CustomerName || 'CASH CUSTOMER').trim();
+      const custAddr1 = (header.CustomerAddress1 || '').trim();
+      const custAddr2 = (header.CustomerAddress2 || '').trim();
+      const custAddr3 = (header.CustomerAddress3 || '').trim();
+      const custNric = (header.CustomerNricNo || '').trim();
+      const salesman = (header.SalesManName || header.SalesManCode || '').trim();
+      const location = (header.LocationCode || 'HQ').trim();
+
+      // Format Dates
+      const rawDate = header.InvoiceDate || header.CreateDate;
+      let invoiceDateFormatted = '';
+      if (rawDate) {
+        const d = new Date(rawDate);
+        if (!isNaN(d.getTime())) {
+          invoiceDateFormatted = `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`;
+        }
+      }
+      const printTimeStr = new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
+
+      // Financials
+      const totalWeight = (parseFloat(header.TotalWeight) || (items || []).reduce((acc: number, it: any) => acc + (parseFloat(it.Weight) || 0), 0)).toFixed(2);
+      const totalPCS = parseInt(header.TotalPCS) || (items || []).reduce((acc: number, it: any) => acc + (parseInt(it.PCS) || 0), 0);
+      const totalSMC = (parseFloat(header.TotalSMC) || (items || []).reduce((acc: number, it: any) => acc + (parseFloat(it.SMC) || 0), 0)).toFixed(2);
+      const netTotalVal = (parseFloat(header.NetTotal) || parseFloat(header.TotalValue) || 0).toFixed(2);
+      const paidAmtVal = (parseFloat(header.PaidAmt) || 0).toFixed(2);
+      const balanceAmtVal = (parseFloat(header.BalanceAmt) || 0).toFixed(2);
+      const gstAmtVal = (parseFloat(header.GST) || 0).toFixed(2);
+      const netDiscountVal = (parseFloat(header.NetDiscount) || 0).toFixed(2);
+
+      // Report Title (Duplicate Copy on reprint as per frmGPOS.vb)
+      const reportTitle = isReprint ? 'TAX INVOICE (DUPLICATE COPY)' : 'TAX INVOICE';
+
+      // Items Rows HTML
+      const itemsHtml = (items || []).map((it: any, idx: number) => {
+        const desc = (it.Description || '').trim();
+        const code = (it.InventoryCode || '').trim();
+        const wt = parseFloat(it.Weight) || 0;
+        const rate = parseFloat(it.Rate || it.DailyRate) || 0;
+        const smc = parseFloat(it.SMC) || 0;
+        const pcs = parseInt(it.PCS) || 1;
+        const amount = parseFloat(it.NetAmount || it.TotalValue) || 0;
+
+        return `
+          <tr>
+            <td style="text-align: center; padding: 7px 4px; border-bottom: 1px solid #ECECEC;">${idx + 1}</td>
+            <td style="padding: 7px 6px; border-bottom: 1px solid #ECECEC; font-family: monospace;">${code}</td>
+            <td style="padding: 7px 6px; border-bottom: 1px solid #ECECEC;">${desc}</td>
+            <td style="text-align: center; padding: 7px 4px; border-bottom: 1px solid #ECECEC;">${pcs}</td>
+            <td style="text-align: right; padding: 7px 6px; border-bottom: 1px solid #ECECEC;">${wt.toFixed(2)}</td>
+            <td style="text-align: right; padding: 7px 6px; border-bottom: 1px solid #ECECEC;">$${rate.toFixed(2)}</td>
+            <td style="text-align: right; padding: 7px 6px; border-bottom: 1px solid #ECECEC;">$${smc.toFixed(2)}</td>
+            <td style="text-align: right; padding: 7px 6px; border-bottom: 1px solid #ECECEC; font-weight: 600;">$${amount.toFixed(2)}</td>
+          </tr>
+        `;
+      }).join('');
+
+      // Payments Rows HTML
+      const paymentsHtml = (payments || []).map((p: any) => {
+        const mode = (p.PayMode || '').trim();
+        const amt = parseFloat(p.Amount) || 0;
+        return `
+          <div style="display: flex; justify-content: space-between; font-size: 11px; padding: 3px 0; border-bottom: 1px dashed #E0E0E0;">
+            <span style="font-weight: 600; color: #444;">${mode}:</span>
+            <span style="font-weight: 700; color: #222;">$${amt.toFixed(2)}</span>
+          </div>
+        `;
+      }).join('');
+
+      // Build Print HTML Document
+      const printHtml = `
+        <!DOCTYPE html>
+        <html>
+          <head>
+            <meta charset="utf-8" />
+            <title>Point of Sale Invoice - ${trimmedNo}</title>
+            <style>
+              @page {
+                size: A4 portrait;
+                margin: 0;
+              }
+              *, *:before, *:after {
+                box-sizing: border-box;
+              }
+              body {
+                font-family: 'Segoe UI', Tahoma, Arial, sans-serif;
+                margin: 0;
+                padding: 0;
+                background-color: #525659;
+                color: #222;
+                -webkit-print-color-adjust: exact;
+                print-color-adjust: exact;
+              }
+              .page-sheet {
+                background: #FFFFFF;
+                width: 210mm;
+                min-height: 297mm;
+                margin: 10mm auto;
+                padding: 14mm 16mm;
+                box-shadow: 0 0 14px rgba(0,0,0,0.4);
+                display: flex;
+                flex-direction: column;
+                justify-content: space-between;
+              }
+              @media print {
+                body {
+                  background: #FFFFFF;
+                }
+                .page-sheet {
+                  margin: 0;
+                  padding: 10mm 14mm;
+                  box-shadow: none;
+                  width: 100%;
+                  min-height: 100%;
+                }
+                .no-print {
+                  display: none !important;
+                }
+              }
+              .company-title {
+                font-size: 20px;
+                font-weight: 800;
+                color: #8D6409;
+                letter-spacing: 0.5px;
+                text-transform: uppercase;
+                margin-bottom: 2px;
+              }
+              .company-sub {
+                font-size: 11px;
+                color: #555;
+                line-height: 1.4;
+              }
+              .report-badge {
+                display: inline-block;
+                background: #FAF5EA;
+                border: 1px solid #D8C593;
+                color: #8D6409;
+                font-weight: 800;
+                font-size: 13px;
+                padding: 5px 14px;
+                border-radius: 4px;
+                letter-spacing: 1px;
+                text-transform: uppercase;
+              }
+              .rates-box {
+                background: #FDFCF9;
+                border: 1px solid #EADBBA;
+                border-radius: 4px;
+                padding: 6px 12px;
+                display: flex;
+                gap: 16px;
+                font-size: 10.5px;
+                margin-top: 8px;
+              }
+              .rates-box span {
+                color: #444;
+              }
+              .rates-box b {
+                color: #8D6409;
+              }
+              .info-panel {
+                display: flex;
+                justify-content: space-between;
+                background: #FAF7F0;
+                border: 1px solid #E8DECA;
+                border-radius: 5px;
+                padding: 10px 14px;
+                margin: 14px 0 16px 0;
+                font-size: 11.5px;
+              }
+              .info-col {
+                flex: 1;
+                line-height: 1.6;
+              }
+              .info-col b {
+                color: #333;
+              }
+              .data-table {
+                width: 100%;
+                border-collapse: collapse;
+                margin-top: 6px;
+                font-size: 11px;
+              }
+              .data-table th {
+                background: #8D6409;
+                color: #FFFFFF;
+                font-weight: 700;
+                text-transform: uppercase;
+                font-size: 10px;
+                letter-spacing: 0.5px;
+                padding: 7px 6px;
+                border: 1px solid #7D5605;
+              }
+              .summary-container {
+                display: flex;
+                justify-content: space-between;
+                gap: 18px;
+                margin-top: 14px;
+              }
+              .pay-box {
+                flex: 1.1;
+                background: #FDFCF9;
+                border: 1px solid #EAE0CB;
+                border-radius: 4px;
+                padding: 10px 12px;
+              }
+              .totals-box {
+                flex: 1;
+                background: #FAF7F0;
+                border: 1px solid #E8DECA;
+                border-radius: 4px;
+                padding: 10px 14px;
+              }
+              .total-row {
+                display: flex;
+                justify-content: space-between;
+                padding: 3px 0;
+                font-size: 11.5px;
+                color: #444;
+              }
+              .total-row.grand {
+                border-top: 2px solid #8D6409;
+                margin-top: 6px;
+                padding-top: 6px;
+                font-size: 14px;
+                font-weight: 800;
+                color: #8D6409;
+              }
+              .terms-box {
+                font-size: 9.5px;
+                color: #666;
+                line-height: 1.4;
+                border-top: 1px solid #EBE2D2;
+                padding-top: 10px;
+                margin-top: 20px;
+              }
+              .sig-row {
+                display: flex;
+                justify-content: space-between;
+                margin-top: 28px;
+                padding: 0 20px;
+              }
+              .sig-line {
+                width: 160px;
+                text-align: center;
+                border-top: 1px solid #888;
+                padding-top: 4px;
+                font-size: 10.5px;
+                color: #444;
+              }
+            </style>
+          </head>
+          <body>
+            <div class="page-sheet">
+              <div>
+                <!-- Header -->
+                <div style="display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #8D6409; padding-bottom: 12px;">
+                  <div>
+                    <div class="company-title">${compName}</div>
+                    <div class="company-sub">${compAddr1}</div>
+                    <div class="company-sub">${compAddr2}</div>
+                    <div class="company-sub">${compContact}</div>
+                  </div>
+                  <div style="text-align: right;">
+                    <div class="report-badge">${reportTitle}</div>
+                    <div style="font-size: 12px; font-weight: 700; color: #333; margin-top: 8px;">Invoice No: <span style="font-family: monospace; color: #8D6409;">${trimmedNo}</span></div>
+                    <div style="font-size: 11px; color: #555;">Date: ${invoiceDateFormatted || '-'}</div>
+                    <div style="font-size: 10px; color: #777;">Time: ${printTimeStr}</div>
+                  </div>
+                </div>
+
+                <!-- Gold Daily Rates Bar -->
+                <div class="rates-box">
+                  <span>Gold Rates Today:</span>
+                  <span>999 (24K): <b>$${rates?.rate999 || '-'}</b></span>
+                  <span>916 (22K): <b>$${rates?.rate916 || '-'}</b></span>
+                  <span>Silver (835): <b>$${rates?.rate835 || '-'}</b></span>
+                </div>
+
+                <!-- Customer & Bill Info Panel -->
+                <div class="info-panel">
+                  <div class="info-col">
+                    <div><b>Customer:</b> ${custName}</div>
+                    ${custNric ? `<div><b>NRIC / ID:</b> ${custNric}</div>` : ''}
+                    <div><b>Address:</b> ${[custAddr1, custAddr2, custAddr3].filter(Boolean).join(', ') || '-'}</div>
+                  </div>
+                  <div class="info-col" style="text-align: right;">
+                    <div><b>Salesman:</b> ${salesman || '-'}</div>
+                    <div><b>Location:</b> ${location}</div>
+                    <div><b>Sales Type:</b> ${header.SalesType || 'CASH'}</div>
+                  </div>
+                </div>
+
+                <!-- Items Table -->
+                <table class="data-table">
+                  <thead>
+                    <tr>
+                      <th style="width: 32px; text-align: center;">#</th>
+                      <th style="width: 110px; text-align: left;">Item Code</th>
+                      <th style="text-align: left;">Description</th>
+                      <th style="width: 45px; text-align: center;">PCS</th>
+                      <th style="width: 70px; text-align: right;">Weight (g)</th>
+                      <th style="width: 80px; text-align: right;">Rate /g</th>
+                      <th style="width: 75px; text-align: right;">SMC</th>
+                      <th style="width: 90px; text-align: right;">Amount ($)</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    ${itemsHtml || '<tr><td colspan="8" style="text-align: center; padding: 14px;">No items found</td></tr>'}
+                  </tbody>
+                </table>
+
+                <!-- Summary & Payments -->
+                <div class="summary-container">
+                  <!-- Payment Details -->
+                  <div class="pay-box">
+                    <div style="font-size: 11px; font-weight: 700; color: #8D6409; text-transform: uppercase; margin-bottom: 6px; border-bottom: 1px solid #EADBBA; padding-bottom: 4px;">Payment Breakdown</div>
+                    ${paymentsHtml || '<div style="font-size: 11px; color: #777;">Full cash payment</div>'}
+                    ${header.Remarks && header.Remarks.trim() ? `
+                      <div style="margin-top: 8px; font-size: 10.5px; color: #666; border-top: 1px dashed #DDD; padding-top: 4px;">
+                        <b>Remarks:</b> ${header.Remarks.trim()}
+                      </div>
+                    ` : ''}
+                  </div>
+
+                  <!-- Financial Totals -->
+                  <div class="totals-box">
+                    <div class="total-row">
+                      <span>Total PCS:</span>
+                      <b>${totalPCS}</b>
+                    </div>
+                    <div class="total-row">
+                      <span>Total Weight (g):</span>
+                      <b>${totalWeight} g</b>
+                    </div>
+                    <div class="total-row">
+                      <span>Total SMC:</span>
+                      <span>$${totalSMC}</span>
+                    </div>
+                    ${parseFloat(netDiscountVal) > 0 ? `
+                      <div class="total-row">
+                        <span>Net Discount:</span>
+                        <span style="color: #C62828;">-$${netDiscountVal}</span>
+                      </div>
+                    ` : ''}
+                    <div class="total-row">
+                      <span>GST (9%):</span>
+                      <span>$${gstAmtVal}</span>
+                    </div>
+                    <div class="total-row grand">
+                      <span>Net Total:</span>
+                      <span>$${netTotalVal}</span>
+                    </div>
+                    <div class="total-row" style="margin-top: 4px; font-size: 11px;">
+                      <span>Paid Amount:</span>
+                      <b>$${paidAmtVal}</b>
+                    </div>
+                    <div class="total-row" style="font-size: 11px;">
+                      <span>Balance Due:</span>
+                      <b>$${balanceAmtVal}</b>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Terms and Signatures -->
+                <div class="terms-box">
+                  <b>Terms & Conditions:</b> Goods sold are non-refundable. Any exchange must be made within 3 days with this original receipt intact. Weights and purities are verified as per industry standards.
+                </div>
+
+                <div class="sig-row">
+                  <div class="sig-line">Customer Signature</div>
+                  <div class="sig-line">Authorized Signature</div>
+                </div>
+              </div>
+
+              <!-- Footer Print Info -->
+              <div style="border-top: 1px solid #EBE2D2; padding-top: 8px; display: flex; justify-content: space-between; font-size: 9.5px; color: #888;">
+                <span>SmartGold POS System &copy; ${new Date().getFullYear()}</span>
+                <span>Page 1 of 1</span>
+              </div>
+            </div>
+
+            <script>
+              window.onload = function() {
+                window.print();
+              };
+            </script>
+          </body>
+        </html>
+      `;
+
+      if (Platform.OS === 'web' && typeof window !== 'undefined') {
+        const printWindow = window.open('', '_blank', 'width=900,height=750');
+        if (printWindow) {
+          printWindow.document.open();
+          printWindow.document.write(printHtml);
+          printWindow.document.close();
+          showToast(`Invoice print preview opened: ${trimmedNo}`, 'success');
+        } else {
+          const blob = new Blob([printHtml], { type: 'text/html;charset=utf-8;' });
+          const url = URL.createObjectURL(blob);
+          const win = window.open(url, '_blank');
+          if (!win) {
+            showToast('Popup blocker prevented opening print preview. Please allow popups.', 'error');
+          } else {
+            showToast(`Invoice print preview opened: ${trimmedNo}`, 'success');
+          }
+        }
+      } else {
+        showToast(`Invoice print ready: ${trimmedNo}`, 'success');
+      }
+    } catch (err: any) {
+      console.error("Print error:", err);
+      showToast(err.message || 'Error occurred while generating print preview', 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // RePrint button handler (PnlReprint in VB)
+  const handleRePrint = () => {
+    // Open Reprint Dialog modal matching VB frmGPOS: PnlReprint.Visible = True, txtRePrintBillNo.Text = ""
+    setReprintBillNo(headerState.InvoiceNo ? headerState.InvoiceNo.trim() : '');
+    setReprintModalVisible(true);
+  };
+
+  // Confirm RePrint inside modal (btnReprintOK_Click in VB)
+  const executeRePrint = async () => {
+    const trimmed = (reprintBillNo || '').trim();
+    if (!trimmed) {
+      showToast('Validation Error: Please enter a Bill No to reprint', 'error');
+      return;
+    }
+
+    try {
+      setLoading(true);
+      // Check whether bill exists matching: dsInvoice = objSales.GetSalesHeaderByInvoiceNo(Trim(txtRePrintBillNo.Text))
+      const res = await fetch(`${API_URL}/pos/print-data?invoiceNo=${encodeURIComponent(trimmed)}`);
+      const json = await res.json();
+      if (json.success && json.data) {
+        setReprintModalVisible(false);
+        setReprintBillNo('');
+        subPrintBill(trimmed, true);
+      } else {
+        showToast('Bill No is not Correct! Please enter a valid Bill No.', 'error');
+      }
+    } catch (err: any) {
+      showToast('Error verifying Bill No for reprint', 'error');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleNetTotal = () => {
@@ -1916,6 +2400,115 @@ export default function PosScreen() {
             </TouchableWithoutFeedback>
           </View>
         </TouchableWithoutFeedback>
+      </Modal>
+
+      {/* REPRINT BILL MODAL (PnlReprint in VB: txtRePrintBillNo, btnReprintOK, btnReprintCancel) */}
+      <Modal visible={reprintModalVisible} transparent animationType="fade" onRequestClose={() => setReprintModalVisible(false)}>
+        <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setReprintModalVisible(false)}>
+          <TouchableWithoutFeedback>
+            <View style={[styles.passwordModalContent, { maxWidth: 330, width: '100%' }]}>
+              <View style={styles.passwordModalHeader}>
+                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                  <View style={styles.headerIconBadgeSmall}>
+                    <Ionicons name="print-outline" size={14} color="#B48218" />
+                  </View>
+                  <ThemedText style={styles.passwordModalTitle}>RePrint Bill</ThemedText>
+                </View>
+                <TouchableOpacity onPress={() => setReprintModalVisible(false)} style={{ padding: 4 }}>
+                  <Ionicons name="close" size={18} color="#3B2D17" />
+                </TouchableOpacity>
+              </View>
+
+              <View style={{ padding: 16 }}>
+                <ThemedText style={{ fontSize: 11, color: '#554428', marginBottom: 6, fontWeight: 'bold' }}>
+                  Bill / Invoice Number
+                </ThemedText>
+                <TextInput
+                  style={[styles.formInput, { height: 34, marginBottom: 14 }]}
+                  value={reprintBillNo}
+                  onChangeText={setReprintBillNo}
+                  placeholder="e.g. HQ01000148"
+                  placeholderTextColor="#9E8D77"
+                  autoFocus
+                  onSubmitEditing={executeRePrint}
+                />
+                <View style={{ flexDirection: 'row', gap: 10 }}>
+                  <TouchableOpacity
+                    style={[styles.actionBtn, styles.clearBtn, { flex: 1, justifyContent: 'center' }]}
+                    onPress={() => {
+                      setReprintModalVisible(false);
+                      setReprintBillNo('');
+                    }}
+                    activeOpacity={0.8}
+                  >
+                    <ThemedText style={styles.clearBtnText}>Cancel</ThemedText>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.actionBtn, styles.saveBtn, { flex: 1, justifyContent: 'center' }]}
+                    onPress={executeRePrint}
+                    disabled={loading}
+                    activeOpacity={0.8}
+                  >
+                    {loading ? (
+                      <ActivityIndicator size="small" color="#9E6D08" />
+                    ) : (
+                      <ThemedText style={styles.saveBtnText}>Print</ThemedText>
+                    )}
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </View>
+          </TouchableWithoutFeedback>
+        </TouchableOpacity>
+      </Modal>
+
+      {/* SAVE & PRINT CONFIRMATION MODAL (MsgBox: "Do you want to print ?") */}
+      <Modal visible={!!printConfirmInvoiceNo} transparent animationType="fade" onRequestClose={() => setPrintConfirmInvoiceNo(null)}>
+        <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setPrintConfirmInvoiceNo(null)}>
+          <TouchableWithoutFeedback>
+            <View style={[styles.passwordModalContent, { maxWidth: 320, width: '100%' }]}>
+              <View style={styles.passwordModalHeader}>
+                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                  <View style={styles.headerIconBadgeSmall}>
+                    <Ionicons name="print-outline" size={14} color="#B48218" />
+                  </View>
+                  <ThemedText style={styles.passwordModalTitle}>Print Invoice</ThemedText>
+                </View>
+                <TouchableOpacity onPress={() => setPrintConfirmInvoiceNo(null)} style={{ padding: 4 }}>
+                  <Ionicons name="close" size={18} color="#3B2D17" />
+                </TouchableOpacity>
+              </View>
+              <View style={{ padding: 18, alignItems: 'center' }}>
+                <Ionicons name="print-outline" size={36} color="#8D6409" style={{ marginBottom: 12 }} />
+                <ThemedText style={{ fontSize: 13, color: '#3B2D17', textAlign: 'center', marginBottom: 16 }}>
+                  Do you want to print ?
+                </ThemedText>
+                <View style={{ flexDirection: 'row', gap: 12, width: '100%' }}>
+                  <TouchableOpacity
+                    style={[styles.actionBtn, styles.clearBtn, { flex: 1, justifyContent: 'center' }]}
+                    onPress={() => setPrintConfirmInvoiceNo(null)}
+                    activeOpacity={0.7}
+                  >
+                    <ThemedText style={styles.clearBtnText}>No</ThemedText>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.actionBtn, styles.saveBtn, { flex: 1, justifyContent: 'center' }]}
+                    onPress={() => {
+                      const invNoToPrint = printConfirmInvoiceNo;
+                      setPrintConfirmInvoiceNo(null);
+                      if (invNoToPrint) {
+                        subPrintBill(invNoToPrint, false);
+                      }
+                    }}
+                    activeOpacity={0.7}
+                  >
+                    <ThemedText style={styles.saveBtnText}>Yes</ThemedText>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </View>
+          </TouchableWithoutFeedback>
+        </TouchableOpacity>
       </Modal>
     </SafeAreaView>
   );

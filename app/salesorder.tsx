@@ -65,6 +65,9 @@ export default function SalesOrderScreen() {
   const [catalogues, setCatalogues] = useState<any[]>([]);
   const [salesOrders, setSalesOrders] = useState<any[]>([]);
 
+  // Confirmation Modal for post-save "Do you want to print?"
+  const [printConfirmOrderNo, setPrintConfirmOrderNo] = useState<string | null>(null);
+
   // Toast Notification State
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
 
@@ -289,92 +292,486 @@ export default function SalesOrderScreen() {
     }
   }, [items, soNo, locationCode, supplierCode, remarks, dueDate]);
 
-  const handlePrint = (orderNoToPrint?: string) => {
-    const targetNo = (orderNoToPrint || soNo || '').trim();
+  // subPrintSalesOrder migrated from frmSalesOrder.vb
+  const subPrintSalesOrder = async (sTransferNo: string) => {
+    const targetNo = (sTransferNo || '').trim();
     if (!targetNo) {
       showToast('SalesOrder Number Should not be Empty', 'error');
       return;
     }
 
-    if (Platform.OS === 'web') {
-      // Build printable HTML view for the Sales Order docket
-      const printWindow = window.open('', '_blank', 'width=800,height=600');
-      if (printWindow) {
-        const rowsHtml = items
-          .filter(i => i.isSelected)
-          .map(
-            (item, idx) => `
-          <tr>
-            <td style="border: 1px solid #ccc; padding: 6px; text-align: center;">${idx + 1}</td>
-            <td style="border: 1px solid #ccc; padding: 6px;">${item.CategoryCode || ''}</td>
-            <td style="border: 1px solid #ccc; padding: 6px;">${item.CatalogueCode || ''}</td>
-            <td style="border: 1px solid #ccc; padding: 6px; text-align: right;">${item.Weight ? Number(item.Weight).toFixed(3) : '0.000'}</td>
-            <td style="border: 1px solid #ccc; padding: 6px; text-align: right;">${item.ToWeight ? Number(item.ToWeight).toFixed(3) : '0.000'}</td>
-            <td style="border: 1px solid #ccc; padding: 6px; text-align: center;">${item.SizeCode ?? '-'}</td>
-            <td style="border: 1px solid #ccc; padding: 6px; text-align: center;">${item.ToSizeCode ?? '-'}</td>
-            <td style="border: 1px solid #ccc; padding: 6px; text-align: center;">${item.Qty ?? 0}</td>
-            <td style="border: 1px solid #ccc; padding: 6px; text-align: center;">${item.ReOrderLevel ?? 0}</td>
-            <td style="border: 1px solid #ccc; padding: 6px; text-align: center; font-weight: bold;">${item.SalesOrderQty ?? 0}</td>
-          </tr>`
-          )
-          .join('');
+    try {
+      setLoading(true);
+      const res = await fetch(`${API_URL}/print-data/${encodeURIComponent(targetNo)}`);
+      const result = await res.json();
 
-        printWindow.document.write(`
-          <html>
-            <head>
-              <title>Sales Order - ${targetNo}</title>
-              <style>
-                body { font-family: Arial, sans-serif; padding: 20px; color: #222; }
-                h2 { margin: 0 0 5px 0; }
-                .meta { margin-bottom: 15px; font-size: 13px; }
-                table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 10px; }
-                th { background-color: #f2f2f2; border: 1px solid #ccc; padding: 6px; text-align: left; }
-                @media print {
-                  button { display: none; }
-                }
-              </style>
-            </head>
-            <body>
-              <div style="display:flex; justify-content:space-between; align-items:center;">
-                <h2>SALES ORDER</h2>
-                <button onclick="window.print()" style="padding: 6px 14px; font-size: 12px; cursor: pointer;">Print</button>
-              </div>
-              <div class="meta">
-                <div><strong>SO No:</strong> ${targetNo}</div>
-                <div><strong>Location:</strong> ${locationCode || ''}</div>
-                <div><strong>Supplier:</strong> ${supplierCode || ''}</div>
-                <div><strong>Due Date:</strong> ${dueDate || ''}</div>
-                <div><strong>Remarks:</strong> ${remarks || ''}</div>
-              </div>
-              <table>
-                <thead>
-                  <tr>
-                    <th style="text-align: center;">#</th>
-                    <th>Category</th>
-                    <th>Catalogue</th>
-                    <th style="text-align: right;">From Wt</th>
-                    <th style="text-align: right;">To Wt</th>
-                    <th style="text-align: center;">From Sz</th>
-                    <th style="text-align: center;">To Sz</th>
-                    <th style="text-align: center;">OnHand</th>
-                    <th style="text-align: center;">ReOrder</th>
-                    <th style="text-align: center;">SO Qty</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  ${rowsHtml || '<tr><td colspan="10" style="text-align:center; padding: 10px;">No details</td></tr>'}
-                </tbody>
-              </table>
-              <script>
-                window.onload = function() { window.print(); };
-              </script>
-            </body>
-          </html>
-        `);
-        printWindow.document.close();
+      if (!result.success || !result.data) {
+        showToast(result.message || `No Sales Order records found for: ${targetNo}`, 'error');
+        return;
       }
+
+      const { company, formulas, header, details } = result.data;
+
+      // Extract Company and Formula values matching Crystal Report:
+      // CompAddress1: sCompanyname
+      // CompAddress2: Address1 & " " & Address2 & " " & Country
+      // CompAddress3: sPhone
+      // CompAddress4: sFax
+      // ReportTitle: "Transfer Note"
+      // RPTSELECTION: sSelectFld
+      const compAddress1 = formulas?.CompAddress1 || company?.name || 'SMART';
+      const compAddress2 = formulas?.CompAddress2 || [company?.address1, company?.address2, company?.country].filter(Boolean).join(' ');
+      const compAddress3 = formulas?.CompAddress3 || company?.phone || '';
+      const compAddress4 = formulas?.CompAddress4 || company?.fax || '';
+      const reportTitle = formulas?.ReportTitle || 'Transfer Note';
+
+      // Format Date strings
+      const rawSODate = header.SalesOrderDate || header.CreateDate;
+      let soDateFormatted = '';
+      if (rawSODate) {
+        const d = new Date(rawSODate);
+        if (!isNaN(d.getTime())) {
+          soDateFormatted = `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`;
+        } else {
+          soDateFormatted = String(rawSODate);
+        }
+      }
+
+      const rawDueDate = header.DueDate;
+      let dueDateFormatted = '';
+      if (rawDueDate) {
+        const d = new Date(rawDueDate);
+        if (!isNaN(d.getTime())) {
+          dueDateFormatted = `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`;
+        } else {
+          dueDateFormatted = String(rawDueDate);
+        }
+      }
+
+      const now = new Date();
+      const printTimeStr = `${String(now.getDate()).padStart(2, '0')}/${String(now.getMonth() + 1).padStart(2, '0')}/${now.getFullYear()} ${now.toLocaleTimeString()}`;
+
+      // Calculate totals
+      let totalQty = 0;
+      let totalWeight = 0;
+      (details || []).forEach((row: any) => {
+        totalQty += parseFloat(row.SalesOrderQty) || 0;
+        totalWeight += parseFloat(row.Weight) || 0;
+      });
+
+      const printHtml = `
+        <!DOCTYPE html>
+        <html>
+          <head>
+            <meta charset="utf-8" />
+            <title>Sales Order / ${reportTitle} - ${targetNo}</title>
+            <style>
+              @page {
+                size: A4 portrait;
+                margin: 0;
+              }
+              *, *:before, *:after {
+                box-sizing: border-box;
+              }
+              body {
+                font-family: 'Segoe UI', Tahoma, Arial, sans-serif;
+                margin: 0;
+                padding: 0;
+                background-color: #525659;
+                color: #222;
+                -webkit-print-color-adjust: exact;
+                print-color-adjust: exact;
+              }
+              .page-sheet {
+                background: #FFFFFF;
+                width: 210mm;
+                min-height: 297mm;
+                margin: 10mm auto;
+                padding: 12mm 15mm;
+                box-shadow: 0 0 14px rgba(0,0,0,0.4);
+                display: flex;
+                flex-direction: column;
+                justify-content: space-between;
+              }
+              @media print {
+                body {
+                  background: #FFFFFF;
+                }
+                .page-sheet {
+                  margin: 0;
+                  padding: 10mm 12mm;
+                  width: 100%;
+                  min-height: 100%;
+                  box-shadow: none;
+                }
+              }
+
+              /* HEADER SECTION (clsCompany1.getCompanyName formulas) */
+              .comp-header {
+                text-align: center;
+                border-bottom: 2px solid #9E741D;
+                padding-bottom: 8px;
+                margin-bottom: 10px;
+              }
+              .comp-name {
+                font-size: 20px;
+                font-weight: 800;
+                letter-spacing: 1.5px;
+                color: #5A3F0C;
+                text-transform: uppercase;
+                margin-bottom: 3px;
+              }
+              .comp-details {
+                font-size: 11px;
+                color: #444;
+                line-height: 1.4;
+              }
+
+              /* TITLE BADGE */
+              .doc-badge-container {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                background: #FBF6EC;
+                border: 1px solid #E2D3B3;
+                border-radius: 6px;
+                padding: 8px 14px;
+                margin-bottom: 12px;
+              }
+              .doc-title {
+                font-size: 15px;
+                font-weight: 800;
+                color: #8C5D08;
+                letter-spacing: 1px;
+                text-transform: uppercase;
+              }
+              .doc-print-time {
+                font-size: 10px;
+                color: #77664B;
+              }
+
+              /* INFO GRID */
+              .info-grid {
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: 12px;
+                margin-bottom: 14px;
+              }
+              .info-card {
+                border: 1px solid #E6DAC5;
+                background: #FAF8F5;
+                border-radius: 5px;
+                padding: 8px 12px;
+              }
+              .card-title {
+                font-size: 11px;
+                font-weight: 700;
+                color: #7A5716;
+                border-bottom: 1px solid #ECE1CD;
+                padding-bottom: 3px;
+                margin-bottom: 6px;
+                text-transform: uppercase;
+                letter-spacing: 0.5px;
+              }
+              .info-row {
+                display: flex;
+                font-size: 11px;
+                margin-bottom: 3px;
+                line-height: 1.35;
+              }
+              .info-lbl {
+                width: 110px;
+                font-weight: 600;
+                color: #665235;
+                flex-shrink: 0;
+              }
+              .info-val {
+                color: #1A1A1A;
+                flex-grow: 1;
+                word-break: break-word;
+              }
+
+              /* DETAIL TABLE (rptSalesOrderDetail) */
+              .detail-table {
+                width: 100%;
+                border-collapse: collapse;
+                margin-bottom: 12px;
+                font-size: 11px;
+              }
+              .detail-table th {
+                background: #8C5D08;
+                color: #FFFFFF;
+                text-align: left;
+                padding: 6px 8px;
+                font-weight: 700;
+                border: 1px solid #734C06;
+                text-transform: uppercase;
+                font-size: 10px;
+                letter-spacing: 0.5px;
+              }
+              .detail-table td {
+                padding: 6px 8px;
+                border: 1px solid #E8DECC;
+                background: #FFFFFF;
+              }
+              .detail-table tr:nth-child(even) td {
+                background: #FAF8F5;
+              }
+
+              /* TOTALS SECTION */
+              .totals-section {
+                display: flex;
+                justify-content: flex-end;
+                margin-bottom: 14px;
+              }
+              .totals-box {
+                width: 260px;
+                border: 1px solid #E6DAC5;
+                background: #FAF8F5;
+                border-radius: 5px;
+                padding: 8px 12px;
+              }
+              .total-row {
+                display: flex;
+                justify-content: space-between;
+                font-size: 11px;
+                padding: 3px 0;
+                color: #444;
+              }
+              .total-row-grand {
+                border-top: 2px solid #8C5D08;
+                margin-top: 4px;
+                padding-top: 4px;
+                font-weight: 800;
+                font-size: 13px;
+                color: #8C5D08;
+              }
+
+              /* SIGNATURES */
+              .sign-grid {
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: 25px;
+                margin-top: 15px;
+              }
+              .sign-card {
+                padding: 6px 10px;
+                border: 1px solid #EFE4D0;
+                background: #FAF8F5;
+                border-radius: 4px;
+              }
+              .sign-title {
+                font-size: 10px;
+                font-weight: 700;
+                color: #7A5716;
+                text-transform: uppercase;
+                margin-bottom: 30px;
+              }
+              .sign-line {
+                border-bottom: 1px solid #444;
+                margin-bottom: 4px;
+              }
+              .sign-sub {
+                font-size: 10px;
+                color: #555;
+                display: flex;
+                justify-content: space-between;
+              }
+
+              /* FOOTER */
+              .footer-bar {
+                margin-top: 14px;
+                text-align: center;
+                border-top: 1px solid #E2D3B3;
+                padding-top: 8px;
+                font-size: 10px;
+                color: #7C694F;
+              }
+            </style>
+          </head>
+          <body>
+            <div class="page-sheet">
+              <div>
+                <!-- COMPANY HEADER (clsCompany1.getCompanyName) -->
+                <div class="comp-header">
+                  <div class="comp-name">${compAddress1}</div>
+                  <div class="comp-details">
+                    ${compAddress2 ? `<div>${compAddress2}</div>` : ''}
+                    ${compAddress3 || compAddress4 ? `<div>${compAddress3 ? 'Tel: ' + compAddress3 : ''} ${compAddress4 ? ' | Fax: ' + compAddress4 : ''}</div>` : ''}
+                  </div>
+                </div>
+
+                <!-- TITLE BADGE -->
+                <div class="doc-badge-container">
+                  <div class="doc-title">${reportTitle} / SALES ORDER</div>
+                  <div class="doc-print-time">Printed: ${printTimeStr} (1 Copy)</div>
+                </div>
+
+                <!-- INFO GRID -->
+                <div class="info-grid">
+                  <!-- ORDER IDENTIFICATION -->
+                  <div class="info-card">
+                    <div class="card-title">SALES ORDER INFORMATION</div>
+                    <div class="info-row"><span class="info-lbl">Sales Order No:</span><span class="info-val font-bold">${targetNo}</span></div>
+                    <div class="info-row"><span class="info-lbl">Order Date:</span><span class="info-val">${soDateFormatted || '-'}</span></div>
+                    <div class="info-row"><span class="info-lbl">Due Date:</span><span class="info-val">${dueDateFormatted || '-'}</span></div>
+                    <div class="info-row"><span class="info-lbl">Location Code:</span><span class="info-val">${(header.LocationCode || '').trim() || '-'}</span></div>
+                  </div>
+
+                  <!-- SUPPLIER & AUDIT -->
+                  <div class="info-card">
+                    <div class="card-title">SUPPLIER & PARTICULARS</div>
+                    <div class="info-row"><span class="info-lbl">Supplier Code:</span><span class="info-val font-bold">${(header.SupplierCode || '').trim() || '-'}</span></div>
+                    ${header.SupplierName ? `<div class="info-row"><span class="info-lbl">Supplier Name:</span><span class="info-val">${(header.SupplierName || '').trim()}</span></div>` : ''}
+                    <div class="info-row"><span class="info-lbl">Remarks:</span><span class="info-val">${header.Remarks || '-'}</span></div>
+                    <div class="info-row"><span class="info-lbl">Created By:</span><span class="info-val">${(header.CreateUser || 'sys').trim()}</span></div>
+                  </div>
+                </div>
+
+                <!-- DETAIL ITEMS TABLE (rptSalesOrderDetail) -->
+                <table class="detail-table">
+                  <thead>
+                    <tr>
+                      <th style="width: 5%; text-align: center;">#</th>
+                      <th style="width: 18%;">Category</th>
+                      <th style="width: 22%;">Catalogue</th>
+                      <th style="width: 12%; text-align: right;">Weight (g)</th>
+                      <th style="width: 12%; text-align: right;">To Wt (g)</th>
+                      <th style="width: 10%; text-align: center;">Size</th>
+                      <th style="width: 10%; text-align: right;">ReOrder</th>
+                      <th style="width: 11%; text-align: right;">SO Qty</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    ${(details || []).length > 0 ? (details || []).map((row: any, idx: number) => {
+                      const catCode = (row.CategoryCode || '').trim();
+                      const catgCode = (row.CatalogueCode || '').trim();
+                      const catName = row.CategoryName ? ` (${row.CategoryName.trim()})` : '';
+                      const catgName = row.CatalogueName ? ` (${row.CatalogueName.trim()})` : '';
+                      const wt = parseFloat(row.Weight) || 0;
+                      const toWt = parseFloat(row.ToWeight) || 0;
+                      const sz = row.SizeCode !== null && row.SizeCode !== undefined ? row.SizeCode : '-';
+                      const szType = row.SizeType ? ` ${row.SizeType.trim()}` : '';
+                      const reorder = parseFloat(row.ReOrderLevel) || 0;
+                      const soQty = parseFloat(row.SalesOrderQty) || 0;
+
+                      return `
+                        <tr>
+                          <td style="text-align: center;">${idx + 1}</td>
+                          <td><strong>${catCode}</strong>${catName}</td>
+                          <td><strong>${catgCode}</strong>${catgName}</td>
+                          <td style="text-align: right;">${wt.toFixed(3)}</td>
+                          <td style="text-align: right;">${toWt.toFixed(3)}</td>
+                          <td style="text-align: center;">${sz}${szType}</td>
+                          <td style="text-align: right;">${reorder}</td>
+                          <td style="text-align: right; font-weight: 700; color: #8C5D08;">${soQty}</td>
+                        </tr>
+                      `;
+                    }).join('') : `
+                      <tr>
+                        <td colspan="8" style="text-align: center; padding: 14px; color: #777;">
+                          No detail records in this Sales Order
+                        </td>
+                      </tr>
+                    `}
+                  </tbody>
+                </table>
+
+                <!-- TOTALS SECTION -->
+                <div class="totals-section">
+                  <div class="totals-box">
+                    <div class="total-row">
+                      <span>Total Items:</span>
+                      <span style="font-weight: 600;">${(details || []).length}</span>
+                    </div>
+                    <div class="total-row">
+                      <span>Total Weight:</span>
+                      <span style="font-weight: 600;">${totalWeight.toFixed(3)} g</span>
+                    </div>
+                    <div class="total-row total-row-grand">
+                      <span>TOTAL SO QTY:</span>
+                      <span>${totalQty}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <!-- SIGNATURES -->
+                <div class="sign-grid">
+                  <div class="sign-card">
+                    <div class="sign-title">Prepared By (Staff)</div>
+                    <div class="sign-line"></div>
+                    <div class="sign-sub">
+                      <span>Staff: ${(header.CreateUser || 'sys').trim()}</span>
+                      <span>Date: ........................</span>
+                    </div>
+                  </div>
+                  <div class="sign-card">
+                    <div class="sign-title">Authorized Signatory / Supplier</div>
+                    <div class="sign-line"></div>
+                    <div class="sign-sub">
+                      <span>Signature</span>
+                      <span>Date: ........................</span>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- FOOTER -->
+                <div class="footer-bar">
+                  *** Official Sales Order / Transfer Note - System Generated by SmartGold POS ***
+                </div>
+              </div>
+            </div>
+
+            <script>
+              window.onload = function() {
+                setTimeout(function() {
+                  window.print();
+                }, 300);
+              };
+            </script>
+          </body>
+        </html>
+      `;
+
+      if (Platform.OS === 'web' && typeof window !== 'undefined') {
+        const printWindow = window.open('', '_blank', 'width=900,height=750');
+        if (printWindow) {
+          printWindow.document.open();
+          printWindow.document.write(printHtml);
+          printWindow.document.close();
+          showToast(`Sales Order ${targetNo} print preview opened`);
+        } else {
+          const blob = new Blob([printHtml], { type: 'text/html;charset=utf-8;' });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.target = '_blank';
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          URL.revokeObjectURL(url);
+          showToast(`Sales Order ${targetNo} print preview opened`);
+        }
+      } else {
+        showToast(`Sales Order ${targetNo} sent to printer.`, 'success');
+      }
+    } catch (err: any) {
+      console.error(err);
+      showToast('Failed to load Sales Order print data', 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // RePrint Button Click: Check whether Sales Order Number is available. If empty, do not execute.
+  const handleRePrint = () => {
+    const trimmedNo = (soNo || '').trim();
+    if (trimmedNo !== '') {
+      subPrintSalesOrder(trimmedNo);
     } else {
-      showToast(`Sales Order ${targetNo} sent to printer.`, 'success');
+      showToast('SalesOrder Number Should not be Empty', 'error');
     }
   };
 
@@ -424,6 +821,8 @@ export default function SalesOrderScreen() {
         if (json.success) {
           const savedSoNo = json.salesOrderNo || soNo;
           showToast(`Please take note reference no. ${savedSoNo}`, 'success');
+          // Display the confirmation message: "Do you want to print?"
+          setPrintConfirmOrderNo(savedSoNo);
           handleNew();
         } else {
           const errDetail = json.error ? ` - ${json.error}` : '';
@@ -523,7 +922,7 @@ export default function SalesOrderScreen() {
         <View style={styles.headerActions}>
           <TouchableOpacity
             style={styles.headerBtnSecondary}
-            onPress={() => handlePrint()}
+            onPress={handleRePrint}
           >
             <ThemedText style={styles.headerBtnSecondaryText}>Re Print</ThemedText>
           </TouchableOpacity>
@@ -951,6 +1350,47 @@ export default function SalesOrderScreen() {
         </TouchableWithoutFeedback>
       </Modal>
 
+      {/* Confirmation Modal for Print after Save */}
+      <Modal visible={printConfirmOrderNo !== null} transparent animationType="fade">
+        <TouchableOpacity style={styles.modalOverlay} activeOpacity={1}>
+          <TouchableWithoutFeedback>
+            <View style={[styles.modalCard, { maxWidth: 360 }]}>
+              <View style={styles.modalHeader}>
+                <ThemedText style={styles.modalTitle}>Print Option</ThemedText>
+              </View>
+              <View style={{ padding: 18, alignItems: 'center' }}>
+                <Ionicons name="print-outline" size={36} color="#8D6409" style={{ marginBottom: 12 }} />
+                <ThemedText style={{ fontSize: 13, color: '#3B2D17', textAlign: 'center', marginBottom: 16 }}>
+                  Do you want to print ?
+                </ThemedText>
+                <View style={{ flexDirection: 'row', gap: 12, width: '100%' }}>
+                  <TouchableOpacity
+                    style={[styles.modalActionBtn, styles.modalBtnCancel]}
+                    onPress={() => setPrintConfirmOrderNo(null)}
+                    activeOpacity={0.7}
+                  >
+                    <ThemedText style={styles.modalBtnCancelText}>No</ThemedText>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.modalActionBtn, styles.modalBtnPrimary]}
+                    onPress={() => {
+                      const orderNo = printConfirmOrderNo;
+                      setPrintConfirmOrderNo(null);
+                      if (orderNo) {
+                        subPrintSalesOrder(orderNo);
+                      }
+                    }}
+                    activeOpacity={0.7}
+                  >
+                    <ThemedText style={styles.modalBtnPrimaryText}>Yes</ThemedText>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </View>
+          </TouchableWithoutFeedback>
+        </TouchableOpacity>
+      </Modal>
+
       {/* Floating Toast Notification */}
       {toast && (
         <View style={[styles.toast, { backgroundColor: toast.type === 'success' ? '#2E7D32' : '#C62828' }]}>
@@ -1362,6 +1802,31 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: 'bold',
     color: '#5C4A28',
+  },
+  modalActionBtn: {
+    flex: 1,
+    paddingVertical: 8,
+    borderRadius: 6,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modalBtnCancel: {
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#DFD5C3',
+  },
+  modalBtnCancelText: {
+    fontSize: 12,
+    fontWeight: 'bold',
+    color: '#7D6F5B',
+  },
+  modalBtnPrimary: {
+    backgroundColor: '#B48218',
+  },
+  modalBtnPrimaryText: {
+    fontSize: 12,
+    fontWeight: 'bold',
+    color: '#FFFFFF',
   },
   // Toast & Loader
   toast: {

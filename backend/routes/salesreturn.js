@@ -267,7 +267,7 @@ router.get("/fetch-return/:returnNo", async (req, res) => {
 
     const result = await pool.request()
       .input("ReturnNo", sql.VarChar, returnNo.trim())
-      .query(`SELECT * FROM tblSalesReturnHeader WHERE ReturnNo = @ReturnNo OR RefNo = @ReturnNo`);
+      .query(`SELECT * FROM tblSalesReturnHeader WHERE RTRIM(LTRIM(RefNo)) = @ReturnNo OR RTRIM(LTRIM(InvoiceNo)) = @ReturnNo`);
 
     if (result.recordset && result.recordset.length > 0) {
       res.json({ success: true, data: result.recordset[0] });
@@ -277,6 +277,157 @@ router.get("/fetch-return/:returnNo", async (req, res) => {
   } catch (err) {
     console.error("Fetch Return Error:", err);
     res.status(500).json({ success: false, message: "Server error", error: err.message });
+  }
+});
+
+// GET /api/salesreturn/print-data?returnNo=...
+// Crystal Report: Reports/rptSalesReturn.rpt
+// Selection: {tblSalesReturnHeader.RefNo} = @ReturnNo
+// Formula Fields: CustomerName, CompAddress1, CompAddress2, CompAddress3
+router.get("/print-data", async (req, res) => {
+  try {
+    const returnNo = (req.query.returnNo || req.query.refNo || "").trim();
+    if (!returnNo) {
+      return res.status(400).json({ success: false, message: "Return Number is required for print." });
+    }
+
+    const pool = await getPool(req);
+
+    // 1. Fetch Company Information matching objCompany.getCompanyName
+    const compRes = await pool.request().query(`
+      SELECT TOP 1 Name, Address1, Address2, City, State, Country, Phone, Fax, CompanyShortCode, CurrencySign
+      FROM tblCompany
+    `);
+    const compRow = compRes.recordset[0] || {};
+    const company = {
+      name: (compRow.Name || "SMART").trim(),
+      address1: (compRow.Address1 || "").trim(),
+      address2: (compRow.Address2 || "").trim(),
+      city: (compRow.City || "").trim(),
+      state: (compRow.State || "").trim(),
+      country: (compRow.Country || "").trim(),
+      phone: (compRow.Phone || "").trim(),
+      fax: (compRow.Fax || "").trim(),
+      companyShortCode: (compRow.CompanyShortCode || "MJ").trim(),
+      currencySign: (compRow.CurrencySign || "SGD").trim()
+    };
+
+    // 2. Fetch Sales Return Header
+    const headerRes = await pool.request()
+      .input("ReturnNo", sql.VarChar(50), returnNo)
+      .query(`
+        SELECT 
+          RTRIM(LTRIM(h.RefNo)) AS RefNo,
+          RTRIM(LTRIM(h.InvoiceNo)) AS InvoiceNo,
+          h.InvoiceDate,
+          RTRIM(LTRIM(h.CompanyCode)) AS CompanyCode,
+          RTRIM(LTRIM(h.LocationCode)) AS LocationCode,
+          RTRIM(LTRIM(h.TerminalCode)) AS TerminalCode,
+          RTRIM(LTRIM(h.CustomerCode)) AS CustomerCode,
+          RTRIM(LTRIM(h.SalesManCode)) AS SalesManCode,
+          ISNULL(h.TotalWeight, 0) AS TotalWeight,
+          ISNULL(h.TotalStoneWeight, 0) AS TotalStoneWeight,
+          ISNULL(h.TotalGoldLoss, 0) AS TotalGoldLoss,
+          ISNULL(h.TotalSMC, 0) AS TotalSMC,
+          ISNULL(h.TotalPCS, 0) AS TotalPCS,
+          ISNULL(h.GST, 0) AS GST,
+          ISNULL(h.DetailDiscount, 0) AS DetailDiscount,
+          ISNULL(h.NetDiscount, 0) AS NetDiscount,
+          ISNULL(h.Discount, 0) AS Discount,
+          ISNULL(h.NetTotal, 0) AS NetTotal,
+          ISNULL(h.PaidAmt, 0) AS PaidAmt,
+          ISNULL(h.BalanceAmt, 0) AS BalanceAmt,
+          ISNULL(h.TotalValue, 0) AS TotalValue,
+          ISNULL(h.TotalCost, 0) AS TotalCost,
+          RTRIM(LTRIM(ISNULL(h.Remarks, ''))) AS Remarks,
+          RTRIM(LTRIM(ISNULL(h.ReturnType, ''))) AS ReturnType,
+          RTRIM(LTRIM(ISNULL(h.JournalNo, ''))) AS JournalNo,
+          RTRIM(LTRIM(ISNULL(h.ModifyUser, ''))) AS ModifyUser,
+          h.ModifyDate,
+          RTRIM(LTRIM(ISNULL(h.MemberCode, ''))) AS MemberCode,
+          RTRIM(LTRIM(ISNULL(c.CustomerName, ''))) AS CustCustomerName,
+          RTRIM(LTRIM(ISNULL(c.Address1, ''))) AS CustomerAddress1,
+          RTRIM(LTRIM(ISNULL(c.Address2, ''))) AS CustomerAddress2,
+          RTRIM(LTRIM(ISNULL(c.Address3, ''))) AS CustomerAddress3,
+          RTRIM(LTRIM(ISNULL(c.Phone1, ISNULL(c.Mobile, '')))) AS CustomerPhone,
+          RTRIM(LTRIM(ISNULL(c.CustomerType, ''))) AS CustomerType
+        FROM tblSalesReturnHeader h
+        LEFT JOIN tblCustomer c ON RTRIM(LTRIM(c.CustomerCode)) = RTRIM(LTRIM(h.CustomerCode))
+        WHERE RTRIM(LTRIM(h.RefNo)) = @ReturnNo OR RTRIM(LTRIM(h.InvoiceNo)) = @ReturnNo
+      `);
+
+    if (!headerRes.recordset || headerRes.recordset.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "This Return Number Not Found... Please Give Correct Return No"
+      });
+    }
+
+    const header = headerRes.recordset[0];
+    const actualRefNo = header.RefNo || returnNo;
+
+    // Resolve Customer Name (falling back to member if member code present)
+    let customerName = header.CustCustomerName || header.CustomerCode || '';
+    if (!customerName && header.MemberCode) {
+      try {
+        const memRes = await pool.request()
+          .input("MemberCode", sql.VarChar(50), header.MemberCode)
+          .query(`SELECT MemberName, Address1, Address2, Address3, MemberType FROM tblMember WHERE RTRIM(LTRIM(MemberCode)) = @MemberCode`);
+        if (memRes.recordset && memRes.recordset.length > 0) {
+          customerName = (memRes.recordset[0].MemberName || '').trim();
+          if (!header.CustomerAddress1) {
+            header.CustomerAddress1 = (memRes.recordset[0].Address1 || '').trim();
+            header.CustomerAddress2 = (memRes.recordset[0].Address2 || '').trim();
+            header.CustomerAddress3 = (memRes.recordset[0].Address3 || '').trim();
+          }
+        }
+      } catch (memErr) {
+        console.warn("Member fallback warning:", memErr.message);
+      }
+    }
+
+    // 3. Fetch Return Details
+    const detailRes = await pool.request()
+      .input("RefNo", sql.VarChar(50), actualRefNo)
+      .query(`
+        SELECT 
+          RTRIM(LTRIM(RefNo)) AS RefNo,
+          RTRIM(LTRIM(InvoiceNo)) AS InvoiceNo,
+          RTRIM(LTRIM(InventoryCode)) AS InventoryCode,
+          RTRIM(LTRIM(Description)) AS Description,
+          ISNULL(Weight, 0) AS Weight,
+          ISNULL(StoneWeight, 0) AS StoneWeight,
+          ISNULL(GoldLoss, 0) AS GoldLoss,
+          ISNULL(Rate, 0) AS Rate,
+          ISNULL(SMC, 0) AS SMC,
+          ISNULL(PCS, 0) AS PCS,
+          ISNULL(GST, 0) AS GST,
+          ISNULL(DetailDiscount, 0) AS DetailDiscount,
+          ISNULL(NetDiscount, 0) AS NetDiscount,
+          ISNULL(NetAmount, 0) AS NetAmount,
+          ISNULL(ActualSales, 0) AS ActualSales,
+          ISNULL(TotalValue, 0) AS TotalValue,
+          ISNULL(TotalCost, 0) AS TotalCost,
+          RTRIM(LTRIM(ISNULL(Remarks, ''))) AS Remarks
+        FROM tblSalesReturnDetail
+        WHERE RTRIM(LTRIM(RefNo)) = @RefNo
+        ORDER BY InventoryCode ASC
+      `);
+
+    res.json({
+      success: true,
+      data: {
+        company,
+        header: {
+          ...header,
+          CustomerName: customerName
+        },
+        items: detailRes.recordset || []
+      }
+    });
+  } catch (err) {
+    console.error("Get Sales Return Print Data Error:", err);
+    res.status(500).json({ success: false, message: "Database error", error: err.message });
   }
 });
 
@@ -400,8 +551,25 @@ router.post("/save", async (req, res) => {
       }
     }
 
+    // 5. Fetch CompanyShortCode for client-side auto-print condition matching VB:
+    // If Trim(sCompanyShortCode) = "AJ" Then subPrintSalesReturn(sNextRetNo)
+    let companyShortCode = "";
+    try {
+      const compRes = await pool.request().query("SELECT TOP 1 CompanyShortCode FROM tblCompany");
+      if (compRes.recordset && compRes.recordset.length > 0) {
+        companyShortCode = (compRes.recordset[0].CompanyShortCode || "").trim().toUpperCase();
+      }
+    } catch (cErr) {
+      console.warn("CompanyShortCode fetch warning:", cErr.message);
+    }
+
     await transaction.commit();
-    res.json({ success: true, message: `Please take note the sales return no ${sNextRetNo}`, returnNo: sNextRetNo });
+    res.json({
+      success: true,
+      message: `Please take note the sales return no ${sNextRetNo}`,
+      returnNo: sNextRetNo,
+      companyShortCode: companyShortCode
+    });
   } catch (err) {
     console.error("Save Sales Return Error:", err);
     try {

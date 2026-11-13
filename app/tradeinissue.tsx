@@ -1,6 +1,7 @@
 import { ThemedText } from '@/components/themed-text';
 import { API_BASE_URL } from '@/constants/api';
 import { useThemeColors } from '@/hooks/useThemeColors';
+import { UNIPRO_LOGO_DATA_URI } from '@/utils/uniproLogo';
 import { Ionicons } from '@expo/vector-icons';
 import { Stack, useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
@@ -261,6 +262,13 @@ export default function TradeInIssueScreen() {
 
       if (data.success) {
         showToast('Tradein Gold Issued Sucessfully', 'success');
+        const assignedNo = data.tradeIssueNo || issueNo;
+        // Automatically prompt to print matching VB.NET subPrint after issue proceed
+        if (assignedNo && assignedNo.trim()) {
+          setTimeout(() => {
+            subPrint(assignedNo.trim());
+          }, 400);
+        }
         handleClear();
       } else {
         showToast(data.message || 'Error in save', 'error');
@@ -269,6 +277,634 @@ export default function TradeInIssueScreen() {
       showToast('Network error while issuing trade-in gold', 'error');
     } finally {
       setSaving(false);
+    }
+  };
+
+  // Original subPrint() implementation (matching VB.NET subPrint in frmTradeInIssue)
+  // Selection: {tblTradeIssueHistory.TradeIssueNo} = sTradeInIssueNo
+  // Report Title: "Trade In Issue Report For " & sTradeInIssueNo
+  const subPrint = async (targetIssueNo: string) => {
+    const sTradeInIssueNo = (targetIssueNo || '').trim();
+    if (!sTradeInIssueNo) return;
+
+    try {
+      setLoading(true);
+
+      let company: any = { name: '', address1: '', address2: '', country: '', phone: '', fax: '' };
+      let header: any = null;
+      let historyRows: any[] = [];
+      let tradeBills: any[] = [];
+
+      // 1. Fetch print data from backend SQL Server
+      const res = await fetch(`${API_URL}/print-data?issueNo=${encodeURIComponent(sTradeInIssueNo)}`);
+      const json = await res.json();
+
+      if (json.success && json.data) {
+        company = json.data.company || company;
+        header = json.data.header || {};
+        historyRows = json.data.history || [];
+        tradeBills = json.data.tradeBills || [];
+      } else {
+        showToast(json.message || 'Trade In Issue record not found for print.', 'error');
+        setLoading(false);
+        return;
+      }
+
+      // Singapore Print Date & Time (Asia/Singapore)
+      const now = new Date();
+      const sgDateStr = now.toLocaleDateString('en-GB', {
+        timeZone: 'Asia/Singapore',
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+      });
+      const sgTimeStr = now.toLocaleTimeString('en-US', {
+        timeZone: 'Asia/Singapore',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: true,
+      });
+      const printTimestamp = `Printed: ${sgDateStr}, ${sgTimeStr}`;
+
+      // Issue Date
+      let issueDateFormatted = '';
+      const rawDate = header.TradeIssueDate || (historyRows[0] && historyRows[0].CreateDate);
+      if (rawDate) {
+        const vd = new Date(rawDate);
+        if (!isNaN(vd.getTime())) {
+          issueDateFormatted = `${String(vd.getDate()).padStart(2, '0')}/${String(vd.getMonth() + 1).padStart(2, '0')}/${vd.getFullYear()}`;
+        }
+      }
+      if (!issueDateFormatted) {
+        issueDateFormatted = sgDateStr;
+      }
+
+      // Detail rows
+      const itemsToRender = historyRows.length > 0 ? historyRows : tradeBills;
+      let totalWt = 0;
+      let totalAmount = 0;
+
+      const rowsHtml = itemsToRender.map((row: any, idx: number) => {
+        const invNo = String(row.InvoiceNo || row.InventoryCode || `ITEM-${idx + 1}`).trim();
+        const cust = String(row.CustomerName || '').trim();
+        const remarks = String(row.Remarks || '').trim();
+        const wt = parseFloat(row.TotalWeight || row.IssuedWeight || 0);
+        const rate = parseFloat(row.CostPerGram || header.CostPerGram || 0);
+        const amt = parseFloat(row.TotalCost || row.Amount || (wt * rate) || 0);
+
+        totalWt += wt;
+        totalAmount += amt;
+
+        return `
+          <tr>
+            <td style="text-align: center; font-weight: 700;">${idx + 1}</td>
+            <td style="text-align: center; font-weight: 600;">${invNo || '-'}</td>
+            <td style="text-align: left; font-weight: 500;">${cust || 'REFINERY / WHOLESALE'}</td>
+            <td style="text-align: right;">${wt.toFixed(3)}</td>
+            <td style="text-align: right;">${rate > 0 ? `$ ${rate.toFixed(2)}` : '-'}</td>
+            <td style="text-align: right; font-weight: 700;">$ ${amt.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+            <td style="text-align: left; font-size: 10px;">${remarks || '-'}</td>
+          </tr>
+        `;
+      }).join('');
+
+      const sCompanyname = (company.name || 'SMART GOLD').trim();
+      const sAddress = [company.address1, company.address2, company.country].filter(Boolean).join(' ');
+      const sPhone = (company.phone || '').trim();
+      const sFax = (company.fax || '').trim();
+      const sReportTitle = `Trade In Issue Report For ${sTradeInIssueNo}`;
+
+      const printHtml = `
+        <!DOCTYPE html>
+        <html>
+          <head>
+            <meta charset="utf-8" />
+            <title>${sReportTitle}</title>
+            <style>
+              @page {
+                size: A4 portrait;
+                margin: 0 !important;
+              }
+              html, body {
+                margin: 0;
+                padding: 0;
+                background-color: #f7f5f0;
+                font-family: Cambria, Georgia, "Times New Roman", serif !important;
+                color: #3b2d17;
+                -webkit-print-color-adjust: exact !important;
+                print-color-adjust: exact !important;
+              }
+              .page-sheet {
+                width: 210mm;
+                min-height: 297mm;
+                margin: 15px auto;
+                background: #ffffff;
+                padding: 10mm 12mm;
+                box-sizing: border-box;
+                display: flex;
+                flex-direction: column;
+                font-family: Cambria, Georgia, "Times New Roman", serif !important;
+                box-shadow: 0 4px 14px rgba(0,0,0,0.08);
+              }
+
+              /* HEADER SECTION */
+              .header-row {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                margin-bottom: 6px;
+                position: relative;
+              }
+              .header-left {
+                width: 140px;
+                display: flex;
+                align-items: center;
+              }
+              .header-left img.unipro-logo-img {
+                max-height: 48px;
+                max-width: 135px;
+                object-fit: contain;
+                display: block;
+              }
+              .header-center {
+                flex: 1;
+                text-align: center;
+                padding: 0 10px;
+              }
+              .company-title {
+                font-family: Cambria, Georgia, "Times New Roman", serif !important;
+                font-size: 26px;
+                font-weight: 700;
+                color: #996515;
+                letter-spacing: 2px;
+                text-transform: uppercase;
+                margin-bottom: 3px;
+                line-height: 1.15;
+              }
+              .company-address {
+                font-family: Cambria, Georgia, "Times New Roman", serif !important;
+                font-size: 11px;
+                color: #4a3b22;
+                font-weight: 700;
+                letter-spacing: 0.5px;
+                text-transform: uppercase;
+              }
+              .header-right {
+                width: 140px;
+                text-align: right;
+                font-size: 11px;
+                color: #705832;
+                font-weight: 600;
+              }
+              .header-right table {
+                float: right;
+                font-size: 10.5px;
+                border-collapse: collapse;
+              }
+              .header-right td {
+                padding: 1px 3px;
+              }
+              .header-ornament {
+                text-align: center;
+                margin: 6px 0 10px 0;
+                color: #d4a742;
+                font-size: 14px;
+                position: relative;
+              }
+              .header-ornament::before,
+              .header-ornament::after {
+                content: "";
+                position: absolute;
+                top: 50%;
+                width: calc(50% - 18px);
+                height: 1.5px;
+                background: #d4a742;
+              }
+              .header-ornament::before { left: 0; }
+              .header-ornament::after { right: 0; }
+
+              /* REPORT TITLE AREA */
+              .report-title-area {
+                text-align: center;
+                margin-bottom: 12px;
+              }
+              .report-main-title {
+                font-family: Cambria, Georgia, "Times New Roman", serif !important;
+                font-size: 20px;
+                font-weight: 700;
+                color: #3b2d17;
+                letter-spacing: 1px;
+                text-transform: uppercase;
+                margin-bottom: 4px;
+              }
+              .report-sub-info {
+                font-family: Cambria, Georgia, "Times New Roman", serif !important;
+                font-size: 11.5px;
+                color: #705832;
+                font-weight: 600;
+                margin-bottom: 2px;
+              }
+              .report-period-line {
+                font-family: Cambria, Georgia, "Times New Roman", serif !important;
+                font-size: 11.5px;
+                color: #705832;
+                font-weight: 600;
+                margin-top: 3px;
+              }
+
+              /* META CARD */
+              .meta-card-container {
+                display: flex;
+                flex-direction: column;
+                gap: 8px;
+                margin-bottom: 14px;
+              }
+              .meta-info-card {
+                display: flex;
+                justify-content: space-between;
+                background: #fffbf2;
+                border: 1px solid #d4a742;
+                border-radius: 6px;
+                padding: 8px 14px;
+                font-size: 11.5px;
+              }
+              .meta-item {
+                display: flex;
+                flex-direction: column;
+              }
+              .meta-label {
+                font-size: 10px;
+                font-weight: 700;
+                color: #705832;
+                text-transform: uppercase;
+                letter-spacing: 0.5px;
+                margin-bottom: 2px;
+              }
+              .meta-val {
+                font-size: 12px;
+                font-weight: 700;
+                color: #996515;
+              }
+
+              /* DETAIL TABLE */
+              .table-container {
+                width: 100%;
+                overflow: hidden;
+                margin-bottom: 10px;
+              }
+              table.report-table {
+                width: 100% !important;
+                border-collapse: collapse;
+                font-family: Cambria, Georgia, "Times New Roman", serif !important;
+                font-size: 11px;
+                border: 0.75px solid #d4a742;
+              }
+              table.report-table thead th {
+                background-color: #996515 !important;
+                color: #ffffff !important;
+                font-weight: 700 !important;
+                font-family: Cambria, Georgia, "Times New Roman", serif !important;
+                padding: 7px 6px;
+                letter-spacing: 0.4px;
+                border: 0.75px solid #d4a742;
+                font-size: 11px;
+                line-height: 1.2;
+                text-align: center !important;
+                text-transform: uppercase !important;
+              }
+              table.report-table tbody td {
+                padding: 6px 6px;
+                color: #3b2d17;
+                font-family: Cambria, Georgia, "Times New Roman", serif !important;
+                border: 0.75px solid #f0d9a0;
+                font-size: 11px;
+                line-height: 1.25;
+              }
+              table.report-table tbody tr:nth-child(even) td {
+                background-color: #fffbf2 !important;
+              }
+              table.report-table tbody tr:nth-child(odd) td {
+                background-color: #ffffff !important;
+              }
+              table.report-table tr.grand-total-row td {
+                background-color: #fff8e7 !important;
+                font-weight: 700 !important;
+                font-family: Cambria, Georgia, "Times New Roman", serif !important;
+                color: #996515 !important;
+                border: 0.75px solid #d4a742 !important;
+                border-top: 1.5px solid #d4a742 !important;
+                border-bottom: 1.5px solid #d4a742 !important;
+                padding: 7px 6px;
+                font-size: 11px;
+              }
+
+              /* SIGNATURE SECTION */
+              .signature-section {
+                margin-top: 30px;
+                width: 100%;
+                display: flex;
+                justify-content: space-between;
+                font-size: 11px;
+                page-break-inside: avoid;
+                break-inside: avoid;
+              }
+              .sign-card {
+                width: 48%;
+                border: 1px solid #d4a742;
+                border-radius: 6px;
+                background-color: #ffffff;
+                padding: 10px 14px;
+                box-sizing: border-box;
+              }
+              .sign-header {
+                font-size: 11.5px;
+                font-weight: 700;
+                color: #996515;
+                text-transform: uppercase;
+                margin-bottom: 10px;
+                border-bottom: 1px dashed #d4a742;
+                padding-bottom: 4px;
+              }
+              .sign-row {
+                margin-bottom: 8px;
+                color: #4a3b22;
+                font-size: 11px;
+                white-space: nowrap;
+              }
+
+              /* FOOTER */
+              .report-footer {
+                margin-top: auto !important;
+                text-align: center;
+                padding-top: 14px;
+                padding-bottom: 2mm;
+                page-break-inside: avoid;
+                break-inside: avoid;
+              }
+              .footer-divider {
+                width: 100%;
+                height: 1.5px;
+                background: #d4a742;
+                margin-bottom: 10px;
+              }
+              .footer-gen-text {
+                font-size: 11px;
+                color: #705832;
+                font-weight: 600;
+                margin-bottom: 3px;
+              }
+              .footer-powered {
+                font-size: 12px;
+                color: #996515;
+                font-weight: 700;
+              }
+
+              /* TOOLBAR */
+              .print-toolbar {
+                position: fixed;
+                top: 16px;
+                right: 20px;
+                z-index: 1000;
+              }
+              .btn-action {
+                background: #996515;
+                color: #fff;
+                border: none;
+                padding: 9px 20px;
+                font-family: Cambria, Georgia, serif;
+                font-size: 12px;
+                font-weight: 700;
+                border-radius: 6px;
+                cursor: pointer;
+                box-shadow: 0 4px 12px rgba(153, 101, 21, 0.25);
+              }
+              .btn-action:hover {
+                background: #7a5408;
+              }
+
+              @media print {
+                @page {
+                  margin: 0 !important;
+                  size: A4 portrait;
+                }
+                html, body {
+                  background: #fff !important;
+                  padding: 0 !important;
+                  margin: 0 !important;
+                  height: 100% !important;
+                }
+                .print-toolbar {
+                  display: none !important;
+                }
+                .page-sheet {
+                  width: 100% !important;
+                  min-height: 297mm !important;
+                  height: 100% !important;
+                  margin: 0 !important;
+                  padding: 10mm 12mm 10mm 12mm !important;
+                  box-shadow: none !important;
+                  box-sizing: border-box !important;
+                  display: flex !important;
+                  flex-direction: column !important;
+                }
+                table.report-table {
+                  page-break-inside: auto;
+                }
+                tr {
+                  page-break-inside: avoid;
+                  break-inside: avoid;
+                }
+                thead {
+                  display: table-header-group;
+                }
+                tfoot {
+                  display: table-footer-group;
+                }
+                .signature-section {
+                  page-break-inside: avoid;
+                  break-inside: avoid;
+                }
+                .report-footer {
+                  margin-top: auto !important;
+                  page-break-inside: avoid !important;
+                  break-inside: avoid !important;
+                  padding-bottom: 4mm !important;
+                }
+              }
+            </style>
+          </head>
+          <body>
+            <div class="print-toolbar">
+              <button class="btn-action" onclick="window.print()">Print Report</button>
+            </div>
+
+            <div class="page-sheet">
+              <!-- HEADER -->
+              <div class="header-row">
+                <div class="header-left">
+                  <img src="${UNIPRO_LOGO_DATA_URI}" alt="UNIPRO" class="unipro-logo-img" />
+                </div>
+
+                <div class="header-center">
+                  <div class="company-title">${sCompanyname}</div>
+                  ${sAddress ? `<div class="company-address">${sAddress}</div>` : ''}
+                  ${sPhone ? `<div class="company-address" style="margin-top: 2px;">TEL: ${sPhone}${sFax ? ` &nbsp; FAX: ${sFax}` : ''}</div>` : ''}
+                </div>
+
+                <div class="header-right">
+                  <table>
+                    <tr><td>PAGE</td><td>:</td><td style="font-weight: 700;">1</td></tr>
+                  </table>
+                </div>
+              </div>
+
+              <div class="header-ornament">◆</div>
+
+              <!-- REPORT TITLE -->
+              <div class="report-title-area">
+                <div class="report-main-title">TRADE IN ISSUE REPORT</div>
+                <div class="report-sub-info">ISSUE NO: ${sTradeInIssueNo}</div>
+                <div class="report-period-line">${printTimestamp}</div>
+              </div>
+
+              <!-- META CARD -->
+              <div class="meta-card-container">
+                <div class="meta-info-card">
+                  <div class="meta-item">
+                    <span class="meta-label">Trade Issue No</span>
+                    <span class="meta-val">${sTradeInIssueNo}</span>
+                  </div>
+                  <div class="meta-item">
+                    <span class="meta-label">Issue Date</span>
+                    <span class="meta-val">${issueDateFormatted}</span>
+                  </div>
+                  <div class="meta-item">
+                    <span class="meta-label">Supplier Code</span>
+                    <span class="meta-val">${header.SupplierCode || supplierCode || 'N/A'}</span>
+                  </div>
+                  <div class="meta-item">
+                    <span class="meta-label">Supplier Name</span>
+                    <span class="meta-val">${header.SupplierName || supplierName || 'REFINERY / WHOLESALE'}</span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- DETAIL TABLE -->
+              <div class="table-container">
+                <table class="report-table">
+                  <colgroup>
+                    <col style="width: 6%;" />
+                    <col style="width: 18%;" />
+                    <col style="width: 26%;" />
+                    <col style="width: 14%;" />
+                    <col style="width: 12%;" />
+                    <col style="width: 12%;" />
+                    <col style="width: 12%;" />
+                  </colgroup>
+                  <thead>
+                    <tr>
+                      <th>#</th>
+                      <th>BILL / INVOICE NO</th>
+                      <th style="text-align: left !important; padding-left: 8px;">PARTICULARS</th>
+                      <th style="text-align: right !important; padding-right: 8px;">ISSUED WT (g)</th>
+                      <th style="text-align: right !important; padding-right: 8px;">RATE / g</th>
+                      <th style="text-align: right !important; padding-right: 8px;">AMOUNT ($)</th>
+                      <th style="text-align: left !important; padding-left: 8px;">REMARKS</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    ${rowsHtml || '<tr><td colspan="7" style="text-align:center; padding: 12px;">No issue line items found</td></tr>'}
+
+                    <!-- Grand Total Row -->
+                    <tr class="grand-total-row">
+                      <td colspan="3" style="text-align: right !important; padding-right: 14px; font-weight: 700;">TOTAL ISSUED:</td>
+                      <td style="text-align: right !important; padding-right: 8px; font-weight: 700;">${totalWt.toFixed(3)}</td>
+                      <td></td>
+                      <td style="text-align: right !important; padding-right: 8px; font-weight: 700;">$ ${totalAmount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                      <td></td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+
+              <!-- SIGNATURE SECTION -->
+              <div class="signature-section">
+                <!-- Supplier Signature -->
+                <div class="sign-card">
+                  <div class="sign-header">RECEIVED BY (SUPPLIER / REFINERY)</div>
+                  <div class="sign-row">Authorized Sign: ...........................................</div>
+                  <div class="sign-row" style="margin-top: 14px;">Name: ................................................................</div>
+                  <div class="sign-row" style="margin-top: 14px;">Date: ................................................................</div>
+                </div>
+
+                <!-- Store Officer -->
+                <div class="sign-card">
+                  <div class="sign-header">DISPATCHED BY (STORE OFFICER)</div>
+                  <div class="sign-row">Authorized Sign: ...........................................</div>
+                  <div class="sign-row" style="margin-top: 14px;">Name: ................................................................</div>
+                  <div class="sign-row" style="margin-top: 14px;">Date: ................................................................</div>
+                </div>
+              </div>
+
+              <!-- FOOTER -->
+              <div class="report-footer">
+                <div class="footer-divider"></div>
+                <div class="footer-gen-text">*** System Generated Report ***</div>
+                <div class="footer-powered">Powered by Unipro SG</div>
+              </div>
+            </div>
+
+            <script>
+              window.onload = function() {
+                setTimeout(function() {
+                  window.print();
+                }, 300);
+              };
+            </script>
+          </body>
+        </html>
+      `;
+
+      if (Platform.OS === 'web' && typeof window !== 'undefined') {
+        const printWindow = window.open('', '_blank', 'width=900,height=750');
+        if (printWindow) {
+          printWindow.document.open();
+          printWindow.document.write(printHtml);
+          printWindow.document.close();
+          showToast('Trade In Issue report preview opened', 'success');
+        } else {
+          const blob = new Blob([printHtml], { type: 'text/html;charset=utf-8;' });
+          const url = URL.createObjectURL(blob);
+          const win = window.open(url, '_blank');
+          if (!win) {
+            showToast('Popup blocker prevented opening print preview. Please allow popups.', 'error');
+          } else {
+            showToast('Trade In Issue report preview opened', 'success');
+          }
+        }
+      } else {
+        showToast('Print preview generated.', 'success');
+      }
+
+    } catch (err: any) {
+      console.error('Print Error:', err);
+      showToast('Error generating print preview: ' + (err.message || 'Error'), 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Exact VB.NET btnPrint_Click validation:
+  // If txtTradeIssueNo.Text.Trim <> "" Then
+  //     subPrint(txtTradeIssueNo.Text.Trim)
+  // End If
+  const handlePrintClick = () => {
+    try {
+      if (issueNo && issueNo.trim() !== '') {
+        subPrint(issueNo.trim());
+      }
+    } catch (ex: any) {
+      showToast(ex.message || 'Error executing print', 'error');
     }
   };
 
@@ -302,8 +938,9 @@ export default function TradeInIssueScreen() {
 
           <TouchableOpacity
             style={[styles.actionBtn, styles.reprintBtn]}
-            onPress={() => showToast('Printing issue voucher...', 'success')}
+            onPress={handlePrintClick}
             activeOpacity={0.8}
+            disabled={saving || loading}
           >
             <Ionicons name="print-outline" size={14} color="#5C4A28" />
             <ThemedText style={styles.clearBtnText}>Print</ThemedText>

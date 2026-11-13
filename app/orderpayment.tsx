@@ -1,8 +1,9 @@
 import { ThemedText } from '@/components/themed-text';
 import { API_BASE_URL } from '@/constants/api';
 import { useThemeColors } from '@/hooks/useThemeColors';
+import { UNIPRO_LOGO_DATA_URI } from '@/utils/uniproLogo';
 import { Ionicons } from '@expo/vector-icons';
-import { Stack, useRouter } from 'expo-router';
+import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useEffect, useState, useRef } from 'react';
 import {
   ActivityIndicator,
@@ -25,9 +26,13 @@ const FLEXI_API_URL = `${API_BASE_URL}/orderpayment/flexi`;
 export default function OrderPaymentScreen() {
   const themeColors = useThemeColors();
   const router = useRouter();
+  const params = useLocalSearchParams();
 
   const [loading, setLoading] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+
+  const orderNoInputRef = useRef<any>(null);
+  const reprintInputRef = useRef<any>(null);
 
   // Form State
   const [orderNo, setOrderNo] = useState('');
@@ -317,27 +322,672 @@ export default function OrderPaymentScreen() {
     }
   };
 
-  const handleReprint = async () => {
-    if (!reprintBillNo || !reprintBillNo.trim()) {
-      showToast('Please enter Bill No to reprint', 'error');
+  // Handle return from payingmode after save
+  useEffect(() => {
+    if (params?.paymentSuccess === 'true') {
+      const savedPaymentNo = (params.orderPaymentNo as string) || (params.paymentNo as string) || (params.savedInvoiceNo as string);
+      if (savedPaymentNo && savedPaymentNo.trim()) {
+        const cleanNo = savedPaymentNo.trim();
+        subPrintOrderPayment(cleanNo, false);
+      }
+      if (orderNo && orderNo.trim()) {
+        fetchBalance(orderNo.trim());
+      }
+    }
+  }, [params?.paymentSuccess]);
+
+  // Original Print Function matching subPrintOrderPayment(ByVal sInvoiceNo As String) in frmOrderPayment.vb
+  // Company specific report:
+  // If Trim(sCompanyShortCode) = "AJ" Then rptOrderPayment_AJ.rpt
+  // ElseIf Trim(sCompanyShortCode) = "MD" Then rptOrderPayment_MD.rpt
+  // ElseIf Trim(sCompanyShortCode) = "MJ" Then rptOrderPayment_MJ.rpt
+  // Selection: {tblOrderPaymentdetail.OrderPaymentNo} = sInvoiceNo
+  // Copies: If chkFinalPayment.Checked Then 1 Else 2
+  const subPrintOrderPayment = async (targetPaymentNo: string, isReprintMode: boolean = false) => {
+    const sInvoiceNo = (targetPaymentNo || '').trim();
+    if (!sInvoiceNo) {
       return;
     }
-    setLoading(true);
+
     try {
-      const res = await fetch(`${API_URL}/reprint/${encodeURIComponent(reprintBillNo.trim())}`);
+      setLoading(true);
+
+      let company: any = { name: '', address1: '', address2: '', city: '', state: '', country: '', phone: '', fax: '', companyShortCode: '' };
+      let payment: any = null;
+      let orderDetails: any[] = [];
+      let history: any[] = [];
+      let rates: any = { rate999: '', rate916: '', rate835: '', rate24k999: '', rate20k850: '', rate22ksov: '' };
+
+      // 1. Fetch actual data from backend SQL Server
+      const res = await fetch(`${API_URL}/print-data?paymentNo=${encodeURIComponent(sInvoiceNo)}`);
       const json = await res.json();
-      if (json.success) {
-        showToast(`Receipt ${reprintBillNo} found. Printing receipt...`, 'success');
-        setIsReprintModalVisible(false);
-        setReprintBillNo('');
+
+      if (json.success && json.data) {
+        company = json.data.company || company;
+        payment = json.data.payment || {};
+        orderDetails = json.data.orderDetails || [];
+        history = json.data.history || [];
+        rates = json.data.rates || rates;
       } else {
-        showToast(json.message || 'Bill not found for reprinting', 'error');
+        showToast(json.message || `Order payment voucher ${sInvoiceNo} not found for print.`, 'error');
+        setLoading(false);
+        return;
       }
-    } catch (err) {
-      showToast('Error loading receipt', 'error');
+
+      // Singapore Print Date & Time (Asia/Singapore)
+      const now = new Date();
+      const sgDateStr = now.toLocaleDateString('en-GB', {
+        timeZone: 'Asia/Singapore',
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+      });
+      const sgTimeStr = now.toLocaleTimeString('en-US', {
+        timeZone: 'Asia/Singapore',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: true,
+      });
+
+      // Original Formula Field Values:
+      // CompAddress1: CompName
+      // CompAddress2: Address1 & " " & Address2 & " " & Country
+      // CompAddress3: PhoneNo & " " & FaxNo
+      // Customer1: txtCustomerName.Text
+      // Customer2: txtAddress1.Text
+      // Customer3: txtAddress2.Text
+      // Rate1: s999
+      // Rate2: s916
+      // Rate3: s835
+      const sCompanyName = (company.name || 'SMART GOLD').trim();
+      const sCompAddress2 = [company.address1, company.address2, company.country].filter(Boolean).join(' ');
+      const sCompAddress3 = [company.phone, company.fax].filter(Boolean).join(' ');
+
+      const sCustomerName = (payment.CustomerName || customerName || '').trim();
+      const sCustomerCode = (payment.CustomerCode || customerCode || '').trim();
+      const sCustomerAddress1 = (payment.CustomerAddress1 || address || '').trim();
+      const sCustomerAddress2 = (payment.CustomerAddress2 || '').trim();
+      const sCustomerPhone = (payment.CustomerPhone || '').trim();
+
+      const s999 = rates.rate999 || '-';
+      const s916 = rates.rate916 || '-';
+      const s835 = rates.rate835 || '-';
+
+      const sOrderNo = (payment.OrderNo || orderNo || '').trim();
+      const sOrderPaymentNo = (payment.OrderPaymentNo || sInvoiceNo).trim();
+      const currentAmtPaid = parseFloat(payment.AmountPaid) || 0;
+      const totalEstimatedCost = parseFloat(payment.TotalCostEstimated) || parseFloat(estimatedCost) || 0;
+      const advancePaidAmt = parseFloat(payment.AdvancePaid) || 0;
+
+      // Compute total payments made
+      let totalInstallmentsPaid = 0;
+      history.forEach((h: any) => {
+        totalInstallmentsPaid += parseFloat(h.AmountPaid) || 0;
+      });
+      const grandTotalPaid = advancePaidAmt + totalInstallmentsPaid;
+      const balanceDue = totalEstimatedCost - grandTotalPaid;
+
+      // Format date helper
+      const formatDate = (val: any) => {
+        if (!val) return '-';
+        const d = new Date(val);
+        if (isNaN(d.getTime())) return String(val).split('T')[0] || '-';
+        return d.toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' });
+      };
+
+      const orderDateFormatted = formatDate(payment.OrderDate);
+      const deliveryDateFormatted = formatDate(payment.DeliveryDate);
+      const paymentDateFormatted = formatDate(payment.CreateDate || new Date());
+
+      // Print copy count: If chkFinalPayment.Checked Then 1 Else 2
+      const copyCount = finalPayment ? 1 : 2;
+
+      // Report Header Title:
+      // AJ: rptOrderPayment_AJ.rpt | MD: rptOrderPayment_MD.rpt | MJ: rptOrderPayment_MJ.rpt
+      const sReportTitle = isReprintMode ? 'ORDER PAYMENT RECEIPT (DUPLICATE COPY)' : 'ORDER PAYMENT RECEIPT';
+
+      // Generate HTML for each copy
+      const generatePageMarkup = (copyLabel: string) => {
+        return `
+          <div class="page-sheet">
+            <!-- BRAND / HEADER -->
+            <div class="report-header">
+              <div class="header-brand">
+                <img src="${UNIPRO_LOGO_DATA_URI}" alt="Logo" class="brand-logo" />
+                <div class="brand-details">
+                  <div class="company-name">${sCompanyName}</div>
+                  <div class="company-address">${sCompAddress2}</div>
+                  ${sCompAddress3 ? `<div class="company-address">${sCompAddress3}</div>` : ''}
+                </div>
+              </div>
+              <div class="header-meta">
+                <div class="report-badge">${sReportTitle}</div>
+                <div class="copy-tag">${copyLabel}</div>
+                <div class="doc-no">VOUCHER NO: <span>${sOrderPaymentNo}</span></div>
+                <div class="meta-date">Date: ${paymentDateFormatted} &nbsp;|&nbsp; ${sgTimeStr}</div>
+              </div>
+            </div>
+
+            <!-- GOLD RATES BANNER (Formula Fields: Rate1, Rate2, Rate3) -->
+            <div class="gold-rate-strip">
+              <div class="rate-cell"><span class="rate-lbl">Gold 999:</span> <span class="rate-val">$${s999}/g</span></div>
+              <div class="rate-divider">|</div>
+              <div class="rate-cell"><span class="rate-lbl">Gold 916 (22K):</span> <span class="rate-val">$${s916}/g</span></div>
+              <div class="rate-divider">|</div>
+              <div class="rate-cell"><span class="rate-lbl">Gold 835 (20K):</span> <span class="rate-val">$${s835}/g</span></div>
+            </div>
+
+            <!-- TWO-COLUMN INFO: CUSTOMER vs ORDER -->
+            <div class="info-grid">
+              <!-- Customer Box (Formula Fields: Customer1, Customer2, Customer3) -->
+              <div class="info-card">
+                <div class="card-title">CUSTOMER DETAILS</div>
+                <div class="info-row"><span class="info-lbl">Customer:</span> <span class="info-val font-bold">${sCustomerName || 'CASH CUSTOMER'}</span></div>
+                <div class="info-row"><span class="info-lbl">Cust Code:</span> <span class="info-val">${sCustomerCode || '-'}</span></div>
+                <div class="info-row"><span class="info-lbl">Address 1:</span> <span class="info-val">${sCustomerAddress1 || '-'}</span></div>
+                ${sCustomerAddress2 ? `<div class="info-row"><span class="info-lbl">Address 2:</span> <span class="info-val">${sCustomerAddress2}</span></div>` : ''}
+                ${sCustomerPhone ? `<div class="info-row"><span class="info-lbl">Contact:</span> <span class="info-val">${sCustomerPhone}</span></div>` : ''}
+              </div>
+
+              <!-- Order Box -->
+              <div class="info-card">
+                <div class="card-title">ORDER SPECIFICATION</div>
+                <div class="info-row"><span class="info-lbl">Order No:</span> <span class="info-val font-bold">${sOrderNo}</span></div>
+                <div class="info-row"><span class="info-lbl">Order Date:</span> <span class="info-val">${orderDateFormatted}</span></div>
+                <div class="info-row"><span class="info-lbl">Delivery Due:</span> <span class="info-val">${deliveryDateFormatted}</span></div>
+                <div class="info-row"><span class="info-lbl">Settlement Mode:</span> <span class="info-val font-bold">${finalPayment ? 'FINAL PAYMENT (FULL)' : 'PARTIAL ADVANCE / INSTALMENT'}</span></div>
+                <div class="info-row"><span class="info-lbl">Remarks:</span> <span class="info-val">${payment.Remarks || '-'}</span></div>
+              </div>
+            </div>
+
+            <!-- CURRENT PAYMENT VOUCHER HIGHLIGHT -->
+            <div class="current-payment-card">
+              <div class="payment-title">PAYMENT RECEIVED THIS VOUCHER</div>
+              <div class="payment-amount">$ ${currentAmtPaid.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+            </div>
+
+            <!-- PAYMENT HISTORY / ACCUMULATED LEDGER -->
+            <div class="section-heading">PAYMENT HISTORY / STATEMENT</div>
+            <table class="receipt-table">
+              <thead>
+                <tr>
+                  <th style="width: 10%; text-align: center;">#</th>
+                  <th style="width: 28%; text-align: left;">Payment Voucher</th>
+                  <th style="width: 22%; text-align: center;">Date</th>
+                  <th style="width: 22%; text-align: left;">Remarks</th>
+                  <th style="width: 18%; text-align: right;">Amount Paid ($)</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${
+                  history.length > 0
+                    ? history
+                        .map(
+                          (h: any, idx: number) => `
+                        <tr class="${h.OrderPaymentNo === sOrderPaymentNo ? 'highlight-row' : ''}">
+                          <td style="text-align: center;">${idx + 1}</td>
+                          <td style="text-align: left; font-weight: 600;">${h.OrderPaymentNo} ${h.OrderPaymentNo === sOrderPaymentNo ? '*(This Voucher)*' : ''}</td>
+                          <td style="text-align: center;">${formatDate(h.CreateDate)}</td>
+                          <td style="text-align: left;">${h.Remarks || '-'}</td>
+                          <td style="text-align: right; font-weight: 700;">$${parseFloat(h.AmountPaid || 0).toFixed(2)}</td>
+                        </tr>
+                      `
+                        )
+                        .join('')
+                    : `<tr><td colspan="5" style="text-align: center; color: #888; padding: 10px;">Initial Deposit Voucher: $${currentAmtPaid.toFixed(2)}</td></tr>`
+                }
+              </tbody>
+            </table>
+
+            <!-- SUMMARY FINANCIAL BALANCES -->
+            <div class="summary-box">
+              <div class="summary-row">
+                <span class="sum-lbl">Estimated Total Order Value:</span>
+                <span class="sum-val font-bold">$ ${totalEstimatedCost.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+              </div>
+              <div class="summary-row">
+                <span class="sum-lbl">Initial Booking Advance Paid:</span>
+                <span class="sum-val">$ ${advancePaidAmt.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+              </div>
+              <div class="summary-row">
+                <span class="sum-lbl">Total Payments Received To Date:</span>
+                <span class="sum-val font-bold" style="color: #0F5132;">$ ${grandTotalPaid.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+              </div>
+              <div class="summary-divider"></div>
+              <div class="summary-row grand-total-row">
+                <span class="sum-lbl font-bold" style="font-size: 13px;">REMAINING BALANCE DUE:</span>
+                <span class="sum-val font-bold" style="font-size: 15px; color: ${balanceDue <= 0.01 ? '#0F5132' : '#842029'};">
+                  $ ${balanceDue > 0 ? balanceDue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '0.00 (FULLY SETTLED)'}
+                </span>
+              </div>
+            </div>
+
+            <!-- SIGNATURE SECTION -->
+            <div class="signature-section">
+              <div class="sign-card">
+                <div class="sign-header">CUSTOMER ACKNOWLEDGEMENT</div>
+                <div class="sign-row">Customer Name: ${sCustomerName || '...............................'}</div>
+                <div class="sign-row" style="margin-top: 14px;">Signature: ....................................................</div>
+              </div>
+              <div class="sign-card">
+                <div class="sign-header">AUTHORIZED STORE OFFICER</div>
+                <div class="sign-row">Received By: ${payment.CreateUser || 'Staff'}</div>
+                <div class="sign-row" style="margin-top: 14px;">Signature: ....................................................</div>
+              </div>
+            </div>
+
+            <!-- FOOTER -->
+            <div class="report-footer">
+              <div class="footer-divider"></div>
+              <div class="footer-gen-text">*** System Generated Order Payment Receipt ***</div>
+              <div class="footer-powered">Powered by Unipro SG</div>
+            </div>
+          </div>
+        `;
+      };
+
+      let printPagesHtml = '';
+      if (copyCount === 1) {
+        printPagesHtml = generatePageMarkup('CUSTOMER / OFFICIAL COPY');
+      } else {
+        printPagesHtml = `
+          ${generatePageMarkup('CUSTOMER COPY')}
+          ${generatePageMarkup('OFFICE COPY')}
+        `;
+      }
+
+      const printHtml = `
+        <!DOCTYPE html>
+        <html>
+          <head>
+            <meta charset="utf-8" />
+            <title>Order Payment Receipt - ${sOrderPaymentNo}</title>
+            <style>
+              @page {
+                size: A4 portrait;
+                margin: 0;
+              }
+              *, *:before, *:after {
+                box-sizing: border-box;
+              }
+              body {
+                font-family: 'Segoe UI', Tahoma, Arial, sans-serif;
+                margin: 0;
+                padding: 0;
+                background-color: #525659;
+                color: #222;
+                -webkit-print-color-adjust: exact;
+                print-color-adjust: exact;
+              }
+              .page-sheet {
+                background: #FFFFFF;
+                width: 210mm;
+                min-height: 297mm;
+                margin: 10mm auto;
+                padding: 12mm 15mm;
+                box-shadow: 0 4px 15px rgba(0, 0, 0, 0.35);
+                display: flex;
+                flex-direction: column;
+                justify-content: space-between;
+              }
+              .report-header {
+                display: flex;
+                justify-content: space-between;
+                align-items: flex-start;
+                border-bottom: 2px solid #8D6409;
+                padding-bottom: 8px;
+              }
+              .header-brand {
+                display: flex;
+                align-items: center;
+                gap: 12px;
+                max-width: 58%;
+              }
+              .brand-logo {
+                width: 55px;
+                height: 55px;
+                object-fit: contain;
+              }
+              .company-name {
+                font-size: 18px;
+                font-weight: 800;
+                color: #5C4A28;
+                letter-spacing: 0.5px;
+                text-transform: uppercase;
+              }
+              .company-address {
+                font-size: 10px;
+                color: #555;
+                line-height: 1.35;
+                margin-top: 2px;
+              }
+              .header-meta {
+                text-align: right;
+              }
+              .report-badge {
+                font-size: 13px;
+                font-weight: 800;
+                color: #8D6409;
+                letter-spacing: 0.6px;
+                text-transform: uppercase;
+              }
+              .copy-tag {
+                display: inline-block;
+                background: #FDF4D9;
+                color: #7D5E19;
+                font-size: 9px;
+                font-weight: 700;
+                padding: 2px 8px;
+                border-radius: 4px;
+                margin-top: 3px;
+                border: 1px solid #E6D29F;
+              }
+              .doc-no {
+                font-size: 12px;
+                font-weight: 700;
+                color: #111;
+                margin-top: 4px;
+              }
+              .doc-no span {
+                color: #8D6409;
+                font-family: monospace;
+                font-size: 13px;
+              }
+              .meta-date {
+                font-size: 10px;
+                color: #666;
+                margin-top: 2px;
+              }
+
+              /* GOLD RATE STRIP */
+              .gold-rate-strip {
+                display: flex;
+                justify-content: center;
+                align-items: center;
+                gap: 16px;
+                background: #FAF6EB;
+                border: 1px solid #E6D7AD;
+                padding: 5px 12px;
+                margin: 8px 0;
+                border-radius: 4px;
+                font-size: 10px;
+              }
+              .rate-lbl {
+                font-weight: 600;
+                color: #6E5316;
+              }
+              .rate-val {
+                font-weight: 800;
+                color: #222;
+                margin-left: 4px;
+              }
+              .rate-divider {
+                color: #D4C3A3;
+              }
+
+              /* TWO-COLUMN INFO */
+              .info-grid {
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: 12px;
+                margin-bottom: 8px;
+              }
+              .info-card {
+                background: #FAF8F4;
+                border: 1px solid #E5DFD4;
+                border-radius: 4px;
+                padding: 8px 10px;
+              }
+              .card-title {
+                font-size: 10px;
+                font-weight: 700;
+                color: #7D5E19;
+                border-bottom: 1px solid #E5DFD4;
+                padding-bottom: 3px;
+                margin-bottom: 4px;
+                text-transform: uppercase;
+              }
+              .info-row {
+                font-size: 10px;
+                line-height: 1.4;
+                display: flex;
+              }
+              .info-lbl {
+                width: 32%;
+                color: #666;
+                font-weight: 500;
+              }
+              .info-val {
+                width: 68%;
+                color: #222;
+              }
+              .font-bold {
+                font-weight: 700;
+              }
+
+              /* CURRENT PAYMENT CARD */
+              .current-payment-card {
+                background: #EBF7EE;
+                border: 1.5px solid #A3D9B1;
+                border-radius: 6px;
+                padding: 8px 14px;
+                text-align: center;
+                margin: 6px 0 10px 0;
+              }
+              .payment-title {
+                font-size: 11px;
+                font-weight: 700;
+                color: #0F5132;
+                letter-spacing: 0.5px;
+                text-transform: uppercase;
+              }
+              .payment-amount {
+                font-size: 22px;
+                font-weight: 800;
+                color: #0F5132;
+                margin-top: 2px;
+                font-family: monospace;
+              }
+
+              .section-heading {
+                font-size: 11px;
+                font-weight: 700;
+                color: #5C4A28;
+                text-transform: uppercase;
+                margin: 6px 0 4px 0;
+                border-bottom: 1px solid #D4C3A3;
+                padding-bottom: 2px;
+              }
+
+              /* TABLE */
+              .receipt-table {
+                width: 100%;
+                border-collapse: collapse;
+                margin-bottom: 8px;
+                font-size: 10px;
+              }
+              .receipt-table th {
+                background: #F1ECE0;
+                color: #4A3A1E;
+                font-weight: 700;
+                padding: 5px 6px;
+                border: 1px solid #D8CFC0;
+              }
+              .receipt-table td {
+                padding: 5px 6px;
+                border: 1px solid #E5DFD4;
+                color: #222;
+              }
+              .highlight-row {
+                background-color: #FFF9E6;
+              }
+
+              /* SUMMARY */
+              .summary-box {
+                margin-left: auto;
+                width: 65%;
+                background: #FAF8F4;
+                border: 1px solid #E5DFD4;
+                border-radius: 4px;
+                padding: 8px 12px;
+                margin-bottom: 10px;
+              }
+              .summary-row {
+                display: flex;
+                justify-content: space-between;
+                font-size: 10px;
+                line-height: 1.5;
+              }
+              .summary-divider {
+                border-top: 1px dashed #C9BC9F;
+                margin: 4px 0;
+              }
+              .grand-total-row {
+                padding-top: 2px;
+              }
+
+              /* SIGNATURE */
+              .signature-section {
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: 20px;
+                margin-top: 8px;
+              }
+              .sign-card {
+                border: 1px dashed #B8AB91;
+                border-radius: 4px;
+                padding: 8px 10px;
+                font-size: 10px;
+                background: #FFFEFC;
+              }
+              .sign-header {
+                font-weight: 700;
+                color: #5C4A28;
+                border-bottom: 1px solid #EDE6D8;
+                padding-bottom: 3px;
+                margin-bottom: 6px;
+                font-size: 9px;
+              }
+              .sign-row {
+                color: #333;
+                line-height: 1.3;
+              }
+
+              /* FOOTER */
+              .report-footer {
+                margin-top: 8px;
+                text-align: center;
+              }
+              .footer-divider {
+                border-top: 1px solid #E0D7C5;
+                margin-bottom: 4px;
+              }
+              .footer-gen-text {
+                font-size: 9px;
+                color: #777;
+                font-style: italic;
+              }
+              .footer-powered {
+                font-size: 8px;
+                color: #999;
+                margin-top: 1px;
+              }
+
+              @media print {
+                body {
+                  background: none !important;
+                }
+                .page-sheet {
+                  width: 100% !important;
+                  min-height: 297mm !important;
+                  height: 100% !important;
+                  margin: 0 !important;
+                  padding: 10mm 12mm !important;
+                  box-shadow: none !important;
+                  display: flex !important;
+                  flex-direction: column !important;
+                  page-break-after: always !important;
+                }
+                .page-sheet:last-child {
+                  page-break-after: auto !important;
+                }
+              }
+            </style>
+          </head>
+          <body>
+            ${printPagesHtml}
+            <script>
+              window.onload = function() {
+                setTimeout(function() {
+                  window.print();
+                }, 300);
+              };
+            </script>
+          </body>
+        </html>
+      `;
+
+      if (Platform.OS === 'web' && typeof window !== 'undefined') {
+        const printWindow = window.open('', '_blank', 'width=900,height=750');
+        if (printWindow) {
+          printWindow.document.open();
+          printWindow.document.write(printHtml);
+          printWindow.document.close();
+          showToast('Order Payment receipt preview opened', 'success');
+        } else {
+          const blob = new Blob([printHtml], { type: 'text/html;charset=utf-8;' });
+          const url = URL.createObjectURL(blob);
+          const win = window.open(url, '_blank');
+          if (!win) {
+            showToast('Popup blocker prevented opening print preview. Please allow popups.', 'error');
+          } else {
+            showToast('Order Payment receipt preview opened', 'success');
+          }
+        }
+      } else {
+        showToast('Print preview generated.', 'success');
+      }
+
+    } catch (err: any) {
+      console.error('Print Error:', err);
+      showToast('Error generating print preview: ' + (err.message || 'Error'), 'error');
     } finally {
       setLoading(false);
     }
+  };
+
+  // RePrint button click handler (matching frmOrderPayment btnRePrint_Click)
+  // Private Sub btnRePrint_Click(sender As System.Object, e As System.EventArgs) Handles btnRePrint.Click
+  //     PnlReprint.Visible = True
+  //     txtRePrintBillNo.Clear()
+  //     txtRePrintBillNo.Focus()
+  // End Sub
+  const handleOpenReprintModal = () => {
+    setReprintBillNo('');
+    setIsReprintModalVisible(true);
+    setTimeout(() => {
+      reprintInputRef.current?.focus?.();
+    }, 100);
+  };
+
+  // Modal RePrint OK handler (matching frmOrderPayment btnReprintOK_Click)
+  // Private Sub btnReprintOK_Click(ByVal sender As System.Object, ByVal e As System.EventArgs) Handles btnReprintOK.Click
+  //     If Trim(txtRePrintBillNo.Text) <> "" Then
+  //         bReprint = True
+  //         Call subPrintOrderPayment(Trim(txtRePrintBillNo.Text))
+  //         bReprint = False
+  //         PnlReprint.Visible = False
+  //     End If
+  // End Sub
+  const handleReprintSubmit = async () => {
+    const cleanNo = (reprintBillNo || '').trim();
+    if (!cleanNo) {
+      // Original VB: If Trim(txtRePrintBillNo.Text) <> "" Then ... Else nothing happens
+      return;
+    }
+    setIsReprintModalVisible(false);
+    setReprintBillNo('');
+    subPrintOrderPayment(cleanNo, true);
   };
 
   return (
@@ -370,8 +1020,9 @@ export default function OrderPaymentScreen() {
 
           <TouchableOpacity
             style={[styles.actionBtn, styles.reprintBtn]}
-            onPress={() => setIsReprintModalVisible(true)}
+            onPress={handleOpenReprintModal}
             activeOpacity={0.8}
+            disabled={loading}
           >
             <Ionicons name="print-outline" size={14} color="#5C4A28" />
             <ThemedText style={styles.clearBtnText}>RePrint</ThemedText>
@@ -1018,9 +1669,11 @@ export default function OrderPaymentScreen() {
                 Order Payment Bill No:
               </ThemedText>
               <TextInput
+                ref={reprintInputRef}
                 style={[styles.formInput, { height: 38 }]}
                 value={reprintBillNo}
                 onChangeText={setReprintBillNo}
+                onSubmitEditing={handleReprintSubmit}
                 placeholder="e.g. OP1 or OP-HQ00000001"
                 placeholderTextColor="#9E8D77"
                 autoFocus
@@ -1037,7 +1690,7 @@ export default function OrderPaymentScreen() {
 
                 <TouchableOpacity
                   style={[styles.actionBtn, styles.saveBtn, { paddingHorizontal: 20, height: 36 }]}
-                  onPress={handleReprint}
+                  onPress={handleReprintSubmit}
                   activeOpacity={0.8}
                   disabled={loading}
                 >

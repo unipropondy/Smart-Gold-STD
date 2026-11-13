@@ -200,4 +200,124 @@ router.post("/save", async (req, res) => {
   }
 });
 
+// GET /api/tradeingoldissue/print-data
+// Fetch actual Trade-In voucher data from SQL Server for printing
+router.get("/print-data", async (req, res) => {
+  try {
+    const { invoiceNo } = req.query;
+    if (!invoiceNo || !invoiceNo.trim()) {
+      return res.status(400).json({ success: false, message: "Voucher / Invoice Number is required for print." });
+    }
+
+    const pool = req.pool;
+    const cleanNo = invoiceNo.trim();
+
+    // 1. Fetch Company Information
+    const compRes = await pool.request().query("SELECT TOP 1 * FROM tblCompany");
+    const rawCompany = compRes.recordset[0] || {};
+    const company = {
+      name: String(rawCompany.Name || rawCompany.CompanyName || '').trim(),
+      address1: String(rawCompany.Address1 || '').trim(),
+      address2: String(rawCompany.Address2 || '').trim(),
+      city: String(rawCompany.City || '').trim(),
+      state: String(rawCompany.State || '').trim(),
+      country: String(rawCompany.Country || '').trim(),
+      phone: String(rawCompany.Phone || '').trim(),
+      fax: String(rawCompany.Fax || '').trim(),
+    };
+
+    // 2. Fetch Header Information from tblTradeInHeader
+    let headerQuery = `
+      SELECT TOP 1 *
+      FROM tblTradeInHeader
+      WHERE RTRIM(LTRIM(CAST(InvoiceNo AS VARCHAR(50)))) = @InvoiceNo
+         OR RTRIM(LTRIM(CAST(InventoryCode AS VARCHAR(50)))) = @InvoiceNo
+         OR RTRIM(LTRIM(CAST(InventoryCode AS VARCHAR(50)))) = 'TI-' + @InvoiceNo
+    `;
+    let headerRes = await pool.request()
+      .input("InvoiceNo", sql.VarChar(50), cleanNo)
+      .query(headerQuery);
+
+    if (headerRes.recordset.length === 0) {
+      return res.status(404).json({ success: false, message: `Trade-in voucher not found for: ${cleanNo}` });
+    }
+
+    const rawHeader = headerRes.recordset[0];
+    const header = {
+      inventoryCode: String(rawHeader.InventoryCode || '').trim(),
+      invoiceNo: String(rawHeader.InvoiceNo || cleanNo).trim(),
+      customerCode: String(rawHeader.CustomerCode || '').trim(),
+      customerName: String(rawHeader.CustomerName || '').trim(),
+      address1: String(rawHeader.Address1 || '').trim(),
+      address2: String(rawHeader.Address2 || '').trim(),
+      address3: String(rawHeader.Address3 || '').trim(),
+      costPerGram: parseFloat(rawHeader.CostPerGram || 0),
+      totalWeight: parseFloat(rawHeader.TotalWeight || 0),
+      totalGoldLoss: parseFloat(rawHeader.TotalGoldLoss || 0),
+      totalStoneWeight: parseFloat(rawHeader.TotalStoneWeight || 0),
+      totalPCS: parseInt(rawHeader.TotalPCS || 0, 10),
+      totalCost: parseFloat(rawHeader.TotalCost || 0),
+      amount: parseFloat(rawHeader.Amount || rawHeader.TradeInAmount || rawHeader.TotalCost || 0),
+      remarks: String(rawHeader.Remarks || '').trim(),
+      date: rawHeader.CreateDate || rawHeader.Date || null,
+    };
+
+    // 3. Fetch Detail items from tblTradeInDetail
+    const targetInvCode = header.inventoryCode || cleanNo;
+    let detailQuery = `
+      SELECT *
+      FROM tblTradeInDetail
+      WHERE RTRIM(LTRIM(CAST(InventoryCode AS VARCHAR(50)))) = @InventoryCode
+         OR RTRIM(LTRIM(CAST(InvoiceNo AS VARCHAR(50)))) = @InvoiceNo
+      ORDER BY ItemNo ASC
+    `;
+    let detailRes = await pool.request()
+      .input("InventoryCode", sql.VarChar(50), targetInvCode)
+      .input("InvoiceNo", sql.VarChar(50), header.invoiceNo)
+      .query(detailQuery);
+
+    const details = detailRes.recordset.map((row, idx) => ({
+      itemNo: row.ItemNo !== null && row.ItemNo !== undefined ? row.ItemNo : (idx + 1),
+      description: String(row.Description || '').trim(),
+      diamondDescription: String(row.DiamondDescription || '').trim(),
+      weight: parseFloat(row.Weight || 0),
+      stoneWeight: parseFloat(row.StoneWeight || 0),
+      goldLoss: parseFloat(row.GoldLoss || 0),
+      costPerGram: parseFloat(row.CostPerGram || 0),
+      totalCost: parseFloat(row.TotalCost || 0),
+      class: String(row.Class || '').trim(),
+      remarks: String(row.Remarks || '').trim(),
+    }));
+
+    // 4. Fetch Gold Purity Benchmark Rates from tblClass
+    let rates = { rate999: '', rate916: '', rate835: '', rate22k: '' };
+    try {
+      const classRes = await pool.request().query("SELECT ClassCode, Rate FROM tblClass");
+      classRes.recordset.forEach(r => {
+        const code = String(r.ClassCode || '').trim().toUpperCase();
+        const val = parseFloat(r.Rate || 0).toFixed(2);
+        if (code.startsWith('999') || code.startsWith('24K')) rates.rate999 = val;
+        else if (code.startsWith('916') || code.startsWith('22K')) {
+          rates.rate916 = val;
+          rates.rate22k = val;
+        } else if (code.startsWith('835')) rates.rate835 = val;
+      });
+    } catch (eRates) {}
+
+    res.json({
+      success: true,
+      data: {
+        company,
+        header,
+        details,
+        rates,
+      }
+    });
+
+  } catch (error) {
+    console.error("Fetch Trade In Print Data Error:", error);
+    res.status(500).json({ success: false, message: "Error fetching trade-in print data: " + error.message });
+  }
+});
+
 module.exports = router;

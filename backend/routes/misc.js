@@ -75,6 +75,100 @@ router.get("/fetch", async (req, res) => {
   }
 });
 
+// GET /api/misc/print-data?type=...&voucherNo=...
+// Crystal Report: Reports/rptMiscJournalNew.rpt
+// Selection: {tblMisc.VoucherNo} = @VoucherNo and {tblMisc.Type} = @Type
+// Company info matching ds = SBll.getCompanyName
+router.get("/print-data", async (req, res) => {
+  try {
+    const pool = await getPool(req);
+    const type = (req.query.type || "").trim();
+    const voucherNo = req.query.voucherNo;
+
+    if (!type || voucherNo === undefined || voucherNo === null || String(voucherNo).trim() === "") {
+      return res.status(400).json({ success: false, message: "Type and VoucherNo are required for print." });
+    }
+
+    const vNoInt = parseInt(String(voucherNo).trim(), 10);
+    if (isNaN(vNoInt)) {
+      return res.status(400).json({ success: false, message: "Invalid VoucherNo format." });
+    }
+
+    // 1. Fetch Company details matching SBll.getCompanyName
+    const compRes = await pool.request().query(`
+      SELECT TOP 1 Name, Address1, Address2, City, State, Country, Phone, Fax, CompanyShortCode, CurrencySign
+      FROM tblCompany
+    `);
+    const compRow = compRes.recordset[0] || {};
+    const company = {
+      name: (compRow.Name || "SMART").trim(),
+      address1: (compRow.Address1 || "").trim(),
+      address2: (compRow.Address2 || "").trim(),
+      city: (compRow.City || "").trim(),
+      state: (compRow.State || "").trim(),
+      country: (compRow.Country || "").trim(),
+      phone: (compRow.Phone || "").trim(),
+      fax: (compRow.Fax || "").trim(),
+      companyShortCode: (compRow.CompanyShortCode || "").trim(),
+      currencySign: (compRow.CurrencySign || "SGD").trim()
+    };
+
+    // 2. Fetch Miscellaneous Voucher Data from tblMisc matching original Crystal Report filter:
+    // {tblMisc.VoucherNo} = Val(txtVoucherNo.Text.Trim) and {tblMisc.Type} = SType
+    const result = await pool.request()
+      .input("Type", sql.VarChar(10), type)
+      .input("VoucherNo", sql.Int, vNoInt)
+      .query(`
+        SELECT 
+          RTRIM(LTRIM(Type)) AS Type,
+          VoucherNo,
+          Date,
+          RTRIM(LTRIM(ISNULL(Person, ''))) AS Person,
+          ISNULL(Amount, 0) AS Amount,
+          ISNULL(GSTPerc, 0) AS GSTPerc,
+          ISNULL(GST, 0) AS GST,
+          ISNULL(NetAmount, 0) AS NetAmount,
+          ISNULL(Weight, 0) AS Weight,
+          RTRIM(LTRIM(ISNULL(Remarks, ''))) AS Remarks,
+          DateOfTransaction,
+          RTRIM(LTRIM(ISNULL(CreateUser, 'sys'))) AS CreateUser,
+          CreateDate,
+          RTRIM(LTRIM(ISNULL(ModifyUser, ''))) AS ModifyUser,
+          ModifyDate
+        FROM tblMisc
+        WHERE Type = @Type AND VoucherNo = @VoucherNo
+      `);
+
+    if (!result.recordset || result.recordset.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: `Miscellaneous voucher record not found for Type '${type}' and Voucher No '${vNoInt}'.`
+      });
+    }
+
+    // Type descriptions mapping for report header
+    const typeNames = {
+      PN: "Purchase Note",
+      CN: "Credit Note",
+      MC: "Misc. Note",
+      PC: "Petty Cash",
+      SR: "Services"
+    };
+
+    res.json({
+      success: true,
+      data: {
+        company,
+        voucher: result.recordset[0],
+        typeName: typeNames[type] || type
+      }
+    });
+  } catch (err) {
+    console.error("Print Data Misc Error:", err);
+    res.status(500).json({ success: false, message: "Failed to fetch print data", error: err.message });
+  }
+});
+
 // POST - Insert new entry
 router.post("/", async (req, res) => {
   let transaction;

@@ -189,6 +189,197 @@ router.get("/class-rates", async (req, res) => {
   }
 });
 
+// 4b. GET /api/tradeinsales/print-data?billNo=...
+// Crystal Report: Reports/rptTradeInGoldInvoice_MJ.rpt (or _ESP / _SSJ / _RJ / _GMT based on CompanyShortCode)
+// Selection Formula: {tblTradeInHeader.InvoiceNo} = sInvoiceNo or {tblTradeInSalesHeader.ReferenceNo} = sInvoiceNo
+// Formula Fields: CompAddress1, CompAddress2, CompAddress3, Customer1, Customer2, Customer3, Rate1, Rate2, Rate3
+router.get("/print-data", async (req, res) => {
+  try {
+    const rawBillNo = (req.query.billNo || req.query.invoiceNo || req.query.refNo || "").trim();
+    if (!rawBillNo) {
+      return res.status(400).json({ success: false, message: "Bill No is required for print." });
+    }
+
+    const pool = await getPool(req);
+
+    // 1. Fetch Company Information matching clsCompany.getCompanyName
+    const compRes = await pool.request().query(`
+      SELECT TOP 1 Name, Address1, Address2, City, State, Country, Phone, Fax, CompanyShortCode, CurrencySign
+      FROM tblCompany
+    `);
+    const compRow = compRes.recordset[0] || {};
+    const company = {
+      name: (compRow.Name || "SMART").trim(),
+      address1: (compRow.Address1 || "").trim(),
+      address2: (compRow.Address2 || "").trim(),
+      city: (compRow.City || "").trim(),
+      state: (compRow.State || "").trim(),
+      country: (compRow.Country || "").trim(),
+      phone: (compRow.Phone || "").trim(),
+      fax: (compRow.Fax || "").trim(),
+      companyShortCode: (compRow.CompanyShortCode || "MJ").trim().toUpperCase(),
+      currencySign: (compRow.CurrencySign || "SGD").trim()
+    };
+
+    // 2. Fetch Daily Class Rates matching subGetClassRate() in frmTradeInSales:
+    // 24K -> s999, 22K -> s916, 20KJ/835 -> s835
+    let rate999 = "-";
+    let rate916 = "-";
+    let rate835 = "-";
+    try {
+      const rateRes = await pool.request().query("SELECT ClassCode, Rate FROM tblClass");
+      if (rateRes.recordset && rateRes.recordset.length > 0) {
+        rateRes.recordset.forEach(r => {
+          const code = (r.ClassCode || "").trim().toUpperCase();
+          const val = parseFloat(r.Rate || 0).toFixed(2);
+          if (code === "24K") rate999 = val;
+          else if (code === "22K") rate916 = val;
+          else if (code === "20KJ" || code === "835") rate835 = val;
+        });
+      }
+    } catch (rErr) {
+      console.warn("Class rates fetch warning:", rErr.message);
+    }
+
+    // 3. Query Trade-In Record: Check tblTradeInSalesHeader / tblTradeInHeader
+    // Normalize variations: "00000012", "TI-00000012"
+    let cleanRef = rawBillNo;
+    let cleanInv = rawBillNo;
+    if (rawBillNo.toUpperCase().startsWith("TI-")) {
+      cleanRef = rawBillNo.substring(3).trim();
+    } else {
+      cleanInv = "TI-" + rawBillNo;
+    }
+
+    // Attempt A: Check tblTradeInSalesHeader & tblTradeinSalesDetail
+    const qSalesHdr = await pool.request()
+      .input("Ref1", sql.VarChar, rawBillNo)
+      .input("Ref2", sql.VarChar, cleanRef)
+      .input("Ref3", sql.VarChar, cleanInv)
+      .query(`
+        SELECT TOP 1 *
+        FROM tblTradeInSalesHeader
+        WHERE RTRIM(LTRIM(ReferenceNo)) IN (@Ref1, @Ref2, @Ref3)
+      `);
+
+    if (qSalesHdr.recordset && qSalesHdr.recordset.length > 0) {
+      const header = qSalesHdr.recordset[0];
+      const actualRef = (header.ReferenceNo || rawBillNo).trim();
+
+      const qSalesDtl = await pool.request()
+        .input("Ref", sql.VarChar, actualRef)
+        .query(`
+          SELECT *
+          FROM tblTradeinSalesDetail
+          WHERE RTRIM(LTRIM(ReferenceNo)) = @Ref
+          ORDER BY InventoryCode ASC
+        `);
+
+      return res.json({
+        success: true,
+        data: {
+          company,
+          rates: { rate999, rate916, rate835 },
+          header: {
+            InvoiceNo: actualRef,
+            ReferenceNo: actualRef,
+            CustomerCode: (header.VendorCode || "").trim(),
+            CustomerName: (header.VendorName || "").trim(),
+            Address1: (header.Address1 || "").trim(),
+            Address2: (header.Address2 || "").trim(),
+            Address3: (header.Address3 || "").trim(),
+            CostPerGram: header.CostPerGram || 0,
+            TotalWeight: header.TotalWeight || 0,
+            TotalStoneWeight: header.TotalStoneWeight || 0,
+            TotalGoldLoss: header.TotalGoldLoss || 0,
+            TotalCost: header.TotalCost || 0,
+            TotalAmount: header.Amount || 0,
+            Remarks: (header.Remarks || "").trim(),
+            SalesmanCode: (header.SalesmanCode || "").trim(),
+            Date: header.SalesDate || header.CreateDate,
+            CreateUser: (header.CreateUser || "").trim()
+          },
+          items: qSalesDtl.recordset || []
+        }
+      });
+    }
+
+    // Attempt B: Check tblTradeInHeader & tblTradeInDetail (original VB.NET tblTradeInHeader)
+    const qTradeHdr = await pool.request()
+      .input("Ref1", sql.VarChar, rawBillNo)
+      .input("Ref2", sql.VarChar, cleanRef)
+      .input("Ref3", sql.VarChar, cleanInv)
+      .query(`
+        SELECT TOP 1 *
+        FROM tblTradeInHeader
+        WHERE RTRIM(LTRIM(InvoiceNo)) IN (@Ref1, @Ref2, @Ref3)
+           OR RTRIM(LTRIM(InventoryCode)) IN (@Ref1, @Ref2, @Ref3)
+      `);
+
+    if (qTradeHdr.recordset && qTradeHdr.recordset.length > 0) {
+      const header = qTradeHdr.recordset[0];
+      const actualInvNo = (header.InvoiceNo || rawBillNo).trim();
+
+      const qTradeDtl = await pool.request()
+        .input("InvNo", sql.VarChar, actualInvNo)
+        .query(`
+          SELECT *
+          FROM tblTradeInDetail
+          WHERE RTRIM(LTRIM(InvoiceNo)) = @InvNo
+          ORDER BY ItemNo ASC
+        `);
+
+      return res.json({
+        success: true,
+        data: {
+          company,
+          rates: { rate999, rate916, rate835 },
+          header: {
+            InvoiceNo: actualInvNo,
+            ReferenceNo: (header.InventoryCode || actualInvNo).trim(),
+            CustomerCode: (header.CustomerCode || "").trim(),
+            CustomerName: (header.CustomerName || "").trim(),
+            Address1: (header.Address1 || "").trim(),
+            Address2: (header.Address2 || "").trim(),
+            Address3: (header.Address3 || "").trim(),
+            CostPerGram: header.CostPerGram || 0,
+            TotalWeight: header.Weight || 0,
+            TotalStoneWeight: header.StoneWeight || 0,
+            TotalGoldLoss: header.GoldLoss || 0,
+            TotalCost: header.TotalCost || 0,
+            TotalAmount: header.Amount || 0,
+            Remarks: (header.Remarks || "").trim(),
+            SalesmanCode: (header.SalesManCode || "").trim(),
+            Date: header.Date || header.Createdate,
+            CreateUser: (header.UserId || "").trim()
+          },
+          items: (qTradeDtl.recordset || []).map(d => ({
+            InventoryCode: d.InventoryCode || d.ItemNo,
+            Description: d.Description,
+            DiamondDescription: d.DiamondDescription,
+            Weight: d.Weight,
+            StoneWeight: d.StoneWeight,
+            CostPerGram: d.CostPerGram,
+            MC: d.MC,
+            PCS: d.PCS,
+            GoldLoss: d.GoldLoss,
+            TotalCost: d.TotalCost,
+            Remarks: d.Remarks
+          }))
+        }
+      });
+    }
+
+    return res.status(404).json({
+      success: false,
+      message: `BillNo is not Correct!... Trade In bill '${rawBillNo}' not found.`
+    });
+  } catch (err) {
+    console.error("Print Data Trade-In Sales Error:", err);
+    res.status(500).json({ success: false, message: "Database query error", error: err.message });
+  }
+});
+
 // 5. POST Save (Insert / Update) Trade-In Sales Transaction
 router.post("/save", async (req, res) => {
   let pool;

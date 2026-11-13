@@ -459,17 +459,169 @@ router.delete("/pay/:orderNo/:paymentNo", async (req, res) => {
   }
 });
 
+// 8. Print / RePrint Order Payment Receipt (matching subPrintOrderPayment in frmOrderPayment.vb)
+// Crystal Report: rptOrderPayment_AJ.rpt / rptOrderPayment_MD.rpt / rptOrderPayment_MJ.rpt
+// Formula fields: CompAddress1, CompAddress2, CompAddress3, Customer1, Customer2, Customer3, Rate1, Rate2, Rate3
+// Filter: {tblOrderPaymentdetail.OrderPaymentNo} = @OrderPaymentNo
+router.get("/print-data", async (req, res) => {
+  try {
+    const paymentNo = (req.query.paymentNo || req.query.orderPaymentNo || req.query.billNo || '').trim();
+    if (!paymentNo) {
+      return res.status(400).json({ success: false, message: "Order Payment No is required for print." });
+    }
+
+    const pool = await getPool(req);
+
+    // 1. Fetch Company details matching objComp / clsCompany
+    const compRes = await pool.request().query("SELECT TOP 1 * FROM tblCompany");
+    const rawCompany = compRes.recordset[0] || {};
+    const company = {
+      name: String(rawCompany.Name || rawCompany.CompanyName || '').trim(),
+      address1: String(rawCompany.Address1 || '').trim(),
+      address2: String(rawCompany.Address2 || '').trim(),
+      city: String(rawCompany.City || '').trim(),
+      state: String(rawCompany.State || '').trim(),
+      country: String(rawCompany.Country || '').trim(),
+      phone: String(rawCompany.Phone || '').trim(),
+      fax: String(rawCompany.Fax || '').trim(),
+      companyShortCode: String(rawCompany.CompanyShortCode || '').trim().toUpperCase(),
+    };
+
+    // 2. Fetch Payment Detail + Order Header + Customer
+    const payRes = await pool.request()
+      .input("OrderPaymentNo", sql.VarChar(50), paymentNo)
+      .query(`
+        SELECT 
+          d.OrderNo,
+          RTRIM(LTRIM(d.OrderPaymentNo)) AS OrderPaymentNo,
+          d.AmountPaid,
+          ISNULL(d.TradeinAmt, 0) AS TradeinAmt,
+          ISNULL(d.TradeinGST, 0) AS TradeinGST,
+          d.Remarks,
+          d.CreateDate,
+          d.CreateUser,
+          h.CustomerCode,
+          h.OrderDate,
+          h.DeliveryDate,
+          h.SupplierCode,
+          ISNULL(h.TotalCostEstimated, 0) AS TotalCostEstimated,
+          ISNULL(h.AdvancePaid, 0) AS AdvancePaid,
+          RTRIM(LTRIM(ISNULL(c.CustomerName, ''))) AS CustomerName,
+          RTRIM(LTRIM(ISNULL(c.Address1, ''))) AS CustomerAddress1,
+          RTRIM(LTRIM(ISNULL(c.Address2, ''))) AS CustomerAddress2,
+          RTRIM(LTRIM(ISNULL(c.Address3, ''))) AS CustomerAddress3,
+          RTRIM(LTRIM(ISNULL(c.Phone1, ISNULL(c.Mobile, '')))) AS CustomerPhone,
+          RTRIM(LTRIM(ISNULL(c.CustomerType, ''))) AS CustomerType
+        FROM tblOrderPaymentdetail d
+        JOIN tblInventoryOrderHeader h ON RTRIM(LTRIM(h.OrderNo)) = RTRIM(LTRIM(d.OrderNo))
+        LEFT JOIN tblCustomer c ON RTRIM(LTRIM(c.CustomerCode)) = RTRIM(LTRIM(h.CustomerCode))
+        WHERE RTRIM(LTRIM(d.OrderPaymentNo)) = @OrderPaymentNo
+      `);
+
+    if (payRes.recordset.length === 0) {
+      return res.status(404).json({ success: false, message: `Order payment receipt ${paymentNo} not found.` });
+    }
+
+    const payment = payRes.recordset[0];
+    const orderNo = payment.OrderNo ? String(payment.OrderNo).trim() : '';
+
+    // 3. Fetch Order Line Items from tblInventoryOrderDetail
+    let orderDetails = [];
+    if (orderNo) {
+      try {
+        const itemRes = await pool.request()
+          .input("OrderNo", sql.VarChar(50), orderNo)
+          .query(`
+            SELECT 
+              d.OrderNo,
+              d.InventoryCode,
+              d.Description,
+              d.Class,
+              d.WeightEstimated,
+              d.CostPerGram,
+              d.EstimatedCost,
+              d.EstimatedGST,
+              d.GoldLoss,
+              d.SMC,
+              d.PMC
+            FROM tblInventoryOrderDetail d
+            WHERE RTRIM(LTRIM(d.OrderNo)) = @OrderNo
+          `);
+        orderDetails = itemRes.recordset || [];
+      } catch (eItems) {
+        console.warn("Could not query tblInventoryOrderDetail for order payment print:", eItems.message);
+      }
+    }
+
+    // 4. Fetch All Payment History for this Order (for statement tracking)
+    let history = [];
+    if (orderNo) {
+      try {
+        const histRes = await pool.request()
+          .input("OrderNo", sql.VarChar(50), orderNo)
+          .query(`
+            SELECT 
+              OrderNo,
+              RTRIM(LTRIM(OrderPaymentNo)) AS OrderPaymentNo,
+              AmountPaid,
+              Remarks,
+              CreateDate,
+              CreateUser
+            FROM tblOrderPaymentdetail
+            WHERE RTRIM(LTRIM(OrderNo)) = @OrderNo
+            ORDER BY CreateDate ASC
+          `);
+        history = histRes.recordset || [];
+      } catch (eHist) {}
+    }
+
+    // 5. Fetch Class Gold Rates (subGetClassRate in VB.NET)
+    let rates = { rate999: '', rate916: '', rate835: '', rate24k999: '', rate20k850: '', rate22ksov: '' };
+    try {
+      const classRes = await pool.request().query("SELECT ClassCode, Rate FROM tblClass");
+      if (classRes.recordset && classRes.recordset.length > 0) {
+        for (const r of classRes.recordset) {
+          const cCode = String(r.ClassCode || '').trim().toUpperCase();
+          const rVal = parseFloat(r.Rate) || 0;
+          const rFormatted = rVal.toFixed(2);
+          if (cCode === '916' || cCode === '22K-916' || cCode === '22K') rates.rate916 = rFormatted;
+          else if (cCode === '999' || cCode === '24K' || cCode === '24K-999') rates.rate999 = rFormatted;
+          else if (cCode === '20KJ' || cCode === '835') rates.rate835 = rFormatted;
+          else if (cCode === '20K-850') rates.rate20k850 = rFormatted;
+          else if (cCode === '22K-SOV') rates.rate22ksov = rFormatted;
+        }
+      }
+    } catch (eRates) {
+      console.warn("Class rate fetch warning for order payment print:", eRates.message);
+    }
+
+    res.json({
+      success: true,
+      data: {
+        company,
+        payment,
+        orderDetails,
+        history,
+        rates
+      }
+    });
+  } catch (err) {
+    console.error("Order Payment Print Data Fetch Error:", err);
+    res.status(500).json({ success: false, message: "Failed to fetch order payment print data", error: err.message });
+  }
+});
+
 // 8. RePrint Order Payment Receipt (matching subPrintOrderPayment & subPrintBill)
 router.get("/reprint/:billNo", async (req, res) => {
   const { billNo } = req.params;
   try {
     const pool = await getPool(req);
     const result = await pool.request()
-      .input("BillNo", sql.VarChar(20), billNo)
+      .input("BillNo", sql.VarChar(50), (billNo || "").trim())
       .query(`
         SELECT 
           d.OrderNo,
-          d.OrderPaymentNo,
+          RTRIM(LTRIM(d.OrderPaymentNo)) AS OrderPaymentNo,
           d.AmountPaid,
           d.TradeinAmt,
           d.TradeinGST,
@@ -477,16 +629,16 @@ router.get("/reprint/:billNo", async (req, res) => {
           d.CreateDate,
           d.CreateUser,
           h.CustomerCode,
-          c.CustomerName,
-          c.Address1,
-          c.Address2,
-          c.Address3,
+          RTRIM(LTRIM(ISNULL(c.CustomerName, ''))) AS CustomerName,
+          RTRIM(LTRIM(ISNULL(c.Address1, ''))) AS Address1,
+          RTRIM(LTRIM(ISNULL(c.Address2, ''))) AS Address2,
+          RTRIM(LTRIM(ISNULL(c.Address3, ''))) AS Address3,
           h.TotalCostEstimated,
           h.AdvancePaid
         FROM tblOrderPaymentdetail d
-        JOIN tblInventoryOrderHeader h ON h.OrderNo = d.OrderNo
-        LEFT JOIN tblCustomer c ON c.CustomerCode = h.CustomerCode
-        WHERE d.OrderPaymentNo = @BillNo
+        JOIN tblInventoryOrderHeader h ON RTRIM(LTRIM(h.OrderNo)) = RTRIM(LTRIM(d.OrderNo))
+        LEFT JOIN tblCustomer c ON RTRIM(LTRIM(c.CustomerCode)) = RTRIM(LTRIM(h.CustomerCode))
+        WHERE RTRIM(LTRIM(d.OrderPaymentNo)) = @BillNo
       `);
 
     if (result.recordset.length === 0) {

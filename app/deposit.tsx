@@ -1,5 +1,6 @@
 import { ThemedText } from '@/components/themed-text';
 import { API_BASE_URL } from '@/constants/api';
+import { UNIPRO_LOGO_DATA_URI } from '@/utils/uniproLogo';
 import { Ionicons } from '@expo/vector-icons';
 import { Stack, useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
@@ -300,6 +301,12 @@ export default function DepositScreen() {
       const json = await res.json();
       if (json.success) {
         showToast(json.message || 'Deposit agreement saved successfully');
+        const savedDepositNo = (json.depositNo || payload.DepositNo || '').trim();
+        // Automatic Print After Save matching frmDeposit.vb:
+        // If txtInvoiceNo.Text.Trim <> "" Then subPrintInstallment(txtInvoiceNo.Text.Trim)
+        if (savedDepositNo !== '') {
+          subPrintInstallment(savedDepositNo);
+        }
         handleClear();
       } else {
         showToast(json.message || 'Failed to save deposit', 'error');
@@ -383,12 +390,624 @@ export default function DepositScreen() {
     fetchNextNumbers();
   };
 
-  const handlePrint = () => {
-    if (!depositNo.trim()) {
-      showToast('Please load a voucher before printing', 'error');
+  // Original Print Function matching subPrintInstallment(ByVal sInvoiceNo As String) in frmDeposit.vb
+  // Report: Reports/rptDeposit_HN.rpt
+  // Selection: {tblDepositSave.DepositNo} = @DepositNo
+  // Formula Fields: CompAddress1, CompAddress2, CompAddress3, Customer1, Customer2, Customer3, PaymodeDetail
+  // Print Copies: 1 copy (CR.PrintToPrinter(1, True, 0, 0))
+  const subPrintInstallment = async (sInvoiceNo: string) => {
+    const trimmedDepositNo = (sInvoiceNo || '').trim();
+    if (!trimmedDepositNo) {
       return;
     }
-    showToast(`Printing Deposit Voucher ${depositNo}...`);
+
+    try {
+      setLoading(true);
+
+      const res = await fetch(`${API_URL}/print-data?depositNo=${encodeURIComponent(trimmedDepositNo)}`);
+      const json = await res.json();
+
+      if (!json.success || !json.data) {
+        showToast(json.message || `Deposit record "${trimmedDepositNo}" not found for print.`, 'error');
+        setLoading(false);
+        return;
+      }
+
+      const { company, deposit, history, payModes, sPayModeDetail, rates, inventoryItems } = json.data;
+
+      // Singapore Date & Time
+      const now = new Date();
+      const sgDateStr = now.toLocaleDateString('en-GB', {
+        timeZone: 'Asia/Singapore',
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+      });
+      const sgTimeStr = now.toLocaleTimeString('en-US', {
+        timeZone: 'Asia/Singapore',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: true,
+      });
+
+      // Original Formula Field Values:
+      // CompAddress1: CompName
+      // CompAddress2: Address1 & " " & Address2 & " " & Country
+      // CompAddress3: PhoneNo & " " & FaxNo
+      // Customer1: txtCustomerName.Text
+      // Customer2: txtAddress1.Text
+      // Customer3: txtAddress2.Text
+      // PaymodeDetail: sPayModeDetail
+      const sCompAddress1 = (company.name || 'SMART').trim();
+      const sCompAddress2 = [company.address1, company.address2, company.country].filter(Boolean).join(' ');
+      const sCompAddress3 = [company.phone, company.fax].filter(Boolean).join(' ');
+
+      const sCustomer1 = (deposit.CustomerName || customerName || '').trim();
+      const sCustomer2 = (deposit.Address1 || address1 || '').trim();
+      const sCustomer3 = (deposit.Address2 || address2 || '').trim();
+      const sCustomerCode = (deposit.CustomerCode || customerCode || '').trim();
+      const sCustomerPhone = (deposit.Phone || '').trim();
+
+      const s999 = rates?.rate999 || '-';
+      const s916 = rates?.rate916 || '-';
+      const s835 = rates?.rate835 || '-';
+
+      const totalVal = parseFloat(deposit.TotalAmount) || 0;
+      const initialDepositVal = parseFloat(deposit.DepositAmount) || 0;
+      const amountPaidVal = parseFloat(deposit.AmountPaid) || 0;
+      const totalPaidToDate = initialDepositVal + amountPaidVal;
+      const balanceDue = totalVal - totalPaidToDate;
+
+      // Format date helper
+      const formatDate = (val: any) => {
+        if (!val) return '-';
+        const d = new Date(val);
+        if (isNaN(d.getTime())) return String(val).split('T')[0] || '-';
+        return d.toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' });
+      };
+
+      const depositDateFormatted = formatDate(deposit.DepositDate || deposit.CreateDate);
+
+      // Print HTML (1 single copy matching CR.PrintToPrinter(1, True, 0, 0))
+      const printHtml = `
+        <!DOCTYPE html>
+        <html>
+          <head>
+            <meta charset="utf-8" />
+            <title>Deposit Receipt - ${trimmedDepositNo}</title>
+            <style>
+              @page {
+                size: A4 portrait;
+                margin: 0;
+              }
+              *, *:before, *:after {
+                box-sizing: border-box;
+              }
+              body {
+                font-family: 'Segoe UI', Tahoma, Arial, sans-serif;
+                margin: 0;
+                padding: 0;
+                background-color: #525659;
+                color: #222;
+                -webkit-print-color-adjust: exact;
+                print-color-adjust: exact;
+              }
+              .page-sheet {
+                background: #FFFFFF;
+                width: 210mm;
+                min-height: 297mm;
+                margin: 10mm auto;
+                padding: 12mm 15mm;
+                box-shadow: 0 4px 15px rgba(0, 0, 0, 0.35);
+                display: flex;
+                flex-direction: column;
+                justify-content: space-between;
+              }
+              .report-header {
+                display: flex;
+                justify-content: space-between;
+                align-items: flex-start;
+                border-bottom: 2px solid #8D6409;
+                padding-bottom: 8px;
+              }
+              .header-brand {
+                display: flex;
+                align-items: center;
+                gap: 12px;
+                max-width: 58%;
+              }
+              .brand-logo {
+                width: 55px;
+                height: 55px;
+                object-fit: contain;
+              }
+              .company-name {
+                font-size: 18px;
+                font-weight: 800;
+                color: #5C4A28;
+                letter-spacing: 0.5px;
+                text-transform: uppercase;
+              }
+              .company-address {
+                font-size: 10px;
+                color: #555;
+                line-height: 1.35;
+                margin-top: 2px;
+              }
+              .header-meta {
+                text-align: right;
+              }
+              .report-badge {
+                font-size: 13px;
+                font-weight: 800;
+                color: #8D6409;
+                letter-spacing: 0.6px;
+                text-transform: uppercase;
+              }
+              .copy-tag {
+                display: inline-block;
+                background: #FDF4D9;
+                color: #7D5E19;
+                font-size: 9px;
+                font-weight: 700;
+                padding: 2px 8px;
+                border-radius: 4px;
+                margin-top: 3px;
+                border: 1px solid #E6D29F;
+              }
+              .doc-no {
+                font-size: 12px;
+                font-weight: 700;
+                color: #111;
+                margin-top: 4px;
+              }
+              .doc-no span {
+                color: #8D6409;
+                font-family: monospace;
+                font-size: 13px;
+              }
+              .meta-date {
+                font-size: 10px;
+                color: #666;
+                margin-top: 2px;
+              }
+
+              /* GOLD RATE STRIP */
+              .gold-rate-strip {
+                display: flex;
+                justify-content: center;
+                align-items: center;
+                gap: 16px;
+                background: #FAF6EB;
+                border: 1px solid #E6D7AD;
+                padding: 5px 12px;
+                margin: 8px 0;
+                border-radius: 4px;
+                font-size: 10px;
+              }
+              .rate-lbl {
+                font-weight: 600;
+                color: #6E5316;
+              }
+              .rate-val {
+                font-weight: 800;
+                color: #222;
+                margin-left: 4px;
+              }
+              .rate-divider {
+                color: #D4C3A3;
+              }
+
+              /* TWO-COLUMN INFO */
+              .info-grid {
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: 12px;
+                margin-bottom: 8px;
+              }
+              .info-card {
+                background: #FAF8F4;
+                border: 1px solid #E5DFD4;
+                border-radius: 4px;
+                padding: 8px 10px;
+              }
+              .card-title {
+                font-size: 10px;
+                font-weight: 700;
+                color: #7D5E19;
+                border-bottom: 1px solid #E5DFD4;
+                padding-bottom: 3px;
+                margin-bottom: 4px;
+                text-transform: uppercase;
+              }
+              .info-row {
+                font-size: 10px;
+                line-height: 1.4;
+                display: flex;
+              }
+              .info-lbl {
+                width: 32%;
+                color: #666;
+                font-weight: 500;
+              }
+              .info-val {
+                width: 68%;
+                color: #222;
+              }
+              .font-bold {
+                font-weight: 700;
+              }
+
+              /* CURRENT DEPOSIT CARD */
+              .current-deposit-card {
+                background: #EBF7EE;
+                border: 1.5px solid #A3D9B1;
+                border-radius: 6px;
+                padding: 8px 14px;
+                text-align: center;
+                margin: 6px 0 10px 0;
+              }
+              .deposit-card-title {
+                font-size: 11px;
+                font-weight: 700;
+                color: #0F5132;
+                letter-spacing: 0.5px;
+                text-transform: uppercase;
+              }
+              .deposit-card-amount {
+                font-size: 22px;
+                font-weight: 800;
+                color: #0F5132;
+                margin-top: 2px;
+                font-family: monospace;
+              }
+
+              .paymode-strip {
+                margin-top: 4px;
+                font-size: 10px;
+                color: #2e7d32;
+                font-weight: 600;
+              }
+
+              .section-heading {
+                font-size: 11px;
+                font-weight: 700;
+                color: #5C4A28;
+                text-transform: uppercase;
+                margin: 6px 0 4px 0;
+                border-bottom: 1px solid #D4C3A3;
+                padding-bottom: 2px;
+              }
+
+              /* TABLE */
+              .receipt-table {
+                width: 100%;
+                border-collapse: collapse;
+                margin-bottom: 8px;
+                font-size: 10px;
+              }
+              .receipt-table th {
+                background: #F1ECE0;
+                color: #4A3A1E;
+                font-weight: 700;
+                padding: 5px 6px;
+                border: 1px solid #D8CFC0;
+              }
+              .receipt-table td {
+                padding: 5px 6px;
+                border: 1px solid #E5DFD4;
+                color: #222;
+              }
+
+              /* SUMMARY */
+              .summary-box {
+                margin-left: auto;
+                width: 65%;
+                background: #FAF8F4;
+                border: 1px solid #E5DFD4;
+                border-radius: 4px;
+                padding: 8px 12px;
+                margin-bottom: 10px;
+              }
+              .summary-row {
+                display: flex;
+                justify-content: space-between;
+                font-size: 10px;
+                line-height: 1.5;
+              }
+              .summary-divider {
+                border-top: 1px dashed #C9BC9F;
+                margin: 4px 0;
+              }
+              .grand-total-row {
+                padding-top: 2px;
+              }
+
+              /* SIGNATURE */
+              .signature-section {
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: 20px;
+                margin-top: 8px;
+              }
+              .sign-card {
+                border: 1px dashed #B8AB91;
+                border-radius: 4px;
+                padding: 8px 10px;
+                font-size: 10px;
+                background: #FFFEFC;
+              }
+              .sign-header {
+                font-weight: 700;
+                color: #5C4A28;
+                border-bottom: 1px solid #EDE6D8;
+                padding-bottom: 3px;
+                margin-bottom: 6px;
+                font-size: 9px;
+              }
+              .sign-row {
+                color: #333;
+                line-height: 1.3;
+              }
+
+              /* FOOTER */
+              .report-footer {
+                margin-top: 8px;
+                text-align: center;
+              }
+              .footer-divider {
+                border-top: 1px solid #E0D7C5;
+                margin-bottom: 4px;
+              }
+              .footer-gen-text {
+                font-size: 9px;
+                color: #777;
+                font-style: italic;
+              }
+              .footer-powered {
+                font-size: 8px;
+                color: #999;
+                margin-top: 1px;
+              }
+
+              @media print {
+                body {
+                  background: none !important;
+                }
+                .page-sheet {
+                  width: 100% !important;
+                  min-height: 297mm !important;
+                  height: 100% !important;
+                  margin: 0 !important;
+                  padding: 10mm 12mm !important;
+                  box-shadow: none !important;
+                  display: flex !important;
+                  flex-direction: column !important;
+                }
+              }
+            </style>
+          </head>
+          <body>
+            <div class="page-sheet">
+              <!-- BRAND / HEADER -->
+              <div class="report-header">
+                <div class="header-brand">
+                  <img src="${UNIPRO_LOGO_DATA_URI}" alt="Logo" class="brand-logo" />
+                  <div class="brand-details">
+                    <div class="company-name">${sCompAddress1}</div>
+                    <div class="company-address">${sCompAddress2}</div>
+                    ${sCompAddress3 ? `<div class="company-address">${sCompAddress3}</div>` : ''}
+                  </div>
+                </div>
+                <div class="header-meta">
+                  <div class="report-badge">DEPOSIT RECEIPT</div>
+                  <div class="copy-tag">OFFICIAL RECEIPT</div>
+                  <div class="doc-no">DEPOSIT NO: <span>${trimmedDepositNo}</span></div>
+                  <div class="meta-date">Date: ${depositDateFormatted} &nbsp;|&nbsp; ${sgTimeStr}</div>
+                </div>
+              </div>
+
+              <!-- GOLD RATES BANNER -->
+              <div class="gold-rate-strip">
+                <div class="rate-cell"><span class="rate-lbl">Gold 999:</span> <span class="rate-val">$${s999}/g</span></div>
+                <div class="rate-divider">|</div>
+                <div class="rate-cell"><span class="rate-lbl">Gold 916 (22K):</span> <span class="rate-val">$${s916}/g</span></div>
+                <div class="rate-divider">|</div>
+                <div class="rate-cell"><span class="rate-lbl">Gold 835 (20K):</span> <span class="rate-val">$${s835}/g</span></div>
+              </div>
+
+              <!-- TWO-COLUMN INFO: CUSTOMER vs DEPOSIT DETAILS -->
+              <div class="info-grid">
+                <!-- Customer Box (Formula Fields: Customer1, Customer2, Customer3) -->
+                <div class="info-card">
+                  <div class="card-title">CUSTOMER DETAILS</div>
+                  <div class="info-row"><span class="info-lbl">Customer:</span> <span class="info-val font-bold">${sCustomer1 || 'CASH CUSTOMER'}</span></div>
+                  <div class="info-row"><span class="info-lbl">Cust Code:</span> <span class="info-val">${sCustomerCode || '-'}</span></div>
+                  <div class="info-row"><span class="info-lbl">Address 1:</span> <span class="info-val">${sCustomer2 || '-'}</span></div>
+                  ${sCustomer3 ? `<div class="info-row"><span class="info-lbl">Address 2:</span> <span class="info-val">${sCustomer3}</span></div>` : ''}
+                  ${sCustomerPhone ? `<div class="info-row"><span class="info-lbl">Contact:</span> <span class="info-val">${sCustomerPhone}</span></div>` : ''}
+                </div>
+
+                <!-- Deposit Specification Box -->
+                <div class="info-card">
+                  <div class="card-title">DEPOSIT SPECIFICATION</div>
+                  <div class="info-row"><span class="info-lbl">Deposit No:</span> <span class="info-val font-bold">${trimmedDepositNo}</span></div>
+                  <div class="info-row"><span class="info-lbl">Salesman:</span> <span class="info-val">${deposit.SalesmanCode || 'sys'}</span></div>
+                  <div class="info-row"><span class="info-lbl">Deposit Used:</span> <span class="info-val font-bold">${deposit.DepositUsed === 'Y' ? 'YES (SETTLED)' : 'NO (ACTIVE)'}</span></div>
+                  <div class="info-row"><span class="info-lbl">Remarks:</span> <span class="info-val">${deposit.Remarks || '-'}</span></div>
+                </div>
+              </div>
+
+              <!-- CURRENT DEPOSIT AMOUNT CARD -->
+              <div class="current-deposit-card">
+                <div class="deposit-card-title">INITIAL DEPOSIT RECEIVED</div>
+                <div class="deposit-card-amount">$ ${initialDepositVal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+                <div class="paymode-strip">PAYMENT MODE: ${sPayModeDetail || 'CASH'}</div>
+              </div>
+
+              <!-- LINKED INVENTORY ITEMS (IF ANY) -->
+              ${
+                inventoryItems.length > 0
+                  ? `
+                <div class="section-heading">LINKED INVENTORY ITEMS</div>
+                <table class="receipt-table">
+                  <thead>
+                    <tr>
+                      <th style="width: 10%; text-align: center;">#</th>
+                      <th style="width: 25%; text-align: left;">Inventory Code</th>
+                      <th style="width: 45%; text-align: left;">Description</th>
+                      <th style="width: 20%; text-align: right;">Weight (g)</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    ${inventoryItems
+                      .map(
+                        (inv: any, idx: number) => `
+                      <tr>
+                        <td style="text-align: center;">${idx + 1}</td>
+                        <td style="text-align: left; font-weight: 600;">${inv.inventoryCode}</td>
+                        <td style="text-align: left;">${inv.description || '-'}</td>
+                        <td style="text-align: right;">${inv.totalWeight > 0 ? inv.totalWeight.toFixed(3) : '-'}</td>
+                      </tr>
+                    `
+                      )
+                      .join('')}
+                  </tbody>
+                </table>
+              `
+                  : ''
+              }
+
+              <!-- PAYMENT HISTORY / ACCUMULATED LEDGER -->
+              <div class="section-heading">DEPOSIT PAYMENT TRANSACTIONS / HISTORY</div>
+              <table class="receipt-table">
+                <thead>
+                  <tr>
+                    <th style="width: 8%; text-align: center;">#</th>
+                    <th style="width: 28%; text-align: left;">Payment Voucher</th>
+                    <th style="width: 24%; text-align: center;">Date</th>
+                    <th style="width: 22%; text-align: left;">Remarks</th>
+                    <th style="width: 18%; text-align: right;">Amount Paid ($)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${
+                    history.length > 0
+                      ? history
+                          .map(
+                            (h: any, idx: number) => `
+                          <tr>
+                            <td style="text-align: center;">${idx + 1}</td>
+                            <td style="text-align: left; font-weight: 600;">${h.DepositPaymentNo}</td>
+                            <td style="text-align: center;">${formatDate(h.DepositPaymentDate || h.CreateDate)}</td>
+                            <td style="text-align: left;">${h.Remarks || '-'}</td>
+                            <td style="text-align: right; font-weight: 700;">$${parseFloat(h.AmtPaid || 0).toFixed(2)}</td>
+                          </tr>
+                        `
+                          )
+                          .join('')
+                      : `<tr><td colspan="5" style="text-align: center; color: #888; padding: 10px;">Initial Deposit Voucher: $${initialDepositVal.toFixed(2)}</td></tr>`
+                  }
+                </tbody>
+              </table>
+
+              <!-- SUMMARY FINANCIAL BALANCES -->
+              <div class="summary-box">
+                <div class="summary-row">
+                  <span class="sum-lbl">Total Agreement Value:</span>
+                  <span class="sum-val font-bold">$ ${totalVal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                </div>
+                <div class="summary-row">
+                  <span class="sum-lbl">Initial Deposit Paid:</span>
+                  <span class="sum-val">$ ${initialDepositVal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                </div>
+                <div class="summary-row">
+                  <span class="sum-lbl">Additional Payments Received:</span>
+                  <span class="sum-val">$ ${amountPaidVal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                </div>
+                <div class="summary-row">
+                  <span class="sum-lbl">Total Received To Date:</span>
+                  <span class="sum-val font-bold" style="color: #0F5132;">$ ${totalPaidToDate.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                </div>
+                <div class="summary-divider"></div>
+                <div class="summary-row grand-total-row">
+                  <span class="sum-lbl font-bold" style="font-size: 13px;">REMAINING BALANCE DUE:</span>
+                  <span class="sum-val font-bold" style="font-size: 15px; color: ${balanceDue <= 0.01 ? '#0F5132' : '#842029'};">
+                    $ ${balanceDue > 0 ? balanceDue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '0.00 (FULLY SETTLED)'}
+                  </span>
+                </div>
+              </div>
+
+              <!-- SIGNATURE SECTION -->
+              <div class="signature-section">
+                <div class="sign-card">
+                  <div class="sign-header">CUSTOMER ACKNOWLEDGEMENT</div>
+                  <div class="sign-row">Customer Name: ${sCustomer1 || '...............................'}</div>
+                  <div class="sign-row" style="margin-top: 14px;">Signature: ....................................................</div>
+                </div>
+                <div class="sign-card">
+                  <div class="sign-header">AUTHORIZED STORE OFFICER</div>
+                  <div class="sign-row">Received By: ${deposit.CreateUser || 'Staff'}</div>
+                  <div class="sign-row" style="margin-top: 14px;">Signature: ....................................................</div>
+                </div>
+              </div>
+
+              <!-- FOOTER -->
+              <div class="report-footer">
+                <div class="footer-divider"></div>
+                <div class="footer-gen-text">*** System Generated Deposit Receipt ***</div>
+                <div class="footer-powered">Powered by Unipro SG</div>
+              </div>
+            </div>
+
+            <script>
+              window.onload = function() {
+                setTimeout(function() {
+                  window.print();
+                }, 300);
+              };
+            </script>
+          </body>
+        </html>
+      `;
+
+      if (Platform.OS === 'web' && typeof window !== 'undefined') {
+        const printWindow = window.open('', '_blank', 'width=900,height=750');
+        if (printWindow) {
+          printWindow.document.open();
+          printWindow.document.write(printHtml);
+          printWindow.document.close();
+          showToast('Deposit receipt preview opened', 'success');
+        } else {
+          const blob = new Blob([printHtml], { type: 'text/html;charset=utf-8;' });
+          const url = URL.createObjectURL(blob);
+          const win = window.open(url, '_blank');
+          if (!win) {
+            showToast('Popup blocker prevented opening print preview. Please allow popups.', 'error');
+          } else {
+            showToast('Deposit receipt preview opened', 'success');
+          }
+        }
+      } else {
+        showToast('Print preview generated.', 'success');
+      }
+
+    } catch (err: any) {
+      console.error('Print Deposit Receipt Error:', err);
+      showToast(err.message || 'Failed to print deposit receipt', 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Original VB.NET btnPrint_Click:
+  // If txtInvoiceNo.Text.Trim <> "" Then
+  //     subPrintInstallment(txtInvoiceNo.Text.Trim)
+  // End If
+  const handlePrint = () => {
+    if (depositNo.trim() !== '') {
+      subPrintInstallment(depositNo.trim());
+    }
   };
 
   // Calendar Helpers

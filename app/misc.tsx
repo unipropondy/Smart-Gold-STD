@@ -315,6 +315,9 @@ export default function MiscScreen() {
       ModifyUser: userId.trim() || 'sys',
     };
 
+    const savedType = selectedType.code;
+    const savedVoucherNo = voucherNo;
+
     setLoading(true);
     try {
       const response = await fetch(API_URL, {
@@ -326,6 +329,13 @@ export default function MiscScreen() {
       const json = await response.json();
       if (json.success) {
         showToast(json.message || 'Miscellaneous details saved successfully');
+        // Automatic Print After Add matching frmMisc.vb:
+        // cmdReprint_Click(sender, e)
+        // cmdCancel_Click(sender, e)
+        // cboType.Focus()
+        if (!isEditing) {
+          subPrintMiscJournal(savedType, savedVoucherNo);
+        }
         handleCancel();
       } else {
         showToast(json.message || 'Failed to save', 'error');
@@ -377,13 +387,522 @@ export default function MiscScreen() {
     }
   };
 
-  // REPRINT logic simulation
-  const handleReprint = () => {
-    if (!selectedType || !voucherNo.trim()) {
-      showToast('Select Type and enter Voucher No to reprint', 'error');
-      return;
+  // Original subPrintMiscJournal matching cmdReprint_Click in frmMisc.vb
+  // Report: Reports/rptMiscJournalNew.rpt
+  // Filter: {tblMisc.VoucherNo} = Val(txtVoucherNo.Text.Trim) and {tblMisc.Type} = SType
+  // Copy count: 1 (CR.PrintToPrinter(1, True, 0, 0))
+  const subPrintMiscJournal = async (sType: string, sVoucherNo: string) => {
+    const trimmedType = (sType || '').trim();
+    const trimmedVoucherNo = (sVoucherNo || '').trim();
+
+    try {
+      setLoading(true);
+      const res = await fetch(`${API_URL}/print-data?type=${encodeURIComponent(trimmedType)}&voucherNo=${encodeURIComponent(trimmedVoucherNo)}`);
+      const json = await res.json();
+
+      if (!json.success || !json.data) {
+        showToast(json.message || `Miscellaneous voucher not found for print.`, 'error');
+        setLoading(false);
+        return;
+      }
+
+      const { company, voucher, typeName } = json.data;
+
+      // Singapore Date & Time
+      const now = new Date();
+      const sgDateStr = now.toLocaleDateString('en-GB', {
+        timeZone: 'Asia/Singapore',
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+      });
+      const sgTimeStr = now.toLocaleTimeString('en-US', {
+        timeZone: 'Asia/Singapore',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: true,
+      });
+
+      // Format date helper
+      const formatDate = (val: any) => {
+        if (!val) return '-';
+        const d = new Date(val);
+        if (isNaN(d.getTime())) return String(val).split('T')[0] || '-';
+        return d.toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' });
+      };
+
+      const voucherDateFormatted = formatDate(voucher.Date || voucher.DateOfTransaction);
+
+      // Company info
+      const compName = (company.name || 'SMART').trim();
+      const compAddr1 = (company.address1 || '').trim();
+      const compAddr2 = [company.address2, company.city, company.country].filter(Boolean).join(' ');
+      const compContact = [
+        company.phone ? `Tel: ${company.phone}` : '',
+        company.fax ? `Fax: ${company.fax}` : ''
+      ].filter(Boolean).join(' | ');
+
+      const vAmount = parseFloat(voucher.Amount) || 0;
+      const vGst = parseFloat(voucher.GST) || 0;
+      const vNetAmount = parseFloat(voucher.NetAmount) || (vAmount + vGst);
+      const vGstPerc = parseFloat(voucher.GSTPerc) || 0;
+      const vWeight = parseFloat(voucher.Weight) || 0;
+
+      const printHtml = `
+        <!DOCTYPE html>
+        <html>
+          <head>
+            <meta charset="utf-8" />
+            <title>Miscellaneous Journal Voucher - ${voucher.Type}-${voucher.VoucherNo}</title>
+            <style>
+              @page {
+                size: A4 portrait;
+                margin: 0;
+              }
+              *, *:before, *:after {
+                box-sizing: border-box;
+              }
+              body {
+                font-family: 'Segoe UI', Tahoma, Arial, sans-serif;
+                margin: 0;
+                padding: 0;
+                background-color: #525659;
+                color: #222;
+                -webkit-print-color-adjust: exact;
+                print-color-adjust: exact;
+              }
+              .page-sheet {
+                background: #FFFFFF;
+                width: 210mm;
+                min-height: 297mm;
+                margin: 10mm auto;
+                padding: 12mm 15mm;
+                box-shadow: 0 0 14px rgba(0,0,0,0.4);
+                display: flex;
+                flex-direction: column;
+                justify-content: space-between;
+              }
+              @media print {
+                body {
+                  background: #FFFFFF;
+                }
+                .page-sheet {
+                  margin: 0;
+                  padding: 10mm 12mm;
+                  width: 100%;
+                  min-height: 100%;
+                  box-shadow: none;
+                }
+              }
+
+              /* HEADER SECTION */
+              .comp-header {
+                text-align: center;
+                border-bottom: 2px solid #9E741D;
+                padding-bottom: 8px;
+                margin-bottom: 12px;
+              }
+              .comp-name {
+                font-size: 20px;
+                font-weight: 800;
+                letter-spacing: 1.5px;
+                color: #5A3F0C;
+                text-transform: uppercase;
+                margin-bottom: 3px;
+              }
+              .comp-details {
+                font-size: 11px;
+                color: #444;
+                line-height: 1.4;
+              }
+
+              /* TITLE BADGE */
+              .doc-badge-container {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                background: #FBF6EC;
+                border: 1px solid #E2D3B3;
+                border-radius: 6px;
+                padding: 8px 14px;
+                margin-bottom: 14px;
+              }
+              .doc-title {
+                font-size: 15px;
+                font-weight: 800;
+                color: #8C5D08;
+                letter-spacing: 1px;
+                text-transform: uppercase;
+              }
+              .doc-print-time {
+                font-size: 10px;
+                color: #77664B;
+              }
+
+              /* INFO GRID */
+              .info-grid {
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: 12px;
+                margin-bottom: 14px;
+              }
+              .info-card {
+                border: 1px solid #E6DAC5;
+                background: #FAF8F5;
+                border-radius: 5px;
+                padding: 9px 12px;
+              }
+              .card-title {
+                font-size: 11px;
+                font-weight: 700;
+                color: #7A5716;
+                border-bottom: 1px solid #ECE1CD;
+                padding-bottom: 4px;
+                margin-bottom: 6px;
+                text-transform: uppercase;
+                letter-spacing: 0.5px;
+              }
+              .info-row {
+                display: flex;
+                font-size: 11px;
+                margin-bottom: 4px;
+                line-height: 1.35;
+              }
+              .info-lbl {
+                width: 120px;
+                font-weight: 600;
+                color: #665235;
+                flex-shrink: 0;
+              }
+              .info-val {
+                color: #1A1A1A;
+                flex-grow: 1;
+                word-break: break-word;
+              }
+              .font-bold {
+                font-weight: 700;
+              }
+
+              /* HIGHLIGHT BANNER */
+              .amount-banner {
+                background: #FFF9ED;
+                border: 1px solid #E5C37A;
+                border-radius: 6px;
+                padding: 12px 18px;
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                margin-bottom: 14px;
+              }
+              .amount-metric {
+                text-align: center;
+              }
+              .amount-lbl {
+                font-size: 10px;
+                color: #7A5C22;
+                font-weight: 600;
+                text-transform: uppercase;
+                margin-bottom: 2px;
+              }
+              .amount-val {
+                font-size: 15px;
+                font-weight: 800;
+                color: #4A330B;
+              }
+              .amount-grand {
+                color: #8C5D08;
+                font-size: 20px;
+              }
+
+              /* DETAIL TABLE */
+              .detail-table {
+                width: 100%;
+                border-collapse: collapse;
+                margin-bottom: 14px;
+                font-size: 11px;
+              }
+              .detail-table th {
+                background-color: #F3E7CF;
+                color: #4C350E;
+                font-weight: 700;
+                padding: 7px 8px;
+                text-align: left;
+                border: 1px solid #D9C8A8;
+                font-size: 10.5px;
+                text-transform: uppercase;
+              }
+              .detail-table td {
+                padding: 8px;
+                border: 1px solid #EFE4D0;
+                vertical-align: top;
+              }
+              .detail-table tr:nth-child(even) td {
+                background-color: #FDFAF5;
+              }
+
+              /* TOTALS BOX */
+              .totals-section {
+                display: flex;
+                justify-content: flex-end;
+                margin-bottom: 16px;
+              }
+              .totals-box {
+                width: 280px;
+                border: 1px solid #E2D3B3;
+                background: #FAF8F5;
+                border-radius: 5px;
+                padding: 8px 12px;
+              }
+              .total-row {
+                display: flex;
+                justify-content: space-between;
+                font-size: 11px;
+                margin-bottom: 4px;
+                color: #443522;
+              }
+              .total-row-grand {
+                border-top: 1px solid #D9C8A8;
+                padding-top: 5px;
+                margin-top: 4px;
+                font-size: 13px;
+                font-weight: 800;
+                color: #8C5D08;
+              }
+
+              /* SIGNATURES */
+              .sign-grid {
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: 20px;
+                margin-top: 18px;
+                padding-top: 10px;
+                border-top: 1px dashed #D6C29E;
+              }
+              .sign-card {
+                padding: 6px 10px;
+                border: 1px solid #EFE4D0;
+                background: #FAF8F5;
+                border-radius: 4px;
+              }
+              .sign-title {
+                font-size: 10px;
+                font-weight: 700;
+                color: #7A5716;
+                text-transform: uppercase;
+                margin-bottom: 30px;
+              }
+              .sign-line {
+                border-bottom: 1px solid #444;
+                margin-bottom: 4px;
+              }
+              .sign-sub {
+                font-size: 10px;
+                color: #555;
+                display: flex;
+                justify-content: space-between;
+              }
+
+              /* FOOTER */
+              .footer-bar {
+                margin-top: 14px;
+                text-align: center;
+                border-top: 1px solid #E2D3B3;
+                padding-top: 8px;
+                font-size: 10px;
+                color: #7C694F;
+              }
+            </style>
+          </head>
+          <body>
+            <div class="page-sheet">
+              <div>
+                <!-- COMPANY HEADER -->
+                <div class="comp-header">
+                  <div class="comp-name">${compName}</div>
+                  <div class="comp-details">
+                    ${compAddr1 ? `<div>${compAddr1}</div>` : ''}
+                    ${compAddr2 ? `<div>${compAddr2}</div>` : ''}
+                    ${compContact ? `<div>${compContact}</div>` : ''}
+                  </div>
+                </div>
+
+                <!-- TITLE BADGE -->
+                <div class="doc-badge-container">
+                  <div class="doc-title">${typeName} Journal Voucher</div>
+                  <div class="doc-print-time">Printed: ${sgDateStr} ${sgTimeStr} (1 Copy)</div>
+                </div>
+
+                <!-- INFO GRID -->
+                <div class="info-grid">
+                  <!-- VOUCHER AUDIT DETAILS -->
+                  <div class="info-card">
+                    <div class="card-title">VOUCHER AUDIT DETAILS</div>
+                    <div class="info-row"><span class="info-lbl">Voucher Type:</span><span class="info-val font-bold">${typeName} (${voucher.Type})</span></div>
+                    <div class="info-row"><span class="info-lbl">Voucher No:</span><span class="info-val font-bold">${voucher.VoucherNo}</span></div>
+                    <div class="info-row"><span class="info-lbl">Voucher Date:</span><span class="info-val">${voucherDateFormatted}</span></div>
+                    <div class="info-row"><span class="info-lbl">Recorded By:</span><span class="info-val">${voucher.CreateUser || 'sys'}</span></div>
+                  </div>
+
+                  <!-- RECIPIENT & SPECIFICATIONS -->
+                  <div class="info-card">
+                    <div class="card-title">BENEFICIARY & PARTICULARS</div>
+                    <div class="info-row"><span class="info-lbl">Person / Payee:</span><span class="info-val font-bold">${voucher.Person || '-'}</span></div>
+                    <div class="info-row"><span class="info-lbl">Weight (g):</span><span class="info-val">${vWeight > 0 ? vWeight.toFixed(3) + ' g' : '-'}</span></div>
+                    <div class="info-row"><span class="info-lbl">GST Applied:</span><span class="info-val">${vGstPerc}%</span></div>
+                    ${voucher.Remarks ? `<div class="info-row"><span class="info-lbl">Remarks:</span><span class="info-val">${voucher.Remarks}</span></div>` : ''}
+                  </div>
+                </div>
+
+                <!-- AMOUNT SUMMARY BANNER -->
+                <div class="amount-banner">
+                  <div class="amount-metric">
+                    <div class="amount-lbl">Amount (Excl. GST)</div>
+                    <div class="amount-val">$ ${vAmount.toFixed(2)}</div>
+                  </div>
+                  <div class="amount-metric">
+                    <div class="amount-lbl">GST Amount (${vGstPerc}%)</div>
+                    <div class="amount-val">$ ${vGst.toFixed(2)}</div>
+                  </div>
+                  <div class="amount-metric">
+                    <div class="amount-lbl">Total Payable / Net Amount</div>
+                    <div class="amount-val amount-grand">$ ${vNetAmount.toFixed(2)}</div>
+                  </div>
+                </div>
+
+                <!-- PARTICULARS TABLE -->
+                <table class="detail-table">
+                  <thead>
+                    <tr>
+                      <th style="width: 8%; text-align: center;">#</th>
+                      <th style="width: 20%;">Type</th>
+                      <th style="width: 42%;">Particulars / Remarks</th>
+                      <th style="width: 15%; text-align: right;">Amount (Excl.)</th>
+                      <th style="width: 15%; text-align: right;">Net Amount ($)</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td style="text-align: center;">1</td>
+                      <td style="font-weight: 600;">${typeName}</td>
+                      <td>${voucher.Remarks || voucher.Person || 'Miscellaneous journal transaction'}</td>
+                      <td style="text-align: right;">$ ${vAmount.toFixed(2)}</td>
+                      <td style="text-align: right; font-weight: 700; color: #8C5D08;">$ ${vNetAmount.toFixed(2)}</td>
+                    </tr>
+                  </tbody>
+                </table>
+
+                <!-- TOTALS SECTION -->
+                <div class="totals-section">
+                  <div class="totals-box">
+                    <div class="total-row">
+                      <span>Base Amount:</span>
+                      <span>$ ${vAmount.toFixed(2)}</span>
+                    </div>
+                    <div class="total-row">
+                      <span>GST (${vGstPerc}%):</span>
+                      <span>$ ${vGst.toFixed(2)}</span>
+                    </div>
+                    <div class="total-row total-row-grand">
+                      <span>TOTAL PAYABLE:</span>
+                      <span>$ ${vNetAmount.toFixed(2)}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <!-- SIGNATURES -->
+                <div class="sign-grid">
+                  <div class="sign-card">
+                    <div class="sign-title">Prepared By (Staff / Cashier)</div>
+                    <div class="sign-line"></div>
+                    <div class="sign-sub">
+                      <span>Staff: ${voucher.CreateUser || 'sys'}</span>
+                      <span>Date: ........................</span>
+                    </div>
+                  </div>
+                  <div class="sign-card">
+                    <div class="sign-title">Approved / Received By</div>
+                    <div class="sign-line"></div>
+                    <div class="sign-sub">
+                      <span>Signature</span>
+                      <span>Date: ........................</span>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- FOOTER -->
+                <div class="footer-bar">
+                  *** Official Miscellaneous Journal Voucher - System Generated by SmartGold POS ***
+                </div>
+              </div>
+            </div>
+
+            <script>
+              window.onload = function() {
+                setTimeout(function() {
+                  window.print();
+                }, 300);
+              };
+            </script>
+          </body>
+        </html>
+      `;
+
+      if (Platform.OS === 'web' && typeof window !== 'undefined') {
+        const printWindow = window.open('', '_blank', 'width=900,height=750');
+        if (printWindow) {
+          printWindow.document.open();
+          printWindow.document.write(printHtml);
+          printWindow.document.close();
+          showToast(`Voucher ${trimmedType}-${trimmedVoucherNo} print preview opened`);
+        } else {
+          const blob = new Blob([printHtml], { type: 'text/html;charset=utf-8;' });
+          const url = URL.createObjectURL(blob);
+          const win = window.open(url, '_blank');
+          if (!win) {
+            showToast('Popup blocker prevented opening print preview. Please allow popups.', 'error');
+          } else {
+            showToast(`Voucher ${trimmedType}-${trimmedVoucherNo} print preview opened`);
+          }
+        }
+      } else {
+        showToast(`Voucher ${trimmedType}-${trimmedVoucherNo} print preview ready`);
+      }
+    } catch (err: any) {
+      console.error('Print Error:', err);
+      showToast('Failed to generate Miscellaneous Journal print preview', 'error');
+    } finally {
+      setLoading(false);
     }
-    showToast(`Reprinting Voucher ${selectedType.code}-${voucherNo}...`);
+  };
+
+  // REPRINT function matching cmdReprint_Click() in frmMisc.vb
+  const handleReprint = () => {
+    let sType = '';
+    const typeLabel = (selectedType?.label || '').trim();
+    switch (typeLabel) {
+      case 'Purchase Note':
+        sType = 'PN';
+        break;
+      case 'Credit Note':
+        sType = 'CN';
+        break;
+      case 'Misc.Note':
+        sType = 'MC';
+        break;
+      case 'Petty Cash':
+        sType = 'PC';
+        break;
+      case 'Services':
+        sType = 'SR';
+        break;
+      default:
+        sType = selectedType?.code || '';
+        break;
+    }
+
+    subPrintMiscJournal(sType, voucherNo);
   };
 
   // CANCEL / CLEAR function

@@ -141,7 +141,7 @@ router.get("/balance/:repairNo", async (req, res) => {
         const custRes = await pool.request()
           .input("CustomerCode", sql.VarChar, custCode)
           .query(`
-            SELECT TOP 1 CustomerName, Address1, Address2, Address3, CustomerType, Phone
+            SELECT TOP 1 CustomerName, Address1, Address2, Address3, CustomerType, ISNULL(Phone1, ISNULL(Mobile, '')) AS Phone
             FROM tblCustomer
             WHERE RTRIM(LTRIM(CustomerCode)) = @CustomerCode
           `);
@@ -561,7 +561,138 @@ router.delete("/pay/:repairNo/:paymentNo", async (req, res) => {
   }
 });
 
-// 6. GET reprint repair receipt details (matching subPrintRepair in frmRepairPayment.vb)
+// 6. GET print / reprint repair receipt details (matching subPrintRepair in frmRepairPayment.vb)
+router.get("/print-data", async (req, res) => {
+  try {
+    const repairNo = (req.query.repairNo || req.query.orderNo || '').trim();
+    if (!repairNo) {
+      return res.status(400).json({ success: false, message: "Repair No is required for print." });
+    }
+
+    const pool = await getPool(req);
+
+    // 1. Fetch Company details matching objClsCompany
+    const compRes = await pool.request().query("SELECT TOP 1 * FROM tblCompany");
+    const rawCompany = compRes.recordset[0] || {};
+    const company = {
+      name: String(rawCompany.Name || rawCompany.CompanyName || '').trim(),
+      address1: String(rawCompany.Address1 || '').trim(),
+      address2: String(rawCompany.Address2 || '').trim(),
+      city: String(rawCompany.City || '').trim(),
+      state: String(rawCompany.State || '').trim(),
+      country: String(rawCompany.Country || '').trim(),
+      phone: String(rawCompany.Phone || '').trim(),
+      fax: String(rawCompany.Fax || '').trim(),
+      companyShortCode: String(rawCompany.CompanyShortCode || '').trim().toUpperCase(),
+    };
+
+    // 2. Fetch Repair Header + Customer Details
+    const headerRes = await pool.request()
+      .input("RepairNo", sql.VarChar, repairNo)
+      .query(`
+        SELECT 
+          h.*,
+          RTRIM(LTRIM(ISNULL(c.CustomerName, ''))) AS CustomerName,
+          RTRIM(LTRIM(ISNULL(c.Address1, ''))) AS CustomerAddress1,
+          RTRIM(LTRIM(ISNULL(c.Address2, ''))) AS CustomerAddress2,
+          RTRIM(LTRIM(ISNULL(c.Address3, ''))) AS CustomerAddress3,
+          RTRIM(LTRIM(ISNULL(c.Phone1, ISNULL(c.Mobile, '')))) AS CustomerPhone,
+          RTRIM(LTRIM(ISNULL(c.CustomerType, ''))) AS CustomerType
+        FROM tblInventoryRepairHeader h
+        LEFT JOIN tblCustomer c ON RTRIM(LTRIM(c.CustomerCode)) = RTRIM(LTRIM(h.CustomerCode))
+        WHERE RTRIM(LTRIM(h.RepairNo)) = @RepairNo
+      `);
+
+    if (headerRes.recordset.length === 0) {
+      return res.status(404).json({ success: false, message: `Repair docket ${repairNo} not found.` });
+    }
+
+    const header = headerRes.recordset[0];
+
+    // 3. Fetch Repair Details (line items)
+    let details = [];
+    try {
+      const detailRes = await pool.request()
+        .input("RepairNo", sql.VarChar, repairNo)
+        .query(`
+          SELECT * 
+          FROM tblInventoryRepairDetail 
+          WHERE RTRIM(LTRIM(RepairNo)) = @RepairNo 
+          ORDER BY LineNo ASC
+        `);
+      details = detailRes.recordset || [];
+    } catch (eDet) {
+      console.warn("Could not query tblInventoryRepairDetail for print:", eDet.message);
+    }
+
+    // 4. Fetch Payment History (from tblRepairPaymentDetail, fallback to tblOrderPaymentDetail)
+    let payments = [];
+    try {
+      const payRes = await pool.request()
+        .input("RepairNo", sql.VarChar, repairNo)
+        .query(`
+          SELECT RepairNo, RepairPaymentNo, AmountPaid, Remarks, CreateDate, CreateUser
+          FROM tblRepairPaymentDetail
+          WHERE RTRIM(LTRIM(RepairNo)) = @RepairNo
+          ORDER BY CreateDate ASC
+        `);
+      payments = payRes.recordset || [];
+    } catch (ePay) {
+      console.warn("Could not query tblRepairPaymentDetail for print:", ePay.message);
+    }
+
+    if (payments.length === 0) {
+      try {
+        const fallbackRes = await pool.request()
+          .input("OrderNo", sql.VarChar, repairNo)
+          .query(`
+            SELECT OrderNo AS RepairNo, OrderPaymentNo AS RepairPaymentNo, AmountPaid, Remarks, CreateDate, CreateUser
+            FROM tblOrderPaymentDetail
+            WHERE RTRIM(LTRIM(OrderNo)) = @OrderNo
+            ORDER BY CreateDate ASC
+          `);
+        payments = fallbackRes.recordset || [];
+      } catch (eFallback) {}
+    }
+
+    // 5. Fetch Class Gold Rates (subGetClassRate in VB.NET)
+    let rates = { rate999: '', rate916: '', rate835: '', rate24k999: '', rate20k850: '', rate22ksov: '' };
+    try {
+      const classRes = await pool.request().query("SELECT ClassCode, Rate FROM tblClass");
+      if (classRes.recordset && classRes.recordset.length > 0) {
+        for (const r of classRes.recordset) {
+          const cCode = String(r.ClassCode || '').trim().toUpperCase();
+          const rVal = parseFloat(r.Rate) || 0;
+          const rFormatted = rVal.toFixed(2);
+          if (cCode === '916' || cCode === '22K-916') rates.rate916 = rFormatted;
+          else if (cCode === '999' || cCode === '24K') rates.rate999 = rFormatted;
+          else if (cCode === '20KJ' || cCode === '835') rates.rate835 = rFormatted;
+          else if (cCode === '24K-999') rates.rate24k999 = rFormatted;
+          else if (cCode === '20K-850') rates.rate20k850 = rFormatted;
+          else if (cCode === '22K-SOV') rates.rate22ksov = rFormatted;
+        }
+      }
+    } catch (eRates) {
+      console.warn("Class rate fetch warning for print:", eRates.message);
+    }
+
+    res.json({
+      success: true,
+      data: {
+        company,
+        header,
+        details,
+        payments,
+        rates
+      }
+    });
+  } catch (err) {
+    console.error("Print Data Fetch Error:", err);
+    res.status(500).json({ success: false, message: "Failed to fetch repair print data", error: err.message });
+  }
+});
+
+// 7. GET reprint repair receipt details (matching subPrintRepair in frmRepairPayment.vb)
 router.get("/reprint/:repairNo", async (req, res) => {
   const { repairNo } = req.params;
   try {
@@ -575,7 +706,7 @@ router.get("/reprint/:repairNo", async (req, res) => {
           h.CustomerCode,
           c.CustomerName,
           c.Address1,
-          c.Phone,
+          ISNULL(c.Phone1, ISNULL(c.Mobile, '')) AS Phone,
           ISNULL(h.TotalCostEstimated, 0) AS TotalCostEstimated,
           ISNULL(h.AdvancePaid, 0) AS AdvancePaid
         FROM tblInventoryRepairHeader h

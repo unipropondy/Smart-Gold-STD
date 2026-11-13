@@ -1553,6 +1553,164 @@ router.get("/debug-schema", async (req, res) => {
   }
 });
 
+// ================= GET PRINT DATA =================
+// Crystal Reports migrated:
+// Reports/rptSalesInvoice_MJ.rpt, rptSalesInvoiceStandard_MJ.rpt, rptSalesInvoiceNoGST_MJ.rpt,
+// rptSalesInvoice_FH.rpt, rptSalesInvoice_SSJ.rpt, rptSalesInvoice_RJ.rpt, rptSalesInvoice_ESP.rpt,
+// rptSalesInvoice_AS.rpt, rptSalesInvoice_AJ.rpt, rptSalesInvoice_MD.rpt, rptSalesInvoice_ML.rpt,
+// rptSalesInvoice_GMT.rpt, rptSalesInvoice_HN.rpt, rptInstallmentSalesInvoice_*.rpt, rptTradeInSalesInvoice_*.rpt
+// Record Selection: {tblSalesHeader.InvoiceNo} = sInvoiceNo
+// Formula Fields: CompAddress1, CompAddress2, CompAddress3, Customer1, Customer2, Customer3, Rate1, Rate2, Rate3, Rate4
+router.get("/print-data", async (req, res) => {
+  try {
+    const rawInvoiceNo = (req.query.invoiceNo || req.query.billNo || "").trim();
+    if (!rawInvoiceNo) {
+      return res.status(400).json({ success: false, message: "Invoice No / Bill No is required for printing." });
+    }
+
+    const pool = req.pool;
+
+    // 1. Fetch Company Information matching clsCompany.getCompanyName
+    const compRes = await pool.request().query(`
+      SELECT TOP 1 Name, Address1, Address2, City, State, Country, Phone, Fax, CompanyShortCode, CurrencySign
+      FROM tblCompany
+    `);
+    const compRow = compRes.recordset[0] || {};
+    const company = {
+      name: (compRow.Name || "SMART").trim(),
+      address1: (compRow.Address1 || "").trim(),
+      address2: (compRow.Address2 || "").trim(),
+      city: (compRow.City || "").trim(),
+      state: (compRow.State || "").trim(),
+      country: (compRow.Country || "").trim(),
+      phone: (compRow.Phone || "").trim(),
+      fax: (compRow.Fax || "").trim(),
+      companyShortCode: (compRow.CompanyShortCode || "MJ").trim().toUpperCase(),
+      currencySign: (compRow.CurrencySign || "SGD").trim()
+    };
+
+    // 2. Fetch Sales Header joined with tblCustomer & tblSalesMan
+    const headerRes = await pool.request()
+      .input("InvoiceNo", sql.VarChar, rawInvoiceNo)
+      .query(`
+        SELECT TOP 1 
+          h.*,
+          c.CustomerName AS CustMasterName,
+          c.Address1 AS CustAddress1,
+          c.Address2 AS CustAddress2,
+          c.Address3 AS CustAddress3,
+          c.CustomerType AS CustType,
+          c.NricNo AS CustNricNo,
+          sm.SalesManName
+        FROM tblSalesHeader h
+        LEFT JOIN tblCustomer c ON RTRIM(h.CustomerCode) = RTRIM(c.CustomerCode)
+        LEFT JOIN tblSalesMan sm ON RTRIM(h.SalesManCode) = RTRIM(sm.SalesManCode)
+        WHERE RTRIM(h.InvoiceNo) = RTRIM(@InvoiceNo)
+      `);
+
+    if (headerRes.recordset.length === 0) {
+      return res.status(404).json({ success: false, message: `Invoice No "${rawInvoiceNo}" not found.` });
+    }
+
+    const header = headerRes.recordset[0];
+
+    // Customer Name resolution
+    let finalCustName = "";
+    if (header.CustMasterName) {
+      finalCustName = Array.isArray(header.CustMasterName) ? header.CustMasterName[0] : header.CustMasterName;
+    } else if (header.CustomerName) {
+      finalCustName = Array.isArray(header.CustomerName) ? header.CustomerName[0] : header.CustomerName;
+    } else {
+      finalCustName = header.CustomerCode || "CASH CUSTOMER";
+    }
+
+    // 3. Fetch Sales Details
+    const itemsRes = await pool.request()
+      .input("InvoiceNo", sql.VarChar, rawInvoiceNo)
+      .query(`
+        SELECT d.*
+        FROM tblSalesDetail d
+        WHERE RTRIM(d.InvoiceNo) = RTRIM(@InvoiceNo)
+        ORDER BY d.SortCode ASC, d.InventoryCode ASC
+      `);
+
+    // 4. Fetch Payment Modes
+    const payRes = await pool.request()
+      .input("InvoiceNo", sql.VarChar, rawInvoiceNo)
+      .query(`
+        SELECT *
+        FROM tblPayModeDetail
+        WHERE RTRIM(InvoiceNo) = RTRIM(@InvoiceNo)
+        ORDER BY PayMode ASC
+      `);
+
+    // 5. Fetch Daily Class Rates for Rate1, Rate2, Rate3, Rate4
+    let rate999 = "-";
+    let rate916 = "-";
+    let rate835 = "-";
+    let rate24k999 = "-";
+    let rate20k850 = "-";
+    let rate22ksov = "-";
+
+    try {
+      const salesDate = header.InvoiceDate ? new Date(header.InvoiceDate) : new Date();
+      const rateRes = await pool.request()
+        .input("SalesDate", sql.DateTime, salesDate)
+        .query(`
+          SELECT ClassCode, ISNULL(Rate, 0.00) AS Rate
+          FROM tblClassRate
+          WHERE @SalesDate BETWEEN FromDate AND ToDate
+          ORDER BY ClassCode
+        `);
+
+      for (const row of rateRes.recordset) {
+        const code = (row.ClassCode || "").trim().toUpperCase();
+        const rVal = parseFloat(row.Rate) || 0;
+        const formatted = rVal.toFixed(2);
+        if (code === "22K" || code === "916" || code === "22K-916") rate916 = formatted;
+        if (code === "999" || code === "24K" || code === "24K-999") {
+          rate999 = formatted;
+          rate24k999 = formatted;
+        }
+        if (code === "SILVER" || code === "835") rate835 = formatted;
+        if (code === "20K-850" || code === "20K") rate20k850 = formatted;
+        if (code === "22K-SOV" || code === "SOV") rate22ksov = formatted;
+      }
+    } catch (rateErr) {
+      console.warn("⚠️ Rate lookup warning:", rateErr.message);
+    }
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        company,
+        rates: {
+          rate999,
+          rate916,
+          rate835,
+          rate24k999,
+          rate20k850,
+          rate22ksov
+        },
+        header: {
+          ...header,
+          CustomerName: String(finalCustName).trim(),
+          CustomerAddress1: (header.CustAddress1 || header.Address1 || "").trim(),
+          CustomerAddress2: (header.CustAddress2 || header.Address2 || "").trim(),
+          CustomerAddress3: (header.CustAddress3 || header.Address3 || "").trim(),
+          CustomerNricNo: (header.CustNricNo || "").trim(),
+          SalesManName: (header.SalesManName || header.SalesManCode || "").trim()
+        },
+        items: itemsRes.recordset,
+        payments: payRes.recordset
+      }
+    });
+  } catch (err) {
+    console.error("🔥 GET POS PRINT-DATA ERROR:", err);
+    return res.status(500).json({ success: false, message: "Server Error", error: err.message });
+  }
+});
+
 // ================= GET INVOICE BY NO =================
 router.get("/:invoiceNo", async (req, res) => {
   try {
