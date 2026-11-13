@@ -16,7 +16,16 @@ router.get('/initData', async (req, res) => {
         const pool = await getPool(req);
         const { customerCode, customerType, date } = req.query;
 
-        // 1. Get PayModes
+        // Fetch company short code to handle company-specific rules (e.g. 'AJ', 'MD', 'HN')
+        let companyShortCode = 'AJ';
+        try {
+            const compRes = await pool.request().query("SELECT TOP 1 ShortCode, CompanyCode FROM tblCompany");
+            if (compRes.recordset.length > 0) {
+                companyShortCode = (compRes.recordset[0].ShortCode || compRes.recordset[0].CompanyCode || 'AJ').trim().toUpperCase();
+            }
+        } catch (_) {}
+
+        // 1. Get PayModes (objPay.GetPayMode() -> "SELECT * FROM tblPaymode ORDER BY POSITION")
         let payModes = [];
         try {
             const paymodeResult = await pool.request().query("SELECT * FROM tblPaymode ORDER BY Position ASC");
@@ -32,82 +41,153 @@ router.get('/initData', async (req, res) => {
         let depositDetails = null;
         let depositTradeInDetails = null;
 
-        if (customerCode) {
+        if (customerCode && String(customerCode).trim().toUpperCase() !== 'CASH') {
+            const cleanCustCode = String(customerCode).trim();
+
             // 2 & 3. Reward and Redeemed Points
-            // As per VB.NET code: GetsumRewardPointsByCustomer, GetsumRedeemedPointsByCustomer
+            // As per VB.NET objCustomer.GetsumRewardPointsByCustomer:
+            // "Select CustomerCode,sum(RewardPoints)RewardPoints, Sum(RedeemPoints)RedeemPoints from tblMemberTransactionaj where CustomerCode = ... group by CustomerCode"
             try {
                 const pointsResult = await pool.request()
-                    .input('CustomerCode', sql.VarChar, customerCode)
+                    .input('CustomerCode', sql.VarChar, cleanCustCode)
                     .query(`
                         SELECT 
-                            ISNULL(RewardPoints, 0) as RewardPoints, 
-                            ISNULL(RedeemPoints, 0) as RedeemPoints 
-                        FROM tblCustomer 
+                            ISNULL(SUM(RewardPoints), 0) as RewardPoints, 
+                            ISNULL(SUM(RedeemPoints), 0) as RedeemPoints 
+                        FROM tblMemberTransactionaj 
                         WHERE CustomerCode = @CustomerCode
+                        GROUP BY CustomerCode
                     `);
                 if (pointsResult.recordset.length > 0) {
                     rewardPoints = parseFloat(pointsResult.recordset[0].RewardPoints) || 0;
                     redeemPoints = parseFloat(pointsResult.recordset[0].RedeemPoints) || 0;
+                } else {
+                    // Fallback to tblCustomer if member transactions table is empty for customer
+                    const custResult = await pool.request()
+                        .input('CustomerCode', sql.VarChar, cleanCustCode)
+                        .query(`
+                            SELECT 
+                                ISNULL(RewardPoints, 0) as RewardPoints, 
+                                ISNULL(RedeemPoints, 0) as RedeemPoints 
+                            FROM tblCustomer 
+                            WHERE CustomerCode = @CustomerCode
+                        `);
+                    if (custResult.recordset.length > 0) {
+                        rewardPoints = parseFloat(custResult.recordset[0].RewardPoints) || 0;
+                        redeemPoints = parseFloat(custResult.recordset[0].RedeemPoints) || 0;
+                    }
                 }
             } catch (err) {
                 console.error("Error fetching reward points:", err);
             }
 
             // Customer today redeemed points
+            // As per VB.NET objCustomer.GetsumRedeemedPointsByCustomer:
+            // "Select CustomerCode,Sum(RedeemPoints)RedeemPoints from tblMemberTransactionaj where CustomerCode = ... and Invoicedate = ... group by CustomerCode"
             try {
+                const effectiveDate = date ? new Date(date) : new Date();
                 const redToday = await pool.request()
-                    .input('CustomerCode', sql.VarChar, customerCode)
+                    .input('CustomerCode', sql.VarChar, cleanCustCode)
+                    .input('TransDate', sql.Date, effectiveDate)
                     .query(`
                         SELECT ISNULL(SUM(RedeemPoints), 0) as RedeemedToday
-                        FROM tblPosMemberTransaction
-                        WHERE CustomerCode = @CustomerCode AND CAST(TransDate AS DATE) = CAST(GETDATE() AS DATE)
+                        FROM tblMemberTransactionaj
+                        WHERE CustomerCode = @CustomerCode AND CAST(InvoiceDate AS DATE) = CAST(@TransDate AS DATE)
+                        GROUP BY CustomerCode
                     `);
                 if (redToday.recordset.length > 0) {
                     redeemedPoints = parseFloat(redToday.recordset[0].RedeemedToday) || 0;
+                } else {
+                    const redToday2 = await pool.request()
+                        .input('CustomerCode', sql.VarChar, cleanCustCode)
+                        .input('TransDate', sql.Date, effectiveDate)
+                        .query(`
+                            SELECT ISNULL(SUM(RedeemPoints), 0) as RedeemedToday
+                            FROM tblPosMemberTransaction
+                            WHERE CustomerCode = @CustomerCode AND CAST(TransDate AS DATE) = CAST(@TransDate AS DATE)
+                            GROUP BY CustomerCode
+                        `);
+                    if (redToday2.recordset.length > 0) {
+                        redeemedPoints = parseFloat(redToday2.recordset[0].RedeemedToday) || 0;
+                    }
                 }
             } catch (err) {
-                // Table might not exist or alternate schema
+                console.error("Error fetching redeemed points today:", err);
             }
 
-            // 4. Deposit Details
+            // 4. Deposit Details (ClsSalesReturn.GetDepositDetails:
+            // "SELECT * FROM tblDepositSave WHERE CustomerCode = ... and DepositUsed='N'")
             try {
-                const depData = await pool.request()
-                    .input('CustomerCode', sql.VarChar, customerCode)
+                let depData = await pool.request()
+                    .input('CustomerCode', sql.VarChar, cleanCustCode)
                     .query(`
                         SELECT TOP 1 DepositNo, (ISNULL(DepositAmount,0) + ISNULL(AmountPaid,0)) as DepositAmount 
-                        FROM tblDeposit 
-                        WHERE CustomerCode = @CustomerCode AND ISNULL(IsUsed, 0) = 0
+                        FROM tblDepositSave 
+                        WHERE CustomerCode = @CustomerCode AND ISNULL(DepositUsed, 'N') = 'N'
                         ORDER BY DepositDate DESC
                     `);
+                if (depData.recordset.length === 0) {
+                    depData = await pool.request()
+                        .input('CustomerCode', sql.VarChar, cleanCustCode)
+                        .query(`
+                            SELECT TOP 1 DepositNo, (ISNULL(DepositAmount,0) + ISNULL(AmountPaid,0)) as DepositAmount 
+                            FROM tblCustomerDeposit 
+                            WHERE CustomerCode = @CustomerCode AND ISNULL(DepositUsed, 'N') = 'N'
+                            ORDER BY DepositDate DESC
+                        `);
+                }
+                if (depData.recordset.length === 0) {
+                    depData = await pool.request()
+                        .input('CustomerCode', sql.VarChar, cleanCustCode)
+                        .query(`
+                            SELECT TOP 1 DepositNo, (ISNULL(DepositAmount,0) + ISNULL(AmountPaid,0)) as DepositAmount 
+                            FROM tblDeposit 
+                            WHERE CustomerCode = @CustomerCode AND (ISNULL(IsUsed, 0) = 0 OR ISNULL(DepositUsed, 'N') = 'N')
+                            ORDER BY DepositDate DESC
+                        `);
+                }
                 if (depData.recordset.length > 0) {
                     depositDetails = depData.recordset[0];
                 }
             } catch (err) {
-                // Ignore missing table
+                console.error("Error fetching deposit details:", err);
             }
 
-            // 5. TradeIn Details
+            // 5. TradeIn Details (ClsSalesReturn.GetDepositTradeInDetails:
+            // "SELECT * FROM tblDeposit WHERE SalesType='TRADEIN' and CustomerCode = ... and DepositUsed='N'")
             try {
-                const trdData = await pool.request()
-                    .input('CustomerCode', sql.VarChar, customerCode)
+                let trdData = await pool.request()
+                    .input('CustomerCode', sql.VarChar, cleanCustCode)
                     .query(`
                         SELECT TOP 1 SalesReturnNo, ISNULL(Amount,0) as Amount 
-                        FROM tblSalesReturn 
-                        WHERE CustomerCode = @CustomerCode AND ReturnType = 'TRADEIN' AND ISNULL(IsUsed, 0) = 0
-                        ORDER BY ReturnDate DESC
+                        FROM tblDeposit 
+                        WHERE CustomerCode = @CustomerCode AND SalesType = 'TRADEIN' AND ISNULL(DepositUsed, 'N') = 'N'
+                        ORDER BY DepositDate DESC
                     `);
+                if (trdData.recordset.length === 0) {
+                    trdData = await pool.request()
+                        .input('CustomerCode', sql.VarChar, cleanCustCode)
+                        .query(`
+                            SELECT TOP 1 SalesReturnNo, ISNULL(Amount,0) as Amount 
+                            FROM tblSalesReturn 
+                            WHERE CustomerCode = @CustomerCode AND ReturnType = 'TRADEIN' AND ISNULL(IsUsed, 0) = 0
+                            ORDER BY ReturnDate DESC
+                        `);
+                }
                 if (trdData.recordset.length > 0) {
                     depositTradeInDetails = trdData.recordset[0];
                 }
             } catch (err) {
-                // Ignore missing table
+                console.error("Error fetching trade-in details:", err);
             }
         }
 
         res.json({
             success: true,
+            companyShortCode,
             payModes,
             customerData: {
+                customerType: customerType || '',
                 rewardPoints,
                 redeemPoints,
                 redeemedPoints,

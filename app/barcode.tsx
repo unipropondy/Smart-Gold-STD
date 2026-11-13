@@ -29,6 +29,7 @@ export default function BarcodeScreen() {
 
   // Field states matching frmBarcode.vb
   const [company, setCompany] = useState('MILLION');
+  const [defaultCompany, setDefaultCompany] = useState('MILLION');
   const [barCode, setBarCode] = useState('');
   const [inventoryCode, setInventoryCode] = useState('');
   const [description, setDescription] = useState('');
@@ -47,6 +48,23 @@ export default function BarcodeScreen() {
   // Focus ref
   const inventoryCodeRef = useRef<TextInput>(null);
   const noOfLabelsRef = useRef<TextInput>(null);
+
+  // Fetch company details on mount matching frmBarcode.vb Load
+  useEffect(() => {
+    const fetchCompany = async () => {
+      try {
+        const res = await fetch(`${API_URL}/company`);
+        const json = await res.json();
+        if (json.success && json.company) {
+          setCompany(json.company);
+          setDefaultCompany(json.company);
+        }
+      } catch (err) {
+        console.warn('Failed to fetch company:', err);
+      }
+    };
+    fetchCompany();
+  }, []);
 
   // In-App Toast Notification
   const [toast, setToast] = useState<{ visible: boolean; message: string; type: 'success' | 'error' | 'info' }>({
@@ -138,7 +156,7 @@ export default function BarcodeScreen() {
   // btnNew_Click
   const handleClear = (fullClear = true) => {
     if (fullClear) {
-      setCompany('MILLION');
+      setCompany(defaultCompany || 'MILLION');
       setInventoryCode('');
     }
     setBarCode('');
@@ -206,7 +224,12 @@ export default function BarcodeScreen() {
           categoryCode: category.trim(),
           oldCategoryCode: initialCategory.trim(),
           noOfLabels: parseInt(noOfLabels, 10) || 1,
-          company: company.trim()
+          company: company.trim(),
+          description: description.trim(),
+          weight: weight.trim(),
+          goldLoss: goldLoss.trim(),
+          smc: smc.trim(),
+          classCode: classCode.trim()
         }),
       });
 

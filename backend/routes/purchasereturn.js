@@ -398,4 +398,152 @@ router.post("/", async (req, res) => {
   }
 });
 
+// GET /print-data - Retrieve exact Crystal Report dataset for Purchase Return
+router.get("/print-data", async (req, res) => {
+  try {
+    const pool = req.pool || (await poolPromise);
+    const { returnNo } = req.query;
+
+    if (!returnNo || !returnNo.trim()) {
+      return res.status(400).json({ success: false, message: "ReturnNo is required." });
+    }
+
+    const trimmedReturnNo = returnNo.trim();
+
+    // 1. Fetch Company Information matching frmPurchaseReturn.vb: objCompany.getCompanyName
+    let company = {
+      name: "SMART",
+      address1: "SINGAPORE",
+      address2: "",
+      city: "",
+      phone: "",
+      fax: ""
+    };
+
+    try {
+      const compRes = await pool.request().query("SELECT TOP 1 * FROM tblCompany");
+      if (compRes.recordset.length > 0) {
+        const c = compRes.recordset[0];
+        company = {
+          name: (c.Name || c.CompanyName || "SMART").trim(),
+          address1: (c.Address1 || "SINGAPORE").trim(),
+          address2: (c.Address2 || "").trim(),
+          city: (c.City || "").trim(),
+          phone: (c.Phone || "").trim(),
+          fax: (c.Fax || "").trim()
+        };
+      }
+    } catch (compErr) {
+      console.warn("Could not fetch company info for Purchase Return report:", compErr.message);
+    }
+
+    // 2. Exact user-provided SQL Query:
+    // SELECT "tblPurchaseReturnHeader"."ReturnDate", "tblPurchaseReturnHeader"."ReturnNo", "tblPurchaseReturnDetail"."ReturnNo", "tblPurchaseReturnHeader"."TotalGst", "tblPurchaseReturnHeader"."NetAmount", "tblPurchaseReturnHeader"."Remarks", "tblPurchaseReturnDetail"."InventoryCode", "tblPurchaseReturnDetail"."Description", "tblPurchaseReturnDetail"."Weight", "tblPurchaseReturnDetail"."GoldLoss", "tblPurchaseReturnDetail"."MC", "tblPurchaseReturnDetail"."PCS", "tblPurchaseReturnDetail"."TotalValue", "tblPurchaseReturnHeader"."TotalValue", "tblSupplier"."SupplierName", "tblSupplier"."Address1", "tblSupplier"."Address2", "tblPurchaseReturnHeader"."TotalWeight", "tblPurchaseReturnHeader"."TotalPCS"
+    // FROM ("tblPurchaseReturnHeader" INNER JOIN "tblPurchaseReturnDetail" ON "tblPurchaseReturnHeader"."ReturnNo"="tblPurchaseReturnDetail"."ReturnNo") LEFT OUTER JOIN "tblSupplier" ON "tblPurchaseReturnHeader"."SupplierCode"="tblSupplier"."SupplierCode"
+    // WHERE "tblPurchaseReturnHeader"."ReturnNo" = @ReturnNo
+    // ORDER BY "tblPurchaseReturnDetail"."ReturnNo"
+    const query = `
+      SELECT 
+        tblPurchaseReturnHeader.ReturnDate, 
+        tblPurchaseReturnHeader.ReturnNo, 
+        tblPurchaseReturnDetail.ReturnNo AS DetailReturnNo, 
+        tblPurchaseReturnHeader.TotalGst, 
+        tblPurchaseReturnHeader.NetAmount, 
+        tblPurchaseReturnHeader.Remarks, 
+        tblPurchaseReturnDetail.InventoryCode, 
+        tblPurchaseReturnDetail.Description, 
+        tblPurchaseReturnDetail.Weight, 
+        tblPurchaseReturnDetail.GoldLoss, 
+        tblPurchaseReturnDetail.MC, 
+        tblPurchaseReturnDetail.PCS, 
+        tblPurchaseReturnDetail.TotalValue, 
+        tblPurchaseReturnHeader.TotalValue AS HeaderTotalValue, 
+        tblSupplier.SupplierName, 
+        tblSupplier.Address1, 
+        tblSupplier.Address2, 
+        tblPurchaseReturnHeader.TotalWeight, 
+        tblPurchaseReturnHeader.TotalPCS
+      FROM tblPurchaseReturnHeader
+      INNER JOIN tblPurchaseReturnDetail ON tblPurchaseReturnHeader.ReturnNo = tblPurchaseReturnDetail.ReturnNo
+      LEFT OUTER JOIN tblSupplier ON tblPurchaseReturnHeader.SupplierCode = tblSupplier.SupplierCode
+      WHERE tblPurchaseReturnHeader.ReturnNo = @ReturnNo
+      ORDER BY tblPurchaseReturnDetail.ReturnNo ASC
+    `;
+
+    const result = await pool.request()
+      .input("ReturnNo", sql.VarChar, trimmedReturnNo)
+      .query(query);
+
+    if (result.recordset.length === 0) {
+      return res.status(404).json({ success: false, message: `No record found for Purchase Return Ref No: ${trimmedReturnNo}` });
+    }
+
+    const firstRow = result.recordset[0];
+    const header = {
+      returnNo: firstRow.ReturnNo,
+      returnDate: firstRow.ReturnDate,
+      supplierName: firstRow.SupplierName || "",
+      address1: firstRow.Address1 || "",
+      address2: firstRow.Address2 || "",
+      remarks: firstRow.Remarks || "",
+      totalGst: parseFloat(firstRow.TotalGst || 0),
+      netAmount: parseFloat(firstRow.NetAmount || 0),
+      totalValue: parseFloat(firstRow.HeaderTotalValue || 0),
+      totalWeight: parseFloat(firstRow.TotalWeight || 0),
+      totalPCS: parseInt(firstRow.TotalPCS || 0, 10)
+    };
+
+    const details = result.recordset.map((row, index) => ({
+      sNo: index + 1,
+      inventoryCode: row.InventoryCode || "",
+      description: row.Description || "",
+      weight: parseFloat(row.Weight || 0),
+      goldLoss: parseFloat(row.GoldLoss || 0),
+      mc: parseFloat(row.MC || 0),
+      pcs: parseInt(row.PCS || 0, 10),
+      amount: parseFloat(row.TotalValue || 0)
+    }));
+
+    res.json({
+      success: true,
+      data: {
+        company,
+        header,
+        details,
+        rawRows: result.recordset
+      }
+    });
+  } catch (err) {
+    console.error("Print Data Error for Purchase Return:", err);
+    res.status(500).json({ success: false, message: "Database Error", error: err.message });
+  }
+});
+
+// GET /past-list - LOV to pick existing saved Purchase Returns to view/print
+router.get("/past-list", async (req, res) => {
+  try {
+    const pool = req.pool || (await poolPromise);
+    const query = `
+      SELECT TOP 100
+        h.ReturnNo,
+        h.ReturnDate,
+        h.SupplierCode,
+        s.SupplierName,
+        h.TotalWeight,
+        h.TotalPCS,
+        h.TotalValue,
+        h.TotalGst,
+        h.NetAmount
+      FROM tblPurchaseReturnHeader h
+      LEFT JOIN tblSupplier s ON h.SupplierCode = s.SupplierCode
+      ORDER BY h.ReturnDate DESC, h.ReturnNo DESC
+    `;
+    const result = await pool.request().query(query);
+    res.json({ success: true, data: result.recordset });
+  } catch (err) {
+    console.error("Past List Error for Purchase Return:", err);
+    res.status(500).json({ success: false, message: "Database Error", error: err.message });
+  }
+});
+
 module.exports = router;

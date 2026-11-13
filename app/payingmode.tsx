@@ -36,11 +36,19 @@ export default function PayingModeScreen() {
   const initialTotalNet = parseFloat(params.totalNet as string) || 0;
   const customerCode = (params.customerCode as string) || '';
   const customerType = (params.customerType as string) || '';
+  const initialTradeInSales = parseFloat(params.tradeInSales as string) || 0;
+  const initialSalesReturnNo = (params.tradeInRefNo as string) || (params.salesReturnNo as string) || '';
+  const initialAdvance = parseFloat(params.advance as string) || 0;
+  const initialAdvDepositNo = (params.advDepositNo as string) || (params.depositNo as string) || '';
+  const initialFlexiAmount = parseFloat(params.flexiAmount as string) || 0;
+  const initialFlexiBonus = parseFloat(params.flexiBonus as string) || 0;
+  const initialSubscriptionId = (params.subscriptionId as string) || '';
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [payModes, setPayModes] = useState<PayModeItem[]>([]);
   const [customerData, setCustomerData] = useState<any>({});
+  const [companyCode, setCompanyCode] = useState<string>('AJ');
 
   // Summary States
   const [total, setTotal] = useState(initialTotalNet);
@@ -58,9 +66,12 @@ export default function PayingModeScreen() {
 
   const fetchInitData = async () => {
     try {
-      const response = await fetch(`${API_URL}/initData?customerCode=${encodeURIComponent(customerCode)}&t=${Date.now()}`);
+      const response = await fetch(`${API_URL}/initData?customerCode=${encodeURIComponent(customerCode)}&customerType=${encodeURIComponent(customerType)}&date=${encodeURIComponent(new Date().toISOString())}&t=${Date.now()}`);
       const json = await response.json();
       if (json.success) {
+        if (json.companyShortCode) {
+          setCompanyCode(json.companyShortCode);
+        }
         const modes = json.payModes.map((m: any) => ({
           PayMode: m.PayMode ? m.PayMode.trim() : '',
           Commission: parseFloat(m.Commission) || 0,
@@ -71,36 +82,77 @@ export default function PayingModeScreen() {
 
         // Setup initial default logic
         if (modes.length > 0) {
-          // Pre-fill Deposit
+          // Pre-fill Deposit (or Advance Deposit)
+          let depositAmount = 0;
+          let depositSlipNo = '';
           if (json.customerData?.depositDetails) {
-            const depIndex = modes.findIndex((m: any) => m.PayMode.toUpperCase() === 'DEPOSIT');
-            if (depIndex !== -1) {
-              const depAmt = parseFloat(json.customerData.depositDetails.DepositAmount) || 0;
-              modes[depIndex].Amount = depAmt > 0 ? depAmt.toFixed(2) : '0.00';
-            }
-          } else {
-            const depIndex = modes.findIndex((m: any) => m.PayMode.toUpperCase() === 'DEPOSIT');
-            if (depIndex !== -1) modes[depIndex].Amount = '0.00';
+            depositAmount = parseFloat(json.customerData.depositDetails.DepositAmount) || 0;
+            depositSlipNo = json.customerData.depositDetails.DepositNo || '';
+          }
+          if (initialAdvance > 0) {
+            depositAmount = initialAdvance;
+            if (initialAdvDepositNo) depositSlipNo = initialAdvDepositNo;
+          }
+
+          const depIndex = modes.findIndex((m: any) => m.PayMode.toUpperCase() === 'DEPOSIT');
+          if (depIndex !== -1) {
+            modes[depIndex].Amount = depositAmount > 0 ? depositAmount.toFixed(2) : '0.00';
+            modes[depIndex].SlipNo = depositSlipNo;
+            modes[depIndex].valueExist = depositAmount > 0;
+          }
+
+          const advDepIndex = modes.findIndex((m: any) => m.PayMode.toUpperCase() === 'ADVDEPOSIT');
+          if (advDepIndex !== -1 && initialAdvance > 0) {
+            modes[advDepIndex].Amount = initialAdvance.toFixed(2);
+            modes[advDepIndex].SlipNo = initialAdvDepositNo || depositSlipNo;
+            modes[advDepIndex].valueExist = true;
           }
 
           // Pre-fill Trade-In
+          let tradeInAmt = 0;
+          let tradeInSlip = '';
           if (json.customerData?.depositTradeInDetails) {
-            const trdIndex = modes.findIndex((m: any) => m.PayMode.toUpperCase() === 'TRADEIN');
-            if (trdIndex !== -1) {
-              const trdAmt = parseFloat(json.customerData.depositTradeInDetails.Amount) || 0;
-              modes[trdIndex].Amount = trdAmt > 0 ? trdAmt.toFixed(2) : '0.00';
+            tradeInAmt = parseFloat(json.customerData.depositTradeInDetails.Amount) || 0;
+            tradeInSlip = json.customerData.depositTradeInDetails.SalesReturnNo || '';
+          }
+          if (initialTradeInSales > 0) {
+            tradeInAmt = initialTradeInSales;
+            if (initialSalesReturnNo) tradeInSlip = initialSalesReturnNo;
+          }
+
+          const trdIndex = modes.findIndex((m: any) => m.PayMode.toUpperCase() === 'TRADEIN');
+          if (trdIndex !== -1) {
+            modes[trdIndex].Amount = tradeInAmt > 0 ? tradeInAmt.toFixed(2) : '0.00';
+            modes[trdIndex].SlipNo = tradeInSlip;
+            modes[trdIndex].valueExist = tradeInAmt > 0;
+          }
+
+          // Pre-fill FlexiAmount & FlexiBonus
+          if (initialFlexiAmount > 0) {
+            const flexiAmtIndex = modes.findIndex((m: any) => m.PayMode.toUpperCase() === 'FLEXIAMOUNT');
+            if (flexiAmtIndex !== -1) {
+              modes[flexiAmtIndex].Amount = initialFlexiAmount.toFixed(2);
+              modes[flexiAmtIndex].SlipNo = initialSubscriptionId;
+              modes[flexiAmtIndex].valueExist = true;
             }
-          } else {
-            const trdIndex = modes.findIndex((m: any) => m.PayMode.toUpperCase() === 'TRADEIN');
-            if (trdIndex !== -1) modes[trdIndex].Amount = '0.00';
+          }
+          if (initialFlexiBonus > 0) {
+            const flexiBonusIndex = modes.findIndex((m: any) => m.PayMode.toUpperCase() === 'FLEXIBONUS');
+            if (flexiBonusIndex !== -1) {
+              modes[flexiBonusIndex].Amount = initialFlexiBonus.toFixed(2);
+              modes[flexiBonusIndex].SlipNo = initialSubscriptionId;
+              modes[flexiBonusIndex].valueExist = true;
+            }
           }
 
           // CASH takes remaining balance
           if (initialTotalNet > 0) {
             const cashIndex = modes.findIndex((m: any) => m.PayMode.toUpperCase() === 'CASH');
             if (cashIndex !== -1) {
-              modes[cashIndex].Amount = initialTotalNet.toFixed(2);
-              modes[cashIndex].valueExist = true;
+              const nonCashInitial = (depositAmount) + (tradeInAmt) + (initialFlexiAmount) + (initialFlexiBonus);
+              const remainingCash = Math.max(0, initialTotalNet - nonCashInitial);
+              modes[cashIndex].Amount = remainingCash.toFixed(2);
+              modes[cashIndex].valueExist = remainingCash > 0;
             }
           }
         }
@@ -153,9 +205,41 @@ export default function PayingModeScreen() {
   const handleAmountChange = (text: string, index: number) => {
     const newModes = [...payModes];
     newModes[index].Amount = text;
-    newModes[index].valueExist = parseFloat(text) > 0;
+    newModes[index].valueExist = (parseFloat(text) || 0) > 0;
     setPayModes(newModes);
     recalculateTotals(newModes, total);
+  };
+
+  const isAmountReadOnly = (modeName: string): boolean => {
+    const upper = (modeName || '').toUpperCase().trim();
+    const comp = (companyCode || 'AJ').toUpperCase().trim();
+    if (comp === 'AJ') {
+      return (
+        upper === 'TRADEIN' ||
+        upper === 'FLEXIAMOUNT' ||
+        upper === 'FLEXIBONUS' ||
+        upper === 'ADVDEPOSIT'
+      );
+    } else if (comp === 'MD') {
+      return upper === 'TRADEIN';
+    }
+    return false;
+  };
+
+  const handleAmountFocus = (index: number) => {
+    // Matches VB.NET subTxtAmount_Gotfocus / CellEnter:
+    // If the paymode currently has 0 or empty, automatically allocate remaining balance!
+    const currentAmt = parseFloat(payModes[index].Amount) || 0;
+    if (currentAmt === 0 && balance > 0) {
+      const modeComm = payModes[index].Commission || 0;
+      // In VB.NET: Format(Val(txtBalanceAmount.Text) + (Val(txtBalanceAmount.Text) * arrpay(iIndex - 1, 0) / 100), "0.00")
+      const allocated = balance + (balance * modeComm / 100);
+      const newModes = [...payModes];
+      newModes[index].Amount = allocated.toFixed(2);
+      newModes[index].valueExist = true;
+      setPayModes(newModes);
+      recalculateTotals(newModes, total);
+    }
   };
 
   const handleSlipNoChange = (text: string, index: number) => {
@@ -188,9 +272,48 @@ export default function PayingModeScreen() {
       return;
     }
 
+    // 2. Validate Overpayment Cash Rule matching VB.NET subEnableButtons:
+    // If paid exceeds total, only CASH can produce change! Non-cash payments cannot exceed total!
+    let totalTendered = 0;
+    let cashTendered = 0;
+    for (const m of payModes) {
+      const amt = parseFloat(m.Amount) || 0;
+      if (amt > 0) {
+        totalTendered += amt;
+        if (m.PayMode.toUpperCase() === 'CASH') {
+          cashTendered += amt;
+        }
+      }
+    }
+
+    if (total > 0 && totalTendered <= 0) {
+      showToast('Please tender payment amount', 'error');
+      return;
+    }
+
+    if (total > 0) {
+      // VB.NET: If Not nCashAmount - (nTotalAmount - Val(txtTotalAmount.Text)) >= 0 Then subEnableButtons = False
+      if (cashTendered - (totalTendered - total) < 0) {
+        showToast('Change can only be returned for CASH payments. Non-cash tender exceeds Total!', 'error');
+        return;
+      }
+    }
+
     const selectedModes = payModes.filter((m) => (parseFloat(m.Amount) || 0) > 0);
 
-    // 2. Validate REDEEMPOINTS if present (as in fnccheckPaid in frmPayingmode.vb)
+    // 3. Validate Slip / Cheque No for Non-Cash pay modes (Card, Nets, Voucher, Cheque, Deposit)
+    for (const m of selectedModes) {
+      const upperMode = m.PayMode.toUpperCase().trim();
+      const amt = parseFloat(m.Amount) || 0;
+      if (amt > 0 && upperMode !== 'CASH' && upperMode !== 'REDEEMPOINTS') {
+        if (!m.SlipNo || !m.SlipNo.trim()) {
+          showToast(`Please enter Slip / Ref No for ${m.PayMode}`, 'error');
+          return;
+        }
+      }
+    }
+
+    // 4. Validate REDEEMPOINTS if present (as in fnccheckPaid in frmPayingmode.vb)
     for (const m of selectedModes) {
       if (m.PayMode.toUpperCase() === 'REDEEMPOINTS') {
         const amt = parseFloat(m.Amount) || 0;
@@ -203,6 +326,11 @@ export default function PayingModeScreen() {
 
         if (customerData?.redeemedPoints >= 10000) {
           showToast('Customer already redeemed 10,000 Points Today', 'error');
+          return;
+        }
+
+        if (total < 300) {
+          showToast('Totalsales should be more than $300 to Redeem Points', 'error');
           return;
         }
 
@@ -406,6 +534,23 @@ export default function PayingModeScreen() {
                   )}
                 </View>
 
+                {customerData?.rewardPoints !== undefined && customerData?.rewardPoints > 0 && (
+                  <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#FDF8EC', padding: 8, marginHorizontal: 10, marginTop: 6, borderRadius: 6, borderWidth: 1, borderColor: '#F0E2C8', gap: 12 }}>
+                    <Ionicons name="gift-outline" size={16} color="#B48218" />
+                    <ThemedText style={{ fontSize: 11, color: '#5C4A28' }}>
+                      Reward Pts: <ThemedText style={{ fontWeight: 'bold' }}>{customerData.rewardPoints - (customerData.redeemPoints || 0)}</ThemedText>
+                    </ThemedText>
+                    <ThemedText style={{ fontSize: 11, color: '#5C4A28' }}>
+                      Redeemed Today: <ThemedText style={{ fontWeight: 'bold' }}>{customerData.redeemedPoints || 0}</ThemedText> / 10,000
+                    </ThemedText>
+                    {customerData?.customerType && (
+                      <ThemedText style={{ fontSize: 11, color: '#9E6D08', fontWeight: 'bold' }}>
+                        Tier: {customerData.customerType}
+                      </ThemedText>
+                    )}
+                  </View>
+                )}
+
                 {/* Table Header Row (Full Width) */}
                 <View style={styles.tableHeadRow}>
                   <ThemedText style={[styles.tableHeadCell, { flex: 1.5 }]}>Payment Mode</ThemedText>
@@ -444,10 +589,13 @@ export default function PayingModeScreen() {
                               styles.formInput,
                               styles.amountInput,
                               isAllocated && styles.amountInputAllocated,
+                              isAmountReadOnly(item.PayMode) && styles.disabledInput,
                             ]}
                             keyboardType="numeric"
                             value={item.Amount}
                             onChangeText={(txt) => handleAmountChange(txt, index)}
+                            onFocus={() => handleAmountFocus(index)}
+                            editable={!isAmountReadOnly(item.PayMode)}
                             placeholder="0.00"
                             placeholderTextColor="#A89885"
                           />

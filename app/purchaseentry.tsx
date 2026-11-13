@@ -695,7 +695,7 @@ const styles = StyleSheet.create({
   },
   mainWrapper: {
     width: '100%',
-    maxWidth: 700,
+    maxWidth: 480,
     gap: 12,
   },
 

@@ -180,6 +180,69 @@ router.get("/sizes", async (req, res) => {
   }
 });
 
+// Helper to find next unused inventory code for a category or numeric sequence
+async function getNextAvailableInventoryCode(reqOrPool, categoryCode, candidateHint = null) {
+  let nextNum = null;
+  let fromCode = 1;
+  let toCode = 999999999;
+
+  if (categoryCode) {
+    const catRes = await reqOrPool.request()
+      .input("categoryCode", sql.VarChar, categoryCode.trim())
+      .query("SELECT NextInventoryCode, FromInventoryCode, ToInventoryCode FROM tblCategory WHERE CategoryCode = @categoryCode");
+
+    if (catRes.recordset.length > 0) {
+      const row = catRes.recordset[0];
+      nextNum = parseInt(row.NextInventoryCode, 10);
+      fromCode = parseInt(row.FromInventoryCode, 10) || 1;
+      toCode = parseInt(row.ToInventoryCode, 10) || 999999999;
+      if (isNaN(nextNum)) {
+        nextNum = fromCode;
+      }
+    }
+  }
+
+  if (candidateHint && !isNaN(parseInt(candidateHint, 10))) {
+    const hintNum = parseInt(candidateHint, 10);
+    if (!nextNum || hintNum > nextNum) {
+      nextNum = hintNum;
+    }
+  }
+
+  if (!nextNum || isNaN(nextNum)) {
+    nextNum = 1;
+  }
+
+  // Find max code in category range or overall numeric codes
+  const maxRes = await reqOrPool.request()
+    .query(`
+      SELECT MAX(TRY_CAST(InventoryCode AS BIGINT)) as MaxCode 
+      FROM tblInventory 
+      WHERE ISNUMERIC(InventoryCode) = 1
+    `);
+  const maxCode = maxRes.recordset[0]?.MaxCode;
+  if (maxCode && Number(maxCode) >= nextNum) {
+    nextNum = Number(maxCode) + 1;
+  }
+
+  // Double check candidate is strictly not already taken in tblInventory
+  let candidate = String(nextNum);
+  let attempts = 0;
+  while (attempts < 100) {
+    const exists = await reqOrPool.request()
+      .input("chkCode", sql.VarChar, candidate)
+      .query("SELECT TOP 1 1 FROM tblInventory WHERE InventoryCode = @chkCode");
+    if (exists.recordset.length === 0) {
+      break;
+    }
+    nextNum++;
+    candidate = String(nextNum);
+    attempts++;
+  }
+
+  return candidate;
+}
+
 // GET /api/splitinventory/nextCode
 router.get("/nextCode", async (req, res) => {
   try {
@@ -190,15 +253,8 @@ router.get("/nextCode", async (req, res) => {
       return res.status(400).json({ success: false, message: "categoryCode is required." });
     }
 
-    const result = await pool.request()
-      .input("categoryCode", sql.VarChar, categoryCode.trim())
-      .query("SELECT NextInventoryCode FROM tblCategory WHERE CategoryCode = @categoryCode");
-
-    if (result.recordset.length === 0) {
-      return res.status(404).json({ success: false, message: "Category not found." });
-    }
-
-    res.json({ success: true, data: result.recordset[0].NextInventoryCode });
+    const candidateCode = await getNextAvailableInventoryCode(pool, categoryCode);
+    res.json({ success: true, data: candidateCode });
   } catch (err) {
     console.error("Get Next Code Error:", err);
     res.status(500).json({ success: false, message: "Database error", error: err.message });
@@ -306,7 +362,13 @@ router.post("/split", async (req, res) => {
       `);
 
     // 3. Handle Original Item
-    if (originalInvCode.trim() !== selectedInventoryCode.trim()) {
+    let finalOrgInvCode = originalInvCode.trim();
+    if (finalOrgInvCode !== selectedInventoryCode.trim()) {
+      // If changing category / new original code, verify it does not conflict with existing codes
+      finalOrgInvCode = await getNextAvailableInventoryCode({
+        request: () => new sql.Request(transaction)
+      }, originalItem.categoryCode, finalOrgInvCode);
+
       // Different category/code, so delete the old code
       await new sql.Request(transaction)
         .input("code", sql.VarChar, selectedInventoryCode)
@@ -315,10 +377,10 @@ router.post("/split", async (req, res) => {
           DELETE FROM tblInventoryStock WHERE InventoryCode = @code;
         `);
 
-      // Insert new original item under originalInvCode
+      // Insert new original item under finalOrgInvCode
       const reqInsertOrg = new sql.Request(transaction);
       await reqInsertOrg
-        .input("InventoryCode", sql.VarChar, originalInvCode)
+        .input("InventoryCode", sql.VarChar, finalOrgInvCode)
         .input("Description", sql.VarChar, originalItem.description || "")
         .input("DiamondDescription", sql.VarChar, originalDetails.DiamondDescription || "")
         .input("Weight", sql.Numeric(18, 3), parseFloat(originalItem.weight) || 0)
@@ -362,7 +424,7 @@ router.post("/split", async (req, res) => {
       // Insert stock for new original item
       const reqStockOrg = new sql.Request(transaction);
       await reqStockOrg
-        .input("InventoryCode", sql.VarChar, originalInvCode)
+        .input("InventoryCode", sql.VarChar, finalOrgInvCode)
         .input("LocationCode", sql.VarChar, loc)
         .input("Description", sql.VarChar, originalItem.description || "")
         .input("DiamondDescription", sql.VarChar, originalDetails.DiamondDescription || "")
@@ -433,7 +495,7 @@ router.post("/split", async (req, res) => {
     const reqMvNewOrg = new sql.Request(transaction);
     await reqMvNewOrg
       .input("LocationCode", sql.VarChar, loc)
-      .input("InventoryCode", sql.VarChar, originalInvCode)
+      .input("InventoryCode", sql.VarChar, finalOrgInvCode)
       .input("Description", sql.VarChar, originalItem.description || "")
       .input("RefNumber", sql.VarChar, refNo)
       .input("Qty", sql.Numeric(18, 0), 1)
@@ -453,10 +515,17 @@ router.post("/split", async (req, res) => {
         )
       `);
 
-    // 4. Handle Split Item
+    // 4. Handle Split Item (Ensure splitInvCode is strictly unique in DB)
+    let finalSplitInvCode = splitInvCode.trim();
+    if (!splitItem.isScrap) {
+      finalSplitInvCode = await getNextAvailableInventoryCode({
+        request: () => new sql.Request(transaction)
+      }, splitItem.categoryCode, finalSplitInvCode);
+    }
+
     const reqInsertSplit = new sql.Request(transaction);
     await reqInsertSplit
-      .input("InventoryCode", sql.VarChar, splitInvCode)
+      .input("InventoryCode", sql.VarChar, finalSplitInvCode)
       .input("Description", sql.VarChar, splitItem.description || "")
       .input("DiamondDescription", sql.VarChar, originalDetails.DiamondDescription || "")
       .input("Weight", sql.Numeric(18, 3), parseFloat(splitItem.weight) || 0)
@@ -500,7 +569,7 @@ router.post("/split", async (req, res) => {
     // Insert stock for split item
     const reqStockSplit = new sql.Request(transaction);
     await reqStockSplit
-      .input("InventoryCode", sql.VarChar, splitInvCode)
+      .input("InventoryCode", sql.VarChar, finalSplitInvCode)
       .input("LocationCode", sql.VarChar, loc)
       .input("Description", sql.VarChar, splitItem.description || "")
       .input("DiamondDescription", sql.VarChar, originalDetails.DiamondDescription || "")
@@ -521,7 +590,7 @@ router.post("/split", async (req, res) => {
     const reqMvNewSplit = new sql.Request(transaction);
     await reqMvNewSplit
       .input("LocationCode", sql.VarChar, loc)
-      .input("InventoryCode", sql.VarChar, splitInvCode)
+      .input("InventoryCode", sql.VarChar, finalSplitInvCode)
       .input("Description", sql.VarChar, splitItem.description || "")
       .input("RefNumber", sql.VarChar, refNo)
       .input("Qty", sql.Numeric(18, 0), 1)
@@ -556,7 +625,7 @@ router.post("/split", async (req, res) => {
       .input("SMC1", sql.Numeric(18, 2), parseFloat(originalItem.smc) || 0)
       .input("GoldLoss1", sql.Numeric(18, 3), goldLoss)
       .input("TotalCost1", sql.Numeric(18, 2), originalTotalCost)
-      .input("DestInventoryCode", sql.VarChar, splitInvCode)
+      .input("DestInventoryCode", sql.VarChar, finalSplitInvCode)
       .input("DestDescription", sql.VarChar, splitItem.description || "")
       .input("Weight2", sql.Numeric(18, 3), parseFloat(splitItem.weight) || 0)
       .input("PMC2", sql.Numeric(18, 2), splitPMC)
@@ -565,7 +634,7 @@ router.post("/split", async (req, res) => {
       .input("TotalCost2", sql.Numeric(18, 2), splitTotalCost)
       .input("UserID", sql.VarChar, sysUser)
       .input("Locationcode", sql.VarChar, loc)
-      .input("InventoryCode1", sql.VarChar, originalInvCode)
+      .input("InventoryCode1", sql.VarChar, finalOrgInvCode)
       .input("OriginalStoneWeight", sql.Numeric(18, 3), parseFloat(originalDetails.StoneWeight) || 0)
       .input("StoneWeight1", sql.Numeric(18, 3), parseFloat(originalItem.stoneWeight) || 0)
       .input("StoneWeight2", sql.Numeric(18, 3), parseFloat(splitItem.stoneWeight) || 0)
@@ -588,12 +657,12 @@ router.post("/split", async (req, res) => {
     // 6. Handle Additional Description if present
     if (additionalDescription) {
       await new sql.Request(transaction)
-        .input("code", sql.VarChar, originalInvCode)
+        .input("code", sql.VarChar, finalOrgInvCode)
         .query("DELETE FROM tblInventoryAddlDescription WHERE InventoryCode = @code");
 
       const reqAddl = new sql.Request(transaction);
       await reqAddl
-        .input("InventoryCode", sql.VarChar, originalInvCode)
+        .input("InventoryCode", sql.VarChar, finalOrgInvCode)
         .input("JobSheetNo", sql.VarChar, originalDetails.JobSheetNo || "")
         .input("Description1", sql.VarChar, additionalDescription.desc1 || "")
         .input("Description2", sql.VarChar, additionalDescription.desc2 || "")
@@ -622,24 +691,32 @@ router.post("/split", async (req, res) => {
     }
 
     // 7. Update Category NextInventoryCode if code was incremented
-    if (originalInvCode.trim() !== selectedInventoryCode.trim()) {
-      await new sql.Request(transaction)
-        .input("categoryCode", sql.VarChar, originalItem.categoryCode)
-        .query(`
-          UPDATE tblCategory 
-          SET NextInventoryCode = ISNULL(NextInventoryCode, 1) + 1 
-          WHERE CategoryCode = @categoryCode
-        `);
+    if (finalOrgInvCode !== selectedInventoryCode.trim()) {
+      const orgNum = parseInt(finalOrgInvCode, 10);
+      if (!isNaN(orgNum)) {
+        await new sql.Request(transaction)
+          .input("categoryCode", sql.VarChar, originalItem.categoryCode)
+          .input("nextCode", sql.VarChar, String(orgNum + 1))
+          .query(`
+            UPDATE tblCategory 
+            SET NextInventoryCode = @nextCode 
+            WHERE CategoryCode = @categoryCode AND (TRY_CAST(NextInventoryCode AS BIGINT) <= @nextCode OR NextInventoryCode IS NULL)
+          `);
+      }
     }
 
     if (!splitItem.isScrap) {
-      await new sql.Request(transaction)
-        .input("categoryCode", sql.VarChar, splitItem.categoryCode)
-        .query(`
-          UPDATE tblCategory 
-          SET NextInventoryCode = ISNULL(NextInventoryCode, 1) + 1 
-          WHERE CategoryCode = @categoryCode
-        `);
+      const splitNum = parseInt(finalSplitInvCode, 10);
+      if (!isNaN(splitNum)) {
+        await new sql.Request(transaction)
+          .input("categoryCode", sql.VarChar, splitItem.categoryCode)
+          .input("nextCode", sql.VarChar, String(splitNum + 1))
+          .query(`
+            UPDATE tblCategory 
+            SET NextInventoryCode = @nextCode 
+            WHERE CategoryCode = @categoryCode AND (TRY_CAST(NextInventoryCode AS BIGINT) <= @nextCode OR NextInventoryCode IS NULL)
+          `);
+      }
     } else {
       // Increment next scrap number
       await new sql.Request(transaction).query(`

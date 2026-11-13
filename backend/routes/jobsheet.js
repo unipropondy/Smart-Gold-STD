@@ -2,6 +2,104 @@ const express = require("express");
 const { sql } = require("../db");
 const router = express.Router();
 
+// ================= GET MATCH JOBSHEET (ACCESSORIES='Y') LOV =================
+// VB Reference: frmJobSheet.vb btnMatchJobsheetNo_Click
+// Query tblJobSheetHeader WHERE Accessories='Y'
+router.get("/lov/matchjobsheet", async (req, res) => {
+  try {
+    const pool = req.pool;
+    const result = await pool.request().query(`
+      SELECT 
+        JobSheetNo,
+        SupplierCode,
+        CONVERT(varchar, JobSheetDate, 105) as JobSheetDate,
+        TotalCost
+      FROM tblJobSheetHeader
+      WHERE Accessories = 'Y'
+      ORDER BY JobSheetDate DESC, JobSheetNo DESC
+    `);
+    return res.status(200).json({ success: true, data: result.recordset });
+  } catch (err) {
+    console.error("🔥 GET MATCH JOBSHEET LOV ERROR:", err);
+    return res.status(500).json({ success: false, message: "Server Error", error: err.message });
+  }
+});
+
+// ================= GET ACCESSORIES DETAILS FOR MATCH JOBSHEET =================
+// VB Reference: dgvHeader in grpMatchJobsheet (CatalogueCode, Weight, PCS) from tblAccessoriesDetail
+router.get("/matchjobsheet/:jobSheetNo/accessories", async (req, res) => {
+  try {
+    const pool = req.pool;
+    const { jobSheetNo } = req.params;
+    const result = await pool.request()
+      .input("JobSheetNo", sql.VarChar, jobSheetNo.trim())
+      .query(`
+        SELECT 
+          CatalogueCode,
+          Weight,
+          PCS
+        FROM tblAccessoriesDetail
+        WHERE JobSheetNo = @JobSheetNo
+        ORDER BY CatalogueCode ASC
+      `);
+    return res.status(200).json({ success: true, data: result.recordset });
+  } catch (err) {
+    console.error("🔥 GET ACCESSORIES DETAIL ERROR:", err);
+    return res.status(500).json({ success: false, message: "Server Error", error: err.message });
+  }
+});
+
+// ================= GET SALES ORDER LOV =================
+// VB Reference: frmJobSheet.vb btnSalesOrderNo_Click
+// Query from vwSalesOrderHeader or tblSalesOrderHeader
+router.get("/lov/salesorder", async (req, res) => {
+  try {
+    const pool = req.pool;
+    const supplierCode = (req.query.supplierCode || '').trim();
+
+    let query = `
+      SELECT 
+        h.SalesOrderNo,
+        h.SupplierCode,
+        CONVERT(varchar, h.SalesOrderDate, 105) as SalesOrderDate,
+        CONVERT(varchar, h.DueDate, 105) as DueDate
+      FROM tblSalesOrderHeader h
+    `;
+    const request = pool.request();
+    if (supplierCode) {
+      query += ` WHERE UPPER(LTRIM(RTRIM(h.SupplierCode))) = UPPER(LTRIM(RTRIM(@SupplierCode)))`;
+      request.input("SupplierCode", sql.VarChar, supplierCode);
+    }
+    query += ` ORDER BY h.SalesOrderDate DESC, h.SalesOrderNo DESC`;
+
+    let result;
+    try {
+      result = await request.query(query);
+    } catch (tblErr) {
+      // Fallback to vwSalesOrderHeader if available
+      let vwQuery = `
+        SELECT 
+          SalesOrderNo,
+          SupplierCode,
+          CONVERT(varchar, SalesOrderDate, 105) as SalesOrderDate,
+          CONVERT(varchar, DueDate, 105) as DueDate
+        FROM vwSalesOrderHeader
+      `;
+      const vwReq = pool.request();
+      if (supplierCode) {
+        vwQuery += ` WHERE UPPER(LTRIM(RTRIM(SupplierCode))) = UPPER(LTRIM(RTRIM(@SupplierCode)))`;
+        vwReq.input("SupplierCode", sql.VarChar, supplierCode);
+      }
+      result = await vwReq.query(vwQuery);
+    }
+
+    return res.status(200).json({ success: true, data: result.recordset });
+  } catch (err) {
+    console.error("🔥 GET SALES ORDER LOV ERROR:", err);
+    return res.status(500).json({ success: false, message: "Server Error", error: err.message });
+  }
+});
+
 // ================= GET TAEL PERCENT (LOV) =================
 router.get("/lov/taelpercent", async (req, res) => {
   try {
@@ -247,16 +345,6 @@ router.post("/", async (req, res) => {
       return res.status(400).json({ success: false, message: "Select payment type." });
     }
 
-    const tealPercent = parseFloat(header.TaelPercent) || 0;
-    if (tealPercent <= 0) {
-      return res.status(400).json({ success: false, message: "Enter TEAL Percent." });
-    }
-
-    const tealRate = parseFloat(header.TaelRate) || 0;
-    if (tealRate <= 0) {
-      return res.status(400).json({ success: false, message: "Enter teal." });
-    }
-
     const costPerGram = parseFloat(header.CostPerGram) || 0;
     if (costPerGram <= 0) {
       return res.status(400).json({ success: false, message: "Enter cost per gram." });
@@ -273,11 +361,35 @@ router.post("/", async (req, res) => {
       .input("JobSheetNoCheck", sql.VarChar, JobSheetNo)
       .query(`SELECT 1 FROM tblJobSheetHeader WHERE JobSheetNo = @JobSheetNoCheck`);
 
+    // Helper to format or parse date cleanly for SQL Server SmallDateTime
+    const parseSqlDate = (dVal) => {
+      if (!dVal) return null;
+      if (dVal instanceof Date) return isNaN(dVal.getTime()) ? null : dVal;
+      const str = String(dVal).trim();
+      if (!str) return null;
+      if (str.includes('-')) {
+        const parts = str.split('-');
+        if (parts.length === 3) {
+          if (parts[0].length === 2 && parts[2].length === 4) {
+            // DD-MM-YYYY -> YYYY-MM-DD
+            return new Date(`${parts[2]}-${parts[1]}-${parts[0]}`);
+          }
+          return new Date(str);
+        }
+      }
+      const d = new Date(str);
+      return isNaN(d.getTime()) ? null : d;
+    };
+
+    const jsDate = parseSqlDate(header.JobSheetDate) || curDate;
+    const pbDate = parseSqlDate(header.PurchaseBillDate) || curDate;
+    const dueDate = parseSqlDate(header.DueDate);
+
     const headerReq = new sql.Request(transaction)
       .input("JobSheetNo", sql.VarChar, JobSheetNo)
-      .input("JobSheetDate", sql.SmallDateTime, header.JobSheetDate ? new Date(header.JobSheetDate) : curDate)
+      .input("JobSheetDate", sql.SmallDateTime, jsDate)
       .input("PurchaseBillNo", sql.VarChar, header.PurchaseBillNo || "")
-      .input("PurchaseBillDate", sql.SmallDateTime, header.PurchaseBillDate ? new Date(header.PurchaseBillDate) : curDate)
+      .input("PurchaseBillDate", sql.SmallDateTime, pbDate)
       .input("SupplierCode", sql.VarChar, header.SupplierCode || "")
       .input("TotalWeight24K", sql.Numeric(18, 2), parseFloat(header.TotalWeight24K) || 0)
       .input("TotalMC", sql.Numeric(18, 2), parseFloat(header.TotalMC) || 0)
@@ -288,10 +400,10 @@ router.post("/", async (req, res) => {
       .input("CurrencyRate", sql.Numeric(9, 4), parseFloat(header.CurrencyRate) || 1.0)
       .input("GST", sql.Numeric(18, 2), parseFloat(header.GST) || 0)
       .input("TotalCost", sql.Numeric(18, 2), parseFloat(header.TotalCost) || 0)
-      .input("PaymentType", sql.Char(1), header.PaymentType ? header.PaymentType.substring(0, 1) : "C")
-      .input("BillClose", sql.Char(1), header.BillClose ? header.BillClose.substring(0, 1) : "N")
+      .input("PaymentType", sql.Char(1), header.PaymentType ? String(header.PaymentType).substring(0, 1) : "C")
+      .input("BillClose", sql.Char(1), (header.BillClose === 'Y' || header.BillClose === true) ? "Y" : "N")
       .input("Remarks", sql.VarChar, header.Remarks || "")
-      .input("TranType", sql.VarChar, header.TranType || "")
+      .input("TranType", sql.VarChar, header.TranType || "JP")
       .input("TotalLocalCost", sql.Numeric(18, 2), parseFloat(header.TotalLocalCost) || 0)
       .input("TotalForeignCost", sql.Numeric(18, 2), parseFloat(header.TotalForeignCost) || 0)
       .input("ManualLocalCost", sql.Numeric(18, 2), parseFloat(header.ManualLocalCost) || 0)
@@ -299,22 +411,22 @@ router.post("/", async (req, res) => {
       .input("ManualMC", sql.Numeric(18, 2), parseFloat(header.ManualMC) || 0)
       .input("ManualWeight", sql.Numeric(18, 2), parseFloat(header.ManualWeight) || 0)
       .input("ManualGoldLoss", sql.Numeric(18, 2), parseFloat(header.ManualGoldLoss) || 0)
-      .input("LocationCode", sql.VarChar, header.LocationCode || "")
-      .input("TaelGST", sql.Char(1), header.TaelGST ? header.TaelGST.substring(0, 1) : "N")
+      .input("LocationCode", sql.VarChar, header.LocationCode || "HQ")
+      .input("TaelGST", sql.Char(1), (header.TaelGST === 'Y' || header.TaelGST === true) ? "Y" : "N")
       .input("ManualAdjustment", sql.Numeric(18, 2), parseFloat(header.ManualAdjustment) || 0)
-      .input("FixStatus", sql.Char(1), header.FixStatus ? header.FixStatus.substring(0, 1) : "U")
-      .input("SplCategory", sql.Char(1), header.SplCategory ? "Y" : "N")
-      .input("Accessories", sql.Char(1), header.Accessories ? "Y" : "N")
+      .input("FixStatus", sql.Char(1), (header.FixStatus === 'F' || header.FixStatus === 'Y') ? "Y" : "N")
+      .input("SplCategory", sql.Char(1), (header.SplCategory === 'Y' || header.SplCategory === true) ? "Y" : "N")
+      .input("Accessories", sql.Char(1), (header.Accessories === 'Y' || header.Accessories === true) ? "Y" : "N")
       .input("MatchJobSheetNo", sql.VarChar, header.MatchJobSheetNo || "")
       .input("MatchWeight", sql.Numeric(18, 2), parseFloat(header.MatchWeight) || 0)
       .input("MatchPCS", sql.Numeric(18, 2), parseFloat(header.MatchPCS) || 0)
       .input("SalesOrderNo", sql.VarChar, header.SalesOrderNo || "")
-      .input("TaelPercent", sql.Numeric(5, 2), parseFloat(header.TaelPercent) || 0)
+      .input("TaelPercent", sql.Numeric(18, 2), parseFloat(header.TaelPercent) || 0)
       .input("TaelRate", sql.Numeric(18, 2), parseFloat(header.TaelRate) || 0)
-      .input("ClassType", sql.VarChar, header.ClassType || "")
+      .input("ClassType", sql.VarChar, header.ClassType || (Number(header.GST) === 24 ? "24K" : "22K"))
       .input("PaidAmount", sql.Numeric(18, 2), parseFloat(header.PaidAmount) || 0)
       .input("BalanceAmount", sql.Numeric(18, 2), parseFloat(header.BalanceAmount) || 0)
-      .input("DueDate", sql.SmallDateTime, header.DueDate ? new Date(header.DueDate) : null)
+      .input("DueDate", sql.SmallDateTime, dueDate)
       .input("User", sql.VarChar, sysUser)
       .input("Date", sql.SmallDateTime, curDate);
 
@@ -359,6 +471,13 @@ router.post("/", async (req, res) => {
       .input("JobSheetNo", sql.VarChar, JobSheetNo);
     await deleteReq.query(`DELETE FROM tblJobSheetDetail WHERE JobSheetNo = @JobSheetNo`);
 
+    // If Accessories='Y', also maintain tblAccessoriesDetail as per VB.NET JobSheetHeaderSave / AccessoriesSave
+    if (header.Accessories === 'Y' || header.Accessories === true) {
+      const delAccReq = new sql.Request(transaction)
+        .input("JobSheetNo", sql.VarChar, JobSheetNo);
+      await delAccReq.query(`DELETE FROM tblAccessoriesDetail WHERE JobSheetNo = @JobSheetNo`);
+    }
+
     if (details && details.length > 0) {
       for (const item of details) {
         const detailReq = new sql.Request(transaction)
@@ -384,6 +503,32 @@ router.post("/", async (req, res) => {
             @User, @Date, @User, @Date
           )
         `);
+
+        if (header.Accessories === 'Y' || header.Accessories === true) {
+          const accReq = new sql.Request(transaction)
+            .input("JobSheetNo", sql.VarChar, JobSheetNo)
+            .input("CatalogueCode", sql.VarChar, item.CatalogueCode || "")
+            .input("CategoryCode", sql.VarChar, item.CategoryCode || "")
+            .input("Description", sql.VarChar, item.Description || "")
+            .input("CostPerGram", sql.Numeric(18, 2), parseFloat(item.CostPerGram) || 0)
+            .input("Weight", sql.Numeric(18, 2), parseFloat(item.Weight) || 0)
+            .input("MC", sql.Numeric(18, 2), parseFloat(item.MC) || 0)
+            .input("PCS", sql.Numeric(18, 2), parseFloat(item.PCS) || 0)
+            .input("GoldLoss", sql.Numeric(18, 2), parseFloat(item.GoldLoss) || 0)
+            .input("TotalCost", sql.Numeric(18, 2), parseFloat(item.TotalCost) || 0)
+            .input("User", sql.VarChar, sysUser)
+            .input("Date", sql.SmallDateTime, curDate);
+
+          await accReq.query(`
+            INSERT INTO tblAccessoriesDetail (
+              JobSheetNo, CatalogueCode, CategoryCode, Description, CostPerGram, Weight, MC, PCS, GoldLoss, TotalCost,
+              CreateUser, CreateDate, ModifyUser, ModifyDate
+            ) VALUES (
+              @JobSheetNo, @CatalogueCode, @CategoryCode, @Description, @CostPerGram, @Weight, @MC, @PCS, @GoldLoss, @TotalCost,
+              @User, @Date, @User, @Date
+            )
+          `);
+        }
       }
     }
 
@@ -394,7 +539,7 @@ router.post("/", async (req, res) => {
     try {
       await transaction.rollback();
     } catch (rbErr) { }
-    return res.status(500).json({ success: false, message: "Database update failed", error: err.message });
+    return res.status(500).json({ success: false, message: "Database update failed", error: err.message || String(err) });
   }
 });
 

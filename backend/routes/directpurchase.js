@@ -1349,10 +1349,10 @@ router.delete("/:purchaseBillNo/item/:inventoryCode", async (req, res) => {
           i.InventoryCode, 
           i.SalesBillNo, 
           i.CreateDate, 
-          i.PCS, 
           i.LocationCode,
           i.JobSheetNo,
           st.QtyOnHand,
+          st.PCS,
           jh.BillClose,
           jh.TranType,
           loc.EODDate
@@ -1374,7 +1374,7 @@ router.delete("/:purchaseBillNo/item/:inventoryCode", async (req, res) => {
       if (item.SalesBillNo && item.SalesBillNo.trim() !== '') {
         return res.status(400).json({ success: false, message: "Item sold. Cannot delete!" });
       }
-      if (item.QtyOnHand != null && parseFloat(item.QtyOnHand) !== parseFloat(item.PCS)) {
+      if (item.QtyOnHand != null && item.PCS != null && parseFloat(item.QtyOnHand) !== parseFloat(item.PCS)) {
         return res.status(400).json({ success: false, message: "Qty on hand is not the same as no. of pieces purchased. Cannot delete!" });
       }
       if (item.EODDate && item.CreateDate) {

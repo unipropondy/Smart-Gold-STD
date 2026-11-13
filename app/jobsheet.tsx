@@ -33,24 +33,34 @@ interface DetailItem {
 
 const API_URL = `${API_BASE_URL}/jobsheet`;
 
+const getTodayDDMMYYYY = () => {
+  const d = new Date();
+  return `${d.getDate().toString().padStart(2, '0')}-${(d.getMonth() + 1).toString().padStart(2, '0')}-${d.getFullYear()}`;
+};
+
 export default function JobSheetScreen() {
   const themeColors = useThemeColors();
   const { accentColor } = useThemeContext();
   const { background: backgroundColor, card: cardColor, text: textColor, border: borderColor, primaryGold: GOLD_COLOR, subtitle: subtitleColor } = themeColors;
   const router = useRouter();
 
+  const todayStr = getTodayDDMMYYYY();
+
   // Header State perfectly matching the tblJobSheetHeader schema
   const [headerState, setHeaderState] = useState({
-    JobSheetNo: '', JobSheetDate: '', PurchaseBillNo: '', PurchaseBillDate: '', SupplierCode: '', SupplierName: '',
+    JobSheetNo: '', JobSheetDate: todayStr, PurchaseBillNo: '', PurchaseBillDate: todayStr, SupplierCode: '', SupplierName: '',
     TotalWeight24K: '', TotalMC: '', TotalPCS: '', TotalGoldLoss: '', CostPerGram: '',
     CurrencyCode: '', CurrencyName: '', CurrencyRate: '', GST: 22, TotalCost: '', PaymentType: 'C',
     BillClose: false, Remarks: '', TranType: '', TotalLocalCost: '', TotalForeignCost: '',
     ManualLocalCost: '', ManualForeignCost: '', ManualMC: '', ManualWeight: '', ManualGoldLoss: '',
     LocationCode: '', TaelGST: false, ManualAdjustment: '', FixStatus: 'U', SplCategory: false,
     Accessories: false, MatchJobSheetNo: '', MatchWeight: '', MatchPCS: '', SalesOrderNo: '',
-    TaelPercent: '', TaelRate: '', ClassType: '', PaidAmount: '', BalanceAmount: '', DueDate: '',
+    TaelPercent: '', TaelRate: '', ClassType: '', PaidAmount: '', BalanceAmount: '', DueDate: todayStr,
     GSTAmountDisplay: '' // display only
   });
+
+  // Summary GST active state (matches ChkGST in VB frmJobSheet GroupBox2 Cost Summary)
+  const [summaryGSTActive, setSummaryGSTActive] = useState(false);
 
   // Detail State
   const [details, setDetails] = useState<DetailItem[]>([]);
@@ -77,6 +87,17 @@ export default function JobSheetScreen() {
   // TaelPercent LOV
   const [taelPercentLovVisible, setTaelPercentLovVisible] = useState(false);
   const [taelPercentLovData, setTaelPercentLovData] = useState<any[]>([]);
+
+  // Sales Order (SO No) LOV
+  const [salesOrderLovVisible, setSalesOrderLovVisible] = useState(false);
+  const [salesOrderLovData, setSalesOrderLovData] = useState<any[]>([]);
+
+  // Match JobSheet (Accessories='Y') State & LOV
+  const [matchJobSheetVisible, setMatchJobSheetVisible] = useState(false);
+  const [matchJobSheetLovVisible, setMatchJobSheetLovVisible] = useState(false);
+  const [matchJobSheetLovData, setMatchJobSheetLovData] = useState<any[]>([]);
+  const [matchAccessoriesData, setMatchAccessoriesData] = useState<any[]>([]);
+  const [selectedMatchRow, setSelectedMatchRow] = useState<any | null>(null);
 
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
   const [detailModalVisible, setDetailModalVisible] = useState(false);
@@ -233,38 +254,30 @@ export default function JobSheetScreen() {
   const handleChkGST1 = (checked: boolean) => {
     setChkGST1(checked);
     setHeaderState(prev => {
-      const tael = parseFloat(prev.TaelRate) || 0;
-      const cost = parseFloat(prev.CostPerGram) || 0;
+      const next = { ...prev, TaelGST: checked };
+      const tael = parseFloat(next.TaelRate) || 0;
+      const cost = parseFloat(next.CostPerGram) || 0;
 
       if (tael > 0) {
-        const updatedCost = calculateCostPerGram(checked, prev);
-        return { ...prev, CostPerGram: updatedCost };
+        next.CostPerGram = calculateCostPerGram(checked, next);
       } else if (cost > 0) {
-        const updatedTael = calculateTaelFromCost(checked, prev);
-        return { ...prev, TaelRate: updatedTael };
+        next.TaelRate = calculateTaelFromCost(checked, next);
       }
-      return prev;
+      return next;
     });
   };
 
   // 2. Second GST Checkbox (ChkGST in Cost Summary) Calculation Logic
-  // VB Reference:
+  // VB Reference subCalcGST():
   // If ChkGST.Checked = True Then
-  //     If OptCash.Checked = True Then
-  //         txtGST.Text = Format((Val(Objuser.GstPercentage) * (Val(txtGoldValueMC.Text) - Val(txtPayableCash.Text))) / 100, "#0.00")
-  //         txtManualCost.Text = Format(Val(txtGoldValueMC.Text) + Val(txtGST.Text.Trim), "#0.00")
-  //     ElseIf OptGoldAC.Checked Then
-  //         txtGST.Text = Format((Val(Objuser.GstPercentage) * (Val(txtGoldValueMC.Text) - Val(txtPayableCash.Text))) / 100, "#0.00")
-  //         txtManualCost.Text = Format(Val(txtGoldValueMC.Text) + Val(txtGST.Text.Trim), "#0.00")
-  //     Else
-  //         txtGST.Text = Format((Val(Objuser.GstPercentage) * (Val(txtGoldValueMC.Text) - Val(txtPayableCash.Text))) / 100, "#0.00")
-  //         txtManualCost.Text = Format(Val(txtGoldValueMC.Text) + Val(txtGST.Text.Trim), "#0.00")
-  //     End If
+  //     txtGST.Text = Format((Val(Objuser.GstPercentage) * (Val(txtGoldValueMC.Text) - Val(txtPayableCash.Text))) / 100, "#0.00")
+  //     txtManualCost.Text = Format(Val(txtGoldValueMC.Text) + Val(txtGST.Text.Trim), "#0.00")
   // Else
   //     txtManualCost.Text = Format(Val(txtManualCost.Text.Trim) - Val(txtGST.Text.Trim), "#0.00")
   //     txtGST.Text = "0.00"
   // End If
   const handleChkGST = (checked: boolean) => {
+    setSummaryGSTActive(checked);
     setHeaderState(prev => {
       const totalCostVal = details.reduce((sum, item) => sum + (parseFloat(item.TotalCost) || 0), 0);
       const totalMC = details.reduce((sum, item) => sum + (parseFloat(item.MC) || 0), 0);
@@ -287,7 +300,6 @@ export default function JobSheetScreen() {
 
       return {
         ...prev,
-        TaelGST: checked,
         GSTAmountDisplay: gstText,
         TotalCost: manualCost,
         TotalLocalCost: goldValue.toFixed(2),
@@ -327,7 +339,7 @@ export default function JobSheetScreen() {
       const goldValueMC = goldValue + totalMC + adjustment;
 
       let gstAmount = 0;
-      if (next.TaelGST) {
+      if (summaryGSTActive) {
         const payableCash = parseFloat(next.PaidAmount) || 0;
         gstAmount = (companyGstPerc * (goldValueMC - payableCash)) / 100;
         if (gstAmount < 0) gstAmount = 0;
@@ -344,7 +356,7 @@ export default function JobSheetScreen() {
     });
   };
 
-  // Recalculate totals whenever details list changes or companyGstPerc changes
+  // Recalculate totals whenever details list changes or companyGstPerc changes or summaryGSTActive changes
   React.useEffect(() => {
     setHeaderState(prev => {
       const totalWeight = details.reduce((sum, item) => sum + (parseFloat(item.Weight) || 0), 0);
@@ -357,7 +369,7 @@ export default function JobSheetScreen() {
       const goldValueMC = goldValue + totalMC + adjustment;
 
       let gstAmount = 0;
-      if (prev.TaelGST) {
+      if (summaryGSTActive) {
         const payableCash = parseFloat(prev.PaidAmount) || 0;
         gstAmount = (companyGstPerc * (goldValueMC - payableCash)) / 100;
         if (gstAmount < 0) gstAmount = 0;
@@ -375,7 +387,7 @@ export default function JobSheetScreen() {
         GSTAmountDisplay: gstAmount.toFixed(2)
       };
     });
-  }, [details, companyGstPerc]);
+  }, [details, companyGstPerc, summaryGSTActive]);
 
   const updateDetail = (key: string, value: any) => {
     setCurrentDetail(prev => {
@@ -492,7 +504,7 @@ export default function JobSheetScreen() {
       GoldLoss: '',
       TotalCost: ''
     });
-    await saveJobSheet(newDetails);
+    await saveJobSheet(newDetails, 'Catalogue added successfully!');
     setDetailModalVisible(false);
   };
 
@@ -540,15 +552,20 @@ export default function JobSheetScreen() {
 
   const clearForm = () => {
     setChkGST1(false);
+    setSummaryGSTActive(false);
+    setMatchJobSheetVisible(false);
+    setMatchAccessoriesData([]);
+    setSelectedMatchRow(null);
+    const curDate = getTodayDDMMYYYY();
     setHeaderState({
-      JobSheetNo: '', JobSheetDate: '', PurchaseBillNo: '', PurchaseBillDate: '', SupplierCode: '', SupplierName: '',
+      JobSheetNo: '', JobSheetDate: curDate, PurchaseBillNo: '', PurchaseBillDate: curDate, SupplierCode: '', SupplierName: '',
       TotalWeight24K: '', TotalMC: '', TotalPCS: '', TotalGoldLoss: '', CostPerGram: '',
       CurrencyCode: '', CurrencyName: '', CurrencyRate: '', GST: 22, TotalCost: '', PaymentType: 'C',
       BillClose: false, Remarks: '', TranType: '', TotalLocalCost: '', TotalForeignCost: '',
       ManualLocalCost: '', ManualForeignCost: '', ManualMC: '', ManualWeight: '', ManualGoldLoss: '',
       LocationCode: '', TaelGST: false, ManualAdjustment: '', FixStatus: 'U', SplCategory: false,
       Accessories: false, MatchJobSheetNo: '', MatchWeight: '', MatchPCS: '', SalesOrderNo: '',
-      TaelPercent: '', TaelRate: '', ClassType: '', PaidAmount: '', BalanceAmount: '', DueDate: '', GSTAmountDisplay: ''
+      TaelPercent: '', TaelRate: '', ClassType: '', PaidAmount: '', BalanceAmount: '', DueDate: curDate, GSTAmountDisplay: ''
     });
     setDetails([]);
     setSelectedIndex(null);
@@ -638,6 +655,109 @@ export default function JobSheetScreen() {
     }
   };
 
+  const openSalesOrderLov = async () => {
+    try {
+      const supp = headerState.SupplierCode ? encodeURIComponent(headerState.SupplierCode.trim()) : '';
+      const res = await fetch(`${API_BASE_URL}/jobsheet/lov/salesorder?supplierCode=${supp}`);
+      const data = await res.json();
+      if (data.success) {
+        setSalesOrderLovData(data.data || []);
+        setSalesOrderLovVisible(true);
+      } else {
+        showToast(data.message || 'Failed to fetch Sales Orders', 'error');
+      }
+    } catch (err) {
+      console.error(err);
+      showToast('Error fetching Sales Order LOV', 'error');
+    }
+  };
+
+  const openMatchJobSheetLov = async () => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/jobsheet/lov/matchjobsheet`);
+      const data = await res.json();
+      if (data.success) {
+        setMatchJobSheetLovData(data.data || []);
+        setMatchJobSheetLovVisible(true);
+      } else {
+        showToast(data.message || 'Failed to fetch Match JobSheets', 'error');
+      }
+    } catch (err) {
+      console.error(err);
+      showToast('Error fetching Match JobSheet LOV', 'error');
+    }
+  };
+
+  const loadMatchAccessories = async (matchJsNo: string) => {
+    if (!matchJsNo?.trim()) return;
+    try {
+      const res = await fetch(`${API_BASE_URL}/jobsheet/matchjobsheet/${encodeURIComponent(matchJsNo.trim())}/accessories`);
+      const data = await res.json();
+      if (data.success) {
+        setMatchAccessoriesData(data.data || []);
+      }
+    } catch (err) {
+      console.error('Error fetching match accessories:', err);
+    }
+  };
+
+  const addMatchAccessoryToDetail = () => {
+    if (!selectedMatchRow) {
+      showToast('Select an accessory row from the grid first', 'error');
+      return;
+    }
+    const catCode = selectedMatchRow.CatalogueCode?.trim();
+    const wt = parseFloat(headerState.MatchWeight || selectedMatchRow.Weight) || 0;
+    const pcs = parseInt(headerState.MatchPCS || selectedMatchRow.PCS) || 1;
+
+    // Prefill into Add Line Detail modal
+    setSelectedIndex(null);
+    setCurrentDetail({
+      CatalogueCode: catCode,
+      CategoryCode: '',
+      Description: '',
+      Weight: wt > 0 ? wt.toFixed(2) : '',
+      CostPerGram: headerState.CostPerGram || '',
+      MC: '0.00',
+      PCS: pcs.toString(),
+      GoldLoss: '0.00',
+      TotalCost: ''
+    });
+
+    // Lookup CategoryCode & Description for this catalogue
+    if (catCode) {
+      fetch(`${API_URL}/lookup/catalogue/${encodeURIComponent(catCode)}`)
+        .then(res => res.json())
+        .then(data => {
+          if (data.success && data.data) {
+            setCurrentDetail(prev => ({
+              ...prev,
+              CategoryCode: data.data.CategoryCode || '',
+              Description: data.data.CatalogueName || ''
+            }));
+          }
+        })
+        .catch(err => console.log('Error looking up catalogue for match:', err));
+    }
+
+    setDetailModalVisible(true);
+  };
+
+  const calculateDueDateFromDays = (baseDateStr: string, daysToAdd: number) => {
+    if (!baseDateStr) return '';
+    let d: Date;
+    const parts = baseDateStr.split('-');
+    if (parts.length === 3 && parts[0].length === 2) {
+      // DD-MM-YYYY
+      d = new Date(parseInt(parts[2], 10), parseInt(parts[1], 10) - 1, parseInt(parts[0], 10));
+    } else {
+      d = new Date(baseDateStr);
+    }
+    if (isNaN(d.getTime())) return '';
+    d.setDate(d.getDate() + (isNaN(daysToAdd) ? 0 : daysToAdd));
+    return `${d.getDate().toString().padStart(2, '0')}-${(d.getMonth() + 1).toString().padStart(2, '0')}-${d.getFullYear()}`;
+  };
+
   const formatDateToDDMMYYYY = (isoString: string) => {
     if (!isoString) return '';
     const d = new Date(isoString);
@@ -663,10 +783,10 @@ export default function JobSheetScreen() {
     generateJobSheetNo();
   }, []);
 
-  const loadJobSheet = async (jobSheetNo: string) => {
+  const loadJobSheet = async (jobSheetNo: string, suppressToast = false) => {
     const noToLoad = jobSheetNo || headerState.JobSheetNo;
     if (!noToLoad) {
-      showToast('Please enter a JobSheet No to load', 'error');
+      if (!suppressToast) showToast('Please enter a JobSheet No to load', 'error');
       return;
     }
     try {
@@ -677,8 +797,17 @@ export default function JobSheetScreen() {
         const isClosed = h.BillClose === 'Y';
         const isDP = h.TranType === 'DP';
         const isTaelGst = h.TaelGST === 'Y';
+        const hasGstAmount = (parseFloat(h.GST) || 0) > 0;
 
         setChkGST1(isTaelGst);
+        setSummaryGSTActive(hasGstAmount);
+        setMatchJobSheetVisible(!!h.MatchJobSheetNo?.trim());
+        if (h.MatchJobSheetNo?.trim()) {
+          loadMatchAccessories(h.MatchJobSheetNo.trim());
+        } else {
+          setMatchAccessoriesData([]);
+          setSelectedMatchRow(null);
+        }
         setHeaderState({
           ...headerState,
           ...h,
@@ -695,6 +824,7 @@ export default function JobSheetScreen() {
           BillClose: isClosed,
           FixStatus: h.FixStatus === 'Y' ? 'F' : 'U',
           GST: h.ClassType === '24K' ? 24 : 22,
+          GSTAmountDisplay: (parseFloat(h.GST) || 0).toFixed(2),
           TaelPercent: h.TaelPercent === 0 ? '' : (h.TaelPercent?.toString() || '')
         });
         setDetails(data.details || []);
@@ -703,14 +833,14 @@ export default function JobSheetScreen() {
           Alert.alert('Notice', 'This bill is closed. Cannot modify!');
         } else if (isDP) {
           Alert.alert('Notice', 'This is a direct purchase bill. Cannot modify from JobSheet screen!');
-        } else {
+        } else if (!suppressToast) {
           showToast('JobSheet loaded successfully');
         }
       } else {
-        showToast(data.message || 'JobSheet not found', 'error');
+        if (!suppressToast) showToast(data.message || 'JobSheet not found', 'error');
       }
     } catch (err) {
-      showToast('Failed to load JobSheet', 'error');
+      if (!suppressToast) showToast('Failed to load JobSheet', 'error');
     }
   };
 
@@ -743,16 +873,6 @@ export default function JobSheetScreen() {
     }
     if (!headerState.PaymentType || !['G', 'C', 'B'].includes(headerState.PaymentType)) {
       showToast('Select payment type.', 'error');
-      return false;
-    }
-    const tealPercent = parseFloat(headerState.TaelPercent) || 0;
-    if (tealPercent <= 0) {
-      showToast('Enter TEAL Percent.', 'error');
-      return false;
-    }
-    const tealVal = parseFloat(headerState.TaelRate) || 0;
-    if (tealVal <= 0) {
-      showToast('Enter teal.', 'error');
       return false;
     }
     const costPerGram = parseFloat(headerState.CostPerGram) || 0;
@@ -797,6 +917,7 @@ export default function JobSheetScreen() {
         SupplierCode: supplier.SupplierCode,
         SupplierName: supplier.SupplierName || '',
         PaymentType: pType,
+        TaelGST: gstChecked,
       };
       if (parseFloat(updated.TaelRate) > 0) {
         updated.CostPerGram = calculateCostPerGram(gstChecked, updated);
@@ -810,7 +931,7 @@ export default function JobSheetScreen() {
   };
 
   // Save JobSheet matching fncJobSheet in frmJobSheet.vb
-  const saveJobSheet = async (overrideDetails?: DetailItem[]) => {
+  const saveJobSheet = async (overrideDetails?: DetailItem[], successMessage?: string) => {
     const activeDetails = overrideDetails || details;
     if (!fncCheckValidity(activeDetails)) {
       return;
@@ -846,7 +967,9 @@ export default function JobSheetScreen() {
         DueDate: parseDDMMYYYY(headerState.DueDate),
         TranType: headerState.TranType || 'JP',
         FixStatus: headerState.FixStatus === 'F' ? 'Y' : 'N',
-        ClassType: Number(headerState.GST) === 24 ? '24K' : '22K'
+        ClassType: Number(headerState.GST) === 24 ? '24K' : '22K',
+        TaelGST: chkGST1 ? 'Y' : 'N',
+        GST: summaryGSTActive ? (parseFloat(headerState.GSTAmountDisplay) || 0) : 0
       };
 
       const payload = {
@@ -863,16 +986,15 @@ export default function JobSheetScreen() {
       const data = await res.json();
       if (data.success) {
         if (isNew) {
-          Alert.alert('Notice', `Please take note of the Job Sheet No: ${activeJobSheetNo}`, [
-            { text: 'OK', onPress: () => clearForm() }
-          ]);
-          showToast(`JobSheet created: ${activeJobSheetNo}`, 'success');
+          showToast(successMessage || `JobSheet created: ${activeJobSheetNo}`, 'success');
+          clearForm();
         } else {
-          showToast('JobSheet updated successfully!', 'success');
-          loadJobSheet(activeJobSheetNo);
+          showToast(successMessage || 'JobSheet updated successfully!', 'success');
+          loadJobSheet(activeJobSheetNo, true);
         }
       } else {
-        showToast('Save failed: ' + (data.message || 'Unknown error'), 'error');
+        const errorDetail = data.error ? ` - ${data.error}` : '';
+        showToast('Save failed: ' + (data.message || 'Unknown error') + errorDetail, 'error');
       }
     } catch (err: any) {
       showToast('Failed to save JobSheet: ' + err.message, 'error');
@@ -1174,11 +1296,16 @@ export default function JobSheetScreen() {
                   />
 
                   <ThemedText style={[styles.labelRight, { width: 60 }]}>SO No</ThemedText>
-                  <TextInput
-                    style={[styles.input, { flex: 0.8, minWidth: 90 }]}
-                    value={headerState.SalesOrderNo}
-                    onChangeText={(text) => updateHeader('SalesOrderNo', text)}
-                  />
+                  <View style={{ flex: 0.8, minWidth: 100, flexDirection: 'row' }}>
+                    <TextInput
+                      style={[styles.input, { flex: 1, borderTopRightRadius: 0, borderBottomRightRadius: 0, borderRightWidth: 0 }]}
+                      value={headerState.SalesOrderNo}
+                      onChangeText={(text) => updateHeader('SalesOrderNo', text)}
+                    />
+                    <TouchableOpacity style={[styles.lookupBtn, { width: 26 }]} onPress={openSalesOrderLov}>
+                      <ThemedText style={styles.lookupBtnText}>...</ThemedText>
+                    </TouchableOpacity>
+                  </View>
                 </View>
 
                 {/* Row 3: Currency Code, Currency Name, Rate */}
@@ -1226,15 +1353,9 @@ export default function JobSheetScreen() {
 
                   <ThemedText style={[styles.labelRight, { width: 60 }]}>Rate</ThemedText>
                   <TextInput
-                    style={[styles.input, { flex: 0.8, minWidth: 90 }]}
+                    style={[styles.input, styles.readonlyInput, { flex: 0.8, minWidth: 90 }]}
                     value={headerState.CurrencyRate}
-                    onChangeText={(text) => updateHeader('CurrencyRate', text)}
-                    onBlur={() => {
-                      if ((parseFloat(headerState.CurrencyRate) || 0) <= 0) {
-                        showToast('Enter currency rate.', 'error');
-                      }
-                    }}
-                    keyboardType="numeric"
+                    editable={false}
                   />
                 </View>
 
@@ -1281,12 +1402,7 @@ export default function JobSheetScreen() {
                       <TextInput
                         style={[styles.input, { width: 50, borderTopRightRadius: 0, borderBottomRightRadius: 0, borderRightWidth: 0 }]}
                         value={headerState.TaelPercent}
-                        onChangeText={(text) => updateHeader('TaelPercent', text)}
-                        onBlur={() => {
-                          if ((parseFloat(headerState.TaelPercent) || 0) <= 0) {
-                            showToast('Enter TEAL Percent.', 'error');
-                          }
-                        }}
+                        onChangeText={(text) => updateHeader('TaelPercent', text.replace(/[^0-9.]/g, ''))}
                         keyboardType="numeric"
                       />
                       <TouchableOpacity style={[styles.lookupBtn, { width: 26 }]} onPress={openTaelPercentLov}>
@@ -1298,12 +1414,7 @@ export default function JobSheetScreen() {
                     <TextInput
                       style={[styles.input, { width: 58 }]}
                       value={headerState.TaelRate}
-                      onChangeText={(text) => updateHeader('TaelRate', text)}
-                      onBlur={() => {
-                        if ((parseFloat(headerState.TaelRate) || 0) <= 0) {
-                          showToast('Enter teal.', 'error');
-                        }
-                      }}
+                      onChangeText={(text) => updateHeader('TaelRate', text.replace(/[^0-9.]/g, ''))}
                       keyboardType="numeric"
                     />
 
@@ -1313,7 +1424,7 @@ export default function JobSheetScreen() {
                     <TextInput
                       style={[styles.input, { width: 68 }]}
                       value={headerState.CostPerGram}
-                      onChangeText={(text) => updateHeader('CostPerGram', text)}
+                      onChangeText={(text) => updateHeader('CostPerGram', text.replace(/[^0-9.]/g, ''))}
                       onBlur={() => {
                         if ((parseFloat(headerState.CostPerGram) || 0) <= 0) {
                           showToast('Enter cost per gram.', 'error');
@@ -1414,7 +1525,7 @@ export default function JobSheetScreen() {
                   {/* GST Field */}
                   <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 7, width: '100%' }}>
                     <ThemedText style={{ fontSize: 11, color: '#3C2E19', fontWeight: 'bold', width: 95 }}>GST</ThemedText>
-                    <Checkbox label="" selected={headerState.TaelGST} onPress={() => handleChkGST(!headerState.TaelGST)} />
+                    <Checkbox label="" selected={summaryGSTActive} onPress={() => handleChkGST(!summaryGSTActive)} />
                     <TextInput
                       style={[styles.input, styles.readonlyInput, { flex: 1, marginLeft: 4 }]}
                       editable={false}
@@ -1541,12 +1652,129 @@ export default function JobSheetScreen() {
         </ScrollView>
 
 
-        {/* BOTTOM SECTION: Actions */}
+        {/* BOTTOM SECTION: Actions & Match JobSheet Panel */}
         <View style={styles.footerSection}>
           <View style={{ flex: 1 }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-              <Checkbox label="Match Jobsheet" selected={!!headerState.MatchJobSheetNo} onPress={() => updateHeader('MatchJobSheetNo', headerState.MatchJobSheetNo ? '' : 'Y')} />
+            <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: matchJobSheetVisible ? 12 : 4 }}>
+              <Checkbox
+                label="Match Jobsheet"
+                selected={matchJobSheetVisible}
+                onPress={() => {
+                  const nextVisible = !matchJobSheetVisible;
+                  setMatchJobSheetVisible(nextVisible);
+                  if (!nextVisible) {
+                    updateHeader('MatchJobSheetNo', '');
+                    updateHeader('MatchWeight', '');
+                    updateHeader('MatchPCS', '');
+                    setMatchAccessoriesData([]);
+                    setSelectedMatchRow(null);
+                  }
+                }}
+              />
             </View>
+
+            {/* Match Jobsheet Floating/Embedded Panel (Matches VB frmJobSheet grpMatchJobsheet) */}
+            {matchJobSheetVisible && (
+              <View style={[styles.goldCard, { maxWidth: 520, marginTop: 4, padding: 10, borderColor: '#D4AF37', backgroundColor: '#FFFDF9' }]}>
+                {/* Header Row: Match JobSheet No Lookup */}
+                <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 10 }}>
+                  <ThemedText style={{ fontSize: 12, fontWeight: 'bold', color: '#3B2D17', width: 110 }}>Match JobSheet</ThemedText>
+                  <View style={{ flexDirection: 'row', flex: 1, maxWidth: 200 }}>
+                    <TextInput
+                      style={[styles.input, { flex: 1, borderTopRightRadius: 0, borderBottomRightRadius: 0, borderRightWidth: 0, height: 28 }]}
+                      value={headerState.MatchJobSheetNo}
+                      onChangeText={(text) => {
+                        updateHeader('MatchJobSheetNo', text);
+                        if (text.trim()) loadMatchAccessories(text);
+                      }}
+                      placeholder="JobSheet No"
+                    />
+                    <TouchableOpacity style={[styles.lookupBtn, { height: 28, width: 28 }]} onPress={openMatchJobSheetLov}>
+                      <ThemedText style={styles.lookupBtnText}>...</ThemedText>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+
+                {/* Grid Header & Rows (dgvHeader in VB) */}
+                <View style={{ borderWidth: 1, borderColor: '#E8DCC4', borderRadius: 4, overflow: 'hidden', marginBottom: 10, backgroundColor: '#FFFFFF' }}>
+                  <View style={{ flexDirection: 'row', backgroundColor: '#F5E7CA', paddingVertical: 5, paddingHorizontal: 6 }}>
+                    <ThemedText style={{ flex: 14, fontSize: 11, fontWeight: 'bold', color: '#3B2D17' }}>Catalogue Code</ThemedText>
+                    <ThemedText style={{ flex: 10, fontSize: 11, fontWeight: 'bold', color: '#3B2D17' }}>Weight</ThemedText>
+                    <ThemedText style={{ flex: 8, fontSize: 11, fontWeight: 'bold', color: '#3B2D17' }}>PCS</ThemedText>
+                  </View>
+
+                  <ScrollView style={{ maxHeight: 110 }}>
+                    {matchAccessoriesData.length === 0 ? (
+                      <View style={{ paddingVertical: 14, alignItems: 'center' }}>
+                        <ThemedText style={{ fontSize: 11, color: '#888' }}>
+                          {headerState.MatchJobSheetNo ? 'No accessories found for this JobSheet' : 'Select a JobSheet above'}
+                        </ThemedText>
+                      </View>
+                    ) : (
+                      matchAccessoriesData.map((row, idx) => {
+                        const isSelected = selectedMatchRow === row;
+                        return (
+                          <TouchableOpacity
+                            key={idx}
+                            style={{
+                              flexDirection: 'row',
+                              paddingVertical: 5,
+                              paddingHorizontal: 6,
+                              backgroundColor: isSelected ? '#FDF1D6' : idx % 2 === 0 ? '#FFFFFF' : '#FAF6EE',
+                              borderBottomWidth: idx === matchAccessoriesData.length - 1 ? 0 : 1,
+                              borderBottomColor: '#F0E6D2'
+                            }}
+                            onPress={() => {
+                              setSelectedMatchRow(row);
+                              updateHeader('MatchWeight', String(row.Weight ?? ''));
+                              updateHeader('MatchPCS', String(row.PCS ?? ''));
+                            }}
+                          >
+                            <ThemedText style={{ flex: 14, fontSize: 11, color: '#332717', fontWeight: isSelected ? 'bold' : 'normal' }}>
+                              {row.CatalogueCode}
+                            </ThemedText>
+                            <ThemedText style={{ flex: 10, fontSize: 11, color: '#332717' }}>
+                              {parseFloat(row.Weight || 0).toFixed(2)}
+                            </ThemedText>
+                            <ThemedText style={{ flex: 8, fontSize: 11, color: '#332717' }}>
+                              {row.PCS || 1}
+                            </ThemedText>
+                          </TouchableOpacity>
+                        );
+                      })
+                    )}
+                  </ScrollView>
+                </View>
+
+                {/* Bottom Row: Weight, PCS, and Add button (Button1 in VB) */}
+                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                    <ThemedText style={{ fontSize: 11, fontWeight: 'bold', color: '#3B2D17', marginRight: 4 }}>Weight</ThemedText>
+                    <TextInput
+                      style={[styles.input, { width: 65, height: 26, fontSize: 11, marginRight: 10 }]}
+                      value={headerState.MatchWeight}
+                      onChangeText={(t) => updateHeader('MatchWeight', t.replace(/[^0-9.]/g, ''))}
+                      keyboardType="numeric"
+                    />
+
+                    <ThemedText style={{ fontSize: 11, fontWeight: 'bold', color: '#3B2D17', marginRight: 4 }}>PCS</ThemedText>
+                    <TextInput
+                      style={[styles.input, { width: 45, height: 26, fontSize: 11 }]}
+                      value={headerState.MatchPCS}
+                      onChangeText={(t) => updateHeader('MatchPCS', t.replace(/[^0-9]/g, ''))}
+                      keyboardType="numeric"
+                    />
+                  </View>
+
+                  <TouchableOpacity
+                    style={[styles.mainActionBtn, { backgroundColor: '#F9F2E2', borderColor: '#B8903B', paddingVertical: 4, paddingHorizontal: 16 }]}
+                    onPress={addMatchAccessoryToDetail}
+                  >
+                    <ThemedText style={{ color: '#9E6D08', fontWeight: 'bold', fontSize: 11 }}>Add</ThemedText>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            )}
           </View>
         </View>
 
@@ -1636,7 +1864,10 @@ export default function JobSheetScreen() {
                 <TextInput
                   style={[inputStyle, { flex: 1, padding: 4, height: 30 }]}
                   value={currentDetail.Weight}
-                  onChangeText={(t: string) => updateDetail('Weight', t)}
+                  onChangeText={(t: string) => {
+                    const clean = t.replace(/[^0-9.]/g, '');
+                    updateDetail('Weight', clean);
+                  }}
                   keyboardType="numeric"
                   onBlur={() => {
                     const w = parseFloat(currentDetail.Weight);
@@ -1652,7 +1883,10 @@ export default function JobSheetScreen() {
                 <TextInput
                   style={[inputStyle, { flex: 1, padding: 4, height: 30 }]}
                   value={currentDetail.CostPerGram}
-                  onChangeText={(t: string) => updateDetail('CostPerGram', t)}
+                  onChangeText={(t: string) => {
+                    const clean = t.replace(/[^0-9.]/g, '');
+                    updateDetail('CostPerGram', clean);
+                  }}
                   keyboardType="numeric"
                   onBlur={() => {
                     const c = parseFloat(currentDetail.CostPerGram);
@@ -1668,7 +1902,10 @@ export default function JobSheetScreen() {
                 <TextInput
                   style={[inputStyle, { flex: 1, padding: 4, height: 30 }]}
                   value={currentDetail.MC}
-                  onChangeText={(t: string) => updateDetail('MC', t)}
+                  onChangeText={(t: string) => {
+                    const clean = t.replace(/[^0-9.]/g, '');
+                    updateDetail('MC', clean);
+                  }}
                   keyboardType="numeric"
                   onBlur={() => {
                     const mc = parseFloat(currentDetail.MC);
@@ -1684,7 +1921,10 @@ export default function JobSheetScreen() {
                 <TextInput
                   style={[inputStyle, { flex: 1, padding: 4, height: 30 }]}
                   value={currentDetail.PCS}
-                  onChangeText={(t: string) => updateDetail('PCS', t)}
+                  onChangeText={(t: string) => {
+                    const clean = t.replace(/[^0-9]/g, '');
+                    updateDetail('PCS', clean);
+                  }}
                   keyboardType="numeric"
                   onBlur={() => {
                     const p = parseInt(currentDetail.PCS);
@@ -1885,6 +2125,100 @@ export default function JobSheetScreen() {
         </View>
       </Modal>
 
+      {/* Sales Order (SO No) LOV Modal */}
+      <Modal visible={salesOrderLovVisible} transparent={true} animationType="fade">
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContainer, { backgroundColor: cardColor, borderColor: borderColor, width: '90%' }]}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+              <ThemedText style={[styles.modalTitle, { color: textColor, marginBottom: 0 }]}>Select Sales Order</ThemedText>
+              <TouchableOpacity onPress={() => setSalesOrderLovVisible(false)}>
+                <Ionicons name="close" size={24} color={textColor} />
+              </TouchableOpacity>
+            </View>
+
+            <View style={{ flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: borderColor, paddingBottom: 8, marginBottom: 8 }}>
+              <ThemedText style={{ flex: 1.5, fontWeight: 'bold', color: textColor, fontSize: 12 }}>Sales Order No</ThemedText>
+              <ThemedText style={{ flex: 1.2, fontWeight: 'bold', color: textColor, fontSize: 12 }}>Supplier Code</ThemedText>
+              <ThemedText style={{ flex: 1.2, fontWeight: 'bold', color: textColor, fontSize: 12 }}>SO Date</ThemedText>
+              <ThemedText style={{ flex: 1.2, fontWeight: 'bold', color: textColor, fontSize: 12 }}>Due Date</ThemedText>
+            </View>
+
+            {salesOrderLovData.length === 0 ? (
+              <View style={{ paddingVertical: 20, alignItems: 'center' }}>
+                <ThemedText style={{ color: subtitleColor, fontSize: 12 }}>No Sales Orders found</ThemedText>
+              </View>
+            ) : (
+              <FlatList
+                data={salesOrderLovData}
+                keyExtractor={(item, index) => item.SalesOrderNo ? item.SalesOrderNo.toString() : index.toString()}
+                renderItem={({ item }) => (
+                  <TouchableOpacity
+                    style={[styles.lovItem, { borderBottomColor: borderColor, flexDirection: 'row', paddingVertical: 10 }]}
+                    onPress={() => {
+                      setSalesOrderLovVisible(false);
+                      updateHeader('SalesOrderNo', item.SalesOrderNo ? item.SalesOrderNo.toString().trim() : '');
+                    }}
+                  >
+                    <ThemedText style={{ flex: 1.5, color: textColor, fontSize: 12 }}>{item.SalesOrderNo}</ThemedText>
+                    <ThemedText style={{ flex: 1.2, color: textColor, fontSize: 12 }}>{item.SupplierCode}</ThemedText>
+                    <ThemedText style={{ flex: 1.2, color: textColor, fontSize: 12 }}>{item.SalesOrderDate}</ThemedText>
+                    <ThemedText style={{ flex: 1.2, color: textColor, fontSize: 12 }}>{item.DueDate}</ThemedText>
+                  </TouchableOpacity>
+                )}
+              />
+            )}
+          </View>
+        </View>
+      </Modal>
+
+      {/* Match JobSheet (Accessories='Y') LOV Modal */}
+      <Modal visible={matchJobSheetLovVisible} transparent={true} animationType="fade">
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContainer, { backgroundColor: cardColor, borderColor: borderColor, width: '90%' }]}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+              <ThemedText style={[styles.modalTitle, { color: textColor, marginBottom: 0 }]}>Select Match JobSheet (Accessories)</ThemedText>
+              <TouchableOpacity onPress={() => setMatchJobSheetLovVisible(false)}>
+                <Ionicons name="close" size={24} color={textColor} />
+              </TouchableOpacity>
+            </View>
+
+            <View style={{ flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: borderColor, paddingBottom: 8, marginBottom: 8 }}>
+              <ThemedText style={{ flex: 1.5, fontWeight: 'bold', color: textColor, fontSize: 12 }}>JobSheet No</ThemedText>
+              <ThemedText style={{ flex: 1.2, fontWeight: 'bold', color: textColor, fontSize: 12 }}>Supplier</ThemedText>
+              <ThemedText style={{ flex: 1.2, fontWeight: 'bold', color: textColor, fontSize: 12 }}>Date</ThemedText>
+              <ThemedText style={{ flex: 1.2, fontWeight: 'bold', color: textColor, fontSize: 12 }}>Total Cost</ThemedText>
+            </View>
+
+            {matchJobSheetLovData.length === 0 ? (
+              <View style={{ paddingVertical: 20, alignItems: 'center' }}>
+                <ThemedText style={{ color: subtitleColor, fontSize: 12 }}>No Accessories JobSheets found</ThemedText>
+              </View>
+            ) : (
+              <FlatList
+                data={matchJobSheetLovData}
+                keyExtractor={(item, index) => item.JobSheetNo ? item.JobSheetNo.toString() : index.toString()}
+                renderItem={({ item }) => (
+                  <TouchableOpacity
+                    style={[styles.lovItem, { borderBottomColor: borderColor, flexDirection: 'row', paddingVertical: 10 }]}
+                    onPress={() => {
+                      setMatchJobSheetLovVisible(false);
+                      const jsNo = item.JobSheetNo ? item.JobSheetNo.toString().trim() : '';
+                      updateHeader('MatchJobSheetNo', jsNo);
+                      loadMatchAccessories(jsNo);
+                    }}
+                  >
+                    <ThemedText style={{ flex: 1.5, color: textColor, fontSize: 12 }}>{item.JobSheetNo}</ThemedText>
+                    <ThemedText style={{ flex: 1.2, color: textColor, fontSize: 12 }}>{item.SupplierCode}</ThemedText>
+                    <ThemedText style={{ flex: 1.2, color: textColor, fontSize: 12 }}>{item.JobSheetDate}</ThemedText>
+                    <ThemedText style={{ flex: 1.2, color: textColor, fontSize: 12 }}>{parseFloat(item.TotalCost || 0).toFixed(2)}</ThemedText>
+                  </TouchableOpacity>
+                )}
+              />
+            )}
+          </View>
+        </View>
+      </Modal>
+
       {/* TaelPercent LOV Modal */}
       <Modal visible={taelPercentLovVisible} transparent={true} animationType="fade">
         <View style={styles.modalOverlay}>
@@ -1911,7 +2245,24 @@ export default function JobSheetScreen() {
                   style={[styles.lovItem, { borderBottomColor: borderColor, flexDirection: 'row', paddingVertical: 10 }]}
                   onPress={() => {
                     setTaelPercentLovVisible(false);
-                    updateHeader('TaelPercent', item.TaelPercent?.toString() || '');
+                    const selectedPercent = item.TaelPercent?.toString() || '';
+                    const daysVal = parseFloat(item.TaelPercent1) || 0;
+                    const baseDate = headerState.PurchaseBillDate || headerState.JobSheetDate || getTodayDDMMYYYY();
+                    const newDueDate = calculateDueDateFromDays(baseDate, daysVal);
+
+                    setHeaderState(prev => {
+                      const next = {
+                        ...prev,
+                        TaelPercent: selectedPercent,
+                        DueDate: newDueDate || prev.DueDate
+                      };
+                      if (parseFloat(next.TaelRate) > 0) {
+                        next.CostPerGram = calculateCostPerGram(chkGST1, next);
+                      } else if (parseFloat(next.CostPerGram) > 0) {
+                        next.TaelRate = calculateTaelFromCost(chkGST1, next);
+                      }
+                      return next;
+                    });
                   }}
                 >
                   <ThemedText style={{ flex: 1, color: textColor, fontSize: 12 }}>{item.TaelPercent}</ThemedText>

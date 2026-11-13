@@ -2,7 +2,7 @@ import { ThemedText } from '@/components/themed-text';
 import { API_BASE_URL } from '@/constants/api';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Stack, useRouter } from 'expo-router';
+import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
@@ -66,6 +66,7 @@ const getLoggedInUser = async () => {
 
 export default function PosScreen() {
   const router = useRouter();
+  const searchParams = useLocalSearchParams();
 
   // ===== CUSTOM CHECKBOX & RADIO =====
   const Checkbox = ({ label, selected, onPress }: { label: string; selected: boolean; onPress: () => void }) => (
@@ -103,11 +104,16 @@ export default function PosScreen() {
     CustomerType: 'N', // Normal
     MemberCode: '',
     TaxMode: 'Inclusive', // Inclusive, Exclusive, Zero Rated
-    LocationCode: 'HQ',
+    LocationCode: '',
+    TerminalCode: '',
     Remarks: '',
     Advance: '',
+    AdvDepositNo: '',
+    TradeInSales: '',
+    TradeInRefNo: '',
     FlexiAmount: '',
     FlexiBonus: '',
+    SubscriptionID: '',
     eTRS: 'Not For eTRS',
     PrintMC: false,
     PrintImage: false,
@@ -121,6 +127,8 @@ export default function PosScreen() {
     Weight: '',
     GoldLoss: '',
     CostPerGram: '',
+    DailyClassRate: '',
+    DailyRate: '',
     SMC: '',
     PCS: '1',
     TotalValue: '',
@@ -150,8 +158,8 @@ export default function PosScreen() {
   const [lineDetailModalVisible, setLineDetailModalVisible] = useState(false);
   const [classRates, setClassRates] = useState<any[]>([]);
   const [auditStats, setAuditStats] = useState<any>({
-    LocationCode: 'HQ',
-    TerminalCode: 'T1',
+    LocationCode: '',
+    TerminalCode: '',
     NextInvoiceNo: '',
     LastSalesMan: '0',
     LastBillNo: '0',
@@ -222,6 +230,12 @@ export default function PosScreen() {
           }
 
           setAuditStats(stats);
+          if (stats.LocationCode && !headerState.LocationCode) {
+            updateHeader('LocationCode', stats.LocationCode);
+          }
+          if (stats.TerminalCode && !headerState.TerminalCode) {
+            updateHeader('TerminalCode', stats.TerminalCode);
+          }
           if (stats.NextInvoiceNo && !headerState.InvoiceNo) {
             updateHeader('InvoiceNo', stats.NextInvoiceNo);
           }
@@ -241,6 +255,18 @@ export default function PosScreen() {
 
     fetchAuditStats();
   }, []);
+
+  // Listen for returning from Payment Mode screen with paymentSuccess
+  useEffect(() => {
+    if (searchParams.paymentSuccess === 'true') {
+      const inv = (searchParams.savedInvoiceNo as string) || '';
+      showToast(`Invoice ${inv ? inv + ' ' : ''}saved and payment completed successfully!`, 'success');
+      clearForm();
+      fetchAuditStats();
+      // Replace URL without payment params to prevent re-triggering
+      router.setParams({ paymentSuccess: '', savedInvoiceNo: '', savedCustomerCode: '' });
+    }
+  }, [searchParams.paymentSuccess]);
 
   // Line Totals calculations matching pos.txt txtSMC_LostFocus / txtGoldLoss_LostFocus
   useEffect(() => {
@@ -267,8 +293,8 @@ export default function PosScreen() {
       gstAmt = Number((baseVal * 0.09).toFixed(2));
       finalTotalVal = Number((baseVal + gstAmt).toFixed(2));
     } else if (headerState.TaxMode === 'Inclusive') {
-      gstAmt = Number(((baseVal * 9) / 100).toFixed(2));
-      finalTotalVal = Number((baseVal + gstAmt).toFixed(2));
+      gstAmt = Number(((baseVal * 9) / 109).toFixed(2));
+      finalTotalVal = Number(baseVal.toFixed(2));
     } else {
       gstAmt = 0;
       finalTotalVal = baseVal;
@@ -471,7 +497,7 @@ export default function PosScreen() {
     if (!cleanCode) return;
 
     try {
-      const res = await fetch(`${API_URL}/pos/inventoryDetail?InventoryCode=${encodeURIComponent(cleanCode)}&LocationCode=${encodeURIComponent(headerState.LocationCode || 'HQ')}`);
+      const res = await fetch(`${API_URL}/pos/inventoryDetail?InventoryCode=${encodeURIComponent(cleanCode)}${headerState.LocationCode ? `&LocationCode=${encodeURIComponent(headerState.LocationCode)}` : ''}`);
       let json: any = null;
       try {
         json = await res.json();
@@ -480,7 +506,13 @@ export default function PosScreen() {
       }
 
       if (!res.ok || !json || !json.success) {
-        showToast((json && json.message) || "Inventory Not Found ...", 'error');
+        const errorMsg = (json && json.message) || "Inventory Not Found ...";
+        if (Platform.OS === 'web') {
+          window.alert(errorMsg);
+        } else {
+          Alert.alert("Notice", errorMsg);
+        }
+        showToast(errorMsg, 'error');
         updateDetail('InventoryCode', '');
         updateDetail('Description', '');
         updateDetail('Class', '');
@@ -510,14 +542,20 @@ export default function PosScreen() {
       if (stoneWt > 0 && (item.ClassSalesType || '').toUpperCase() !== 'P') {
         finalWeight = Math.max(0, finalWeight - stoneWt);
       }
+      const dailyRateVal = item.DailyClassRate?.toString() || item.DailyRate?.toString() || item.ClassRate?.toString() || '0';
+      const effectiveCostPerGram = (parseFloat(dailyRateVal) > 0)
+        ? dailyRateVal 
+        : (item.CostPerGram ? item.CostPerGram.toString() : '0');
+
       updateDetail('Weight', String(finalWeight));
       updateDetail('StoneWeight', String(stoneWt));
       updateDetail('GoldLoss', item.GoldLoss?.toString() || '0');
-      updateDetail('CostPerGram', item.CostPerGram?.toString() || item.DailyClassRate?.toString() || '0');
+      updateDetail('CostPerGram', effectiveCostPerGram);
+      updateDetail('DailyClassRate', dailyRateVal);
+      updateDetail('DailyRate', dailyRateVal);
       updateDetail('SMC', item.SMC?.toString() || '0');
       updateDetail('PMC', item.PMC?.toString() || '0');
       updateDetail('TotalCost', item.TotalCost?.toString() || '0');
-      updateDetail('DailyClassRate', item.DailyClassRate?.toString() || '0');
       if (item.MCDiscount) {
         updateDetail('DetailDiscount', item.MCDiscount?.toString() || '0');
       }
@@ -530,7 +568,8 @@ export default function PosScreen() {
         updateDetail('PCS', '1');
       }
 
-      if ((!item.DailyClassRate || parseFloat(item.DailyClassRate) <= 0) && (item.ClassSalesType || '').toUpperCase() !== 'P') {
+      const dailyRateNum = parseFloat(item.DailyClassRate || item.DailyRate || item.ClassRate || '0');
+      if (dailyRateNum <= 0 && (item.ClassSalesType || '').toUpperCase() !== 'P') {
         showToast("Market Rate Not Found for this Class. Please set market rate!", 'error');
       }
     } catch (e: any) {
@@ -565,6 +604,7 @@ export default function PosScreen() {
       if (json.success) {
         openLov('Select Advance Deposit', json.data, ['DepositNo', 'CustomerCode', 'CustomerName', 'Amount'], (item) => {
           updateHeader('Advance', item.Amount?.toString() || '0');
+          if (item.DepositNo) updateHeader('AdvDepositNo', item.DepositNo);
           if (item.CustomerCode) updateHeader('CustomerCode', item.CustomerCode);
           if (item.CustomerName) updateHeader('CustomerName', item.CustomerName);
         });
@@ -582,6 +622,7 @@ export default function PosScreen() {
         openLov('Select Flexi Subscription', json.data, ['SubscriptionId', 'CustomerName', 'TotalAmount', 'TotalBonus'], (item) => {
           updateHeader('FlexiAmount', item.TotalAmount?.toString() || '0');
           updateHeader('FlexiBonus', item.TotalBonus?.toString() || '0');
+          if (item.SubscriptionId) updateHeader('SubscriptionID', item.SubscriptionId);
         });
       } else {
         showToast("No active Flexi Subscriptions found", 'info');
@@ -637,7 +678,8 @@ export default function PosScreen() {
                 PassportNo: hdr.PassportNo || '',
                 TaxMode: loadedTaxMode,
                 eTRS: loadedETRS,
-                LocationCode: hdr.LocationCode || 'HQ',
+                LocationCode: hdr.LocationCode || '',
+                TerminalCode: hdr.TerminalCode || '',
                 Remarks: hdr.Remarks || '',
               }));
               updatePayment('NetDiscount', hdr.NetDiscount?.toString() || hdr.Discount?.toString() || '0');
@@ -717,7 +759,8 @@ export default function PosScreen() {
     }
 
     const isPcsSales = currentDetail.ClassSalesType === 'P' || (currentDetail.Class && currentDetail.Class.toUpperCase() === 'P');
-    if (!isPcsSales && (!currentDetail.DailyClassRate || parseFloat(currentDetail.DailyClassRate) <= 0)) {
+    const effectiveRate = parseFloat(currentDetail.DailyClassRate || currentDetail.DailyRate || currentDetail.CostPerGram || '0');
+    if (!isPcsSales && effectiveRate <= 0) {
       showToast("Market Rate Not Found for this Class. Please set market rate!", 'error');
       return;
     }
@@ -757,7 +800,7 @@ export default function PosScreen() {
       showToast("Line item added successfully!", 'success');
     }
     setCurrentDetail({
-      InventoryCode: '', Description: '', Class: '', Weight: '', GoldLoss: '', CostPerGram: '', SMC: '', PCS: '1', TotalValue: '', GST: ''
+      InventoryCode: '', Description: '', Class: '', Weight: '', GoldLoss: '', CostPerGram: '', DailyClassRate: '', DailyRate: '', SMC: '', PCS: '1', TotalValue: '', GST: ''
     });
     setLineDetailModalVisible(false);
   };
@@ -787,18 +830,23 @@ export default function PosScreen() {
       CustomerType: 'N',
       MemberCode: '',
       TaxMode: 'Inclusive',
-      LocationCode: 'HQ',
+      LocationCode: auditStats.LocationCode || headerState.LocationCode || '',
+      TerminalCode: auditStats.TerminalCode || headerState.TerminalCode || '',
       Remarks: '',
       Advance: '',
+      AdvDepositNo: '',
+      TradeInSales: '',
+      TradeInRefNo: '',
       FlexiAmount: '',
       FlexiBonus: '',
+      SubscriptionID: '',
       eTRS: 'Not For eTRS',
       PrintMC: false,
       PrintImage: false,
     });
     setDetails([]);
     setCurrentDetail({
-      InventoryCode: '', Description: '', Class: '', Weight: '', GoldLoss: '', CostPerGram: '', SMC: '', PCS: '1', TotalValue: '', GST: ''
+      InventoryCode: '', Description: '', Class: '', Weight: '', GoldLoss: '', CostPerGram: '', DailyClassRate: '', DailyRate: '', SMC: '', PCS: '1', TotalValue: '', GST: ''
     });
     setPaymentState({
       PaymentType: 'Cash Sales', TradeIn: false, TotalQty: '0', TotalSalesAmt: '0', NetDiscount: '0', NetValue: '0', Tax: '0', GrandTotal: '0', ReturnAmt: '0', PayMode: 'Cash'
@@ -864,49 +912,49 @@ export default function PosScreen() {
     // If eTRS Ticket Issued and remarks empty, set customer passport
     const remarks = headerState.Remarks || (headerState.eTRS === 'For eTRS' ? (headerState.PassportNo || headerState.CustomerCode) : '');
 
-    setLoading(true);
     try {
       const loggedUser = await getLoggedInUser();
       const currentUserId = loggedUser.userId || 'ADMIN';
 
-      const res = await fetch(`${API_URL}/pos`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          header: {
-            ...headerState,
-            InvoiceNo: invNo,
-            ...paymentState,
-            Remarks: remarks,
-            LocationCode: headerState.LocationCode || 'HQ',
-            TerminalCode: 'T1',
-            GSTType: gstType,
-            eTRSType: eTRSType,
-            SalesType: salesType
-          },
-          details,
-          userId: currentUserId,
-          payModes: [{
-            PayMode: paymentState.PayMode || (salesType === 'TRADEIN' ? 'TRADE-IN' : salesType),
-            Amount: paymentState.GrandTotal,
-            Commission: 0,
-            SlipNo: ''
-          }]
-        })
+      const payload = {
+        header: {
+          ...headerState,
+          InvoiceNo: invNo,
+          ...paymentState,
+          Remarks: remarks,
+          LocationCode: headerState.LocationCode || auditStats.LocationCode || '',
+          TerminalCode: headerState.TerminalCode || auditStats.TerminalCode || '',
+          GSTType: gstType,
+          eTRSType: eTRSType,
+          SalesType: salesType
+        },
+        details,
+        userId: currentUserId
+      };
+
+      const payableAmount = parseFloat(paymentState.GrandTotal) || 0;
+
+      // Navigate to Payment Mode screen matching legacy frmGPOS subPaymentTypeOk workflow
+      router.push({
+        pathname: '/payingmode',
+        params: {
+          totalNet: payableAmount.toFixed(2),
+          customerCode: headerState.CustomerCode || 'CASH',
+          customerType: headerState.CustomerType || 'N',
+          tradeInSales: String(headerState.TradeInSales || '0'),
+          tradeInRefNo: String(headerState.TradeInRefNo || ''),
+          advance: String(headerState.Advance || '0'),
+          advDepositNo: String(headerState.AdvDepositNo || ''),
+          flexiAmount: String(headerState.FlexiAmount || '0'),
+          flexiBonus: String(headerState.FlexiBonus || '0'),
+          subscriptionId: String(headerState.SubscriptionID || ''),
+          apiEndpoint: `${API_URL}/pos`,
+          payload: JSON.stringify(payload),
+          returnPath: '/pos'
+        }
       });
-      const json = await res.json();
-      if (json.success) {
-        showToast(`Invoice ${json.invoiceNo || ''} saved successfully!`, 'success');
-        clearForm();
-        fetchAuditStats();
-      } else {
-        const errorDetail = json.error ? ` - ${json.error}` : '';
-        showToast((json.message || "Failed to save invoice") + errorDetail, 'error');
-      }
     } catch (e: any) {
-      showToast(e.message || "Network error while saving invoice", 'error');
-    } finally {
-      setLoading(false);
+      showToast(e.message || "Error preparing payment", 'error');
     }
   };
 
@@ -1188,9 +1236,17 @@ export default function PosScreen() {
                     style={[
                       styles.classRateRow,
                       idx % 2 === 1 && { backgroundColor: '#FCFAF6' },
-                      currentDetail.Class === cr.ClassCode && styles.classRateRowSelected
+                      (currentDetail.Class || '').toUpperCase() === (cr.ClassCode || '').toUpperCase() && styles.classRateRowSelected
                     ]}
                     activeOpacity={0.7}
+                    onPress={() => {
+                      updateDetail('Class', cr.ClassCode);
+                      if (parseFloat(cr.Rate) > 0) {
+                        updateDetail('CostPerGram', String(cr.Rate));
+                        updateDetail('DailyClassRate', String(cr.Rate));
+                        updateDetail('DailyRate', String(cr.Rate));
+                      }
+                    }}
                   >
                     <ThemedText style={[styles.classRateText, { flex: 1, fontWeight: 'bold' }]}>
                       {cr.ClassCode}
@@ -1521,7 +1577,11 @@ export default function PosScreen() {
       <View style={styles.footerStatusBar}>
         <View style={styles.footerCol}>
           <ThemedText style={styles.footerLabel}>Location</ThemedText>
-          <ThemedText style={styles.footerVal}>{auditStats.LocationCode || 'HQ'}</ThemedText>
+          <ThemedText style={styles.footerVal}>{auditStats.LocationCode || headerState.LocationCode || ''}</ThemedText>
+        </View>
+        <View style={styles.footerCol}>
+          <ThemedText style={styles.footerLabel}>Terminal</ThemedText>
+          <ThemedText style={styles.footerVal}>{auditStats.TerminalCode || headerState.TerminalCode || ''}</ThemedText>
         </View>
         <View style={styles.footerCol}>
           <ThemedText style={styles.footerLabel}>Last SalesMan</ThemedText>
@@ -1648,9 +1708,9 @@ export default function PosScreen() {
                 <View style={[styles.imageMatchedFieldCol, { width: 75 }]}>
                   <ThemedText style={styles.imageMatchedFieldLabel}>Class</ThemedText>
                   <TextInput
-                    style={[styles.imageMatchedInput, { textAlign: 'center', fontWeight: 'bold' }]}
+                    style={[styles.imageMatchedInput, styles.readonlyInputStyle, { textAlign: 'center', fontWeight: 'bold' }]}
                     value={currentDetail.Class}
-                    onChangeText={(text) => updateDetail('Class', text)}
+                    editable={false}
                     placeholder=""
                     placeholderTextColor="#9E8D77"
                   />
@@ -1660,9 +1720,9 @@ export default function PosScreen() {
                 <View style={[styles.imageMatchedFieldCol, { width: 220 }]}>
                   <ThemedText style={styles.imageMatchedFieldLabel}>Description</ThemedText>
                   <TextInput
-                    style={styles.imageMatchedInput}
+                    style={[styles.imageMatchedInput, styles.readonlyInputStyle]}
                     value={currentDetail.Description}
-                    onChangeText={(text) => updateDetail('Description', text)}
+                    editable={false}
                     placeholder=""
                     placeholderTextColor="#9E8D77"
                   />
@@ -1674,7 +1734,7 @@ export default function PosScreen() {
                   <TextInput
                     style={[styles.imageMatchedInput, { textAlign: 'right' }]}
                     value={currentDetail.Weight}
-                    onChangeText={(text) => updateDetail('Weight', text)}
+                    onChangeText={(text) => updateDetail('Weight', text.replace(/[^0-9.]/g, ''))}
                     keyboardType="numeric"
                     placeholder=""
                     placeholderTextColor="#9E8D77"
@@ -1687,7 +1747,7 @@ export default function PosScreen() {
                   <TextInput
                     style={[styles.imageMatchedInput, { textAlign: 'right' }]}
                     value={currentDetail.GoldLoss}
-                    onChangeText={(text) => updateDetail('GoldLoss', text)}
+                    onChangeText={(text) => updateDetail('GoldLoss', text.replace(/[^0-9.]/g, ''))}
                     keyboardType="numeric"
                     placeholder=""
                     placeholderTextColor="#9E8D77"
@@ -1700,7 +1760,7 @@ export default function PosScreen() {
                   <TextInput
                     style={[styles.imageMatchedInput, { textAlign: 'right' }]}
                     value={currentDetail.CostPerGram}
-                    onChangeText={(text) => updateDetail('CostPerGram', text)}
+                    onChangeText={(text) => updateDetail('CostPerGram', text.replace(/[^0-9.]/g, ''))}
                     keyboardType="numeric"
                     placeholder=""
                     placeholderTextColor="#9E8D77"
@@ -1717,7 +1777,7 @@ export default function PosScreen() {
                       (currentDetail.ClassSalesType !== 'P' && currentDetail.ClassSalesType !== 'B' && (currentDetail.Class || '').toUpperCase() !== 'P') && styles.readonlyInputStyle
                     ]}
                     value={currentDetail.PCS}
-                    onChangeText={(text) => updateDetail('PCS', text)}
+                    onChangeText={(text) => updateDetail('PCS', text.replace(/[^0-9]/g, ''))}
                     editable={currentDetail.ClassSalesType === 'P' || currentDetail.ClassSalesType === 'B' || (currentDetail.Class || '').toUpperCase() === 'P'}
                     keyboardType="numeric"
                     placeholder="1"
@@ -1731,7 +1791,7 @@ export default function PosScreen() {
                   <TextInput
                     style={[styles.imageMatchedInput, { textAlign: 'right' }]}
                     value={currentDetail.SMC}
-                    onChangeText={(text) => updateDetail('SMC', text)}
+                    onChangeText={(text) => updateDetail('SMC', text.replace(/[^0-9.]/g, ''))}
                     keyboardType="numeric"
                     placeholder=""
                     placeholderTextColor="#9E8D77"

@@ -75,6 +75,7 @@ export default function PurchaseScreen() {
     BillClose: 'N',
     TranType: '',
     TotalWeight24K: '0',
+    SplCategory: '',
   });
 
   const [details, setDetails] = useState<any[]>([]);
@@ -418,6 +419,7 @@ export default function PurchaseScreen() {
           BillClose: h.BillClose || 'N',
           TranType: h.TranType || '',
           TotalWeight24K: (h.TotalWeight24K || 0).toString(),
+          SplCategory: h.SplCategory || '',
         }));
 
         if (detailJson.details && detailJson.details.length > 0) {
@@ -476,10 +478,13 @@ export default function PurchaseScreen() {
 
   const fetchCatalogue = async () => {
     try {
-      const res = await fetch(`${API_URL}/catalogue/lov/catalogue`);
+      const jsNo = headerState.JobSheetNo ? encodeURIComponent(headerState.JobSheetNo.trim()) : '';
+      const url = jsNo 
+        ? `${API_URL}/catalogue/lov/catalogue?jobSheetNo=${jsNo}` 
+        : `${API_URL}/catalogue/lov/catalogue`;
+      const res = await fetch(url);
       const json = await res.json();
       if (json.success) {
-        // If JobSheet details are available, filter catalogue items that belong to the job sheet if possible
         const validCatalogues = json.data;
         openLov('Select Catalogue', validCatalogues, ['CatalogueCode', 'CatalogueName', 'CategoryCode', 'GoldLoss'], (item) => {
           applySelectedCatalogue(item);
@@ -712,7 +717,9 @@ export default function PurchaseScreen() {
     const trimmed = (sizeCode || '').trim();
     if (!trimmed) return;
     try {
-      const res = await fetch(`${API_URL}/size`);
+      const catCode = (currentDetail.CategoryCode || '').trim();
+      const url = catCode ? `${API_URL}/size?category=${encodeURIComponent(catCode)}` : `${API_URL}/size`;
+      const res = await fetch(url);
       const json = await res.json();
       if (json.success && Array.isArray(json.data)) {
         const found = json.data.find((s: any) => {
@@ -737,6 +744,9 @@ export default function PurchaseScreen() {
     if (isNaN(num)) return;
     const formatted = num.toFixed(2);
     
+    // Validate inventory weight against catalogue weight on weight blur
+    checkWtPCS(num);
+
     // Auto fetch GoldLoss by weight
     let newGoldLoss = currentDetail.GoldLoss;
     if (num > 0) {
@@ -763,10 +773,25 @@ export default function PurchaseScreen() {
 
   const fetchCategories = async () => {
     try {
-      const res = await fetch(`${API_URL}/category`);
+      const jsNo = headerState.JobSheetNo ? encodeURIComponent(headerState.JobSheetNo.trim()) : '';
+      const url = jsNo ? `${API_URL}/category?jobSheetNo=${jsNo}` : `${API_URL}/category`;
+      const res = await fetch(url);
       const json = await res.json();
       if (json.success) {
-        openLov('Select Category', json.data, ['CategoryCode', 'CategoryName', 'ClassCode'], (item) => {
+        // If jobSheetDetails has items, filter categories belonging to this jobsheet
+        let filteredCats = json.data;
+        if (jobSheetDetails.length > 0) {
+          const allowedCodes = new Set(
+            jobSheetDetails.map(j => (j.CategoryCode || '').trim().toUpperCase())
+          );
+          const matched = json.data.filter((c: any) =>
+            allowedCodes.has((c.CategoryCode || '').trim().toUpperCase())
+          );
+          if (matched.length > 0) {
+            filteredCats = matched;
+          }
+        }
+        openLov('Select Category', filteredCats, ['CategoryCode', 'CategoryName', 'ClassCode'], (item) => {
           applySelectedCategory(item.CategoryCode || '', item);
         });
       }
@@ -792,7 +817,9 @@ export default function PurchaseScreen() {
 
   const fetchSizes = async () => {
     try {
-      const res = await fetch(`${API_URL}/size`);
+      const catCode = (currentDetail.CategoryCode || '').trim();
+      const url = catCode ? `${API_URL}/size?category=${encodeURIComponent(catCode)}` : `${API_URL}/size`;
+      const res = await fetch(url);
       const json = await res.json();
       if (json.success) {
         openLov('Select Size', json.data, ['SizeCode', 'Remarks'], (item) => {
@@ -943,7 +970,7 @@ export default function PurchaseScreen() {
       return false;
     }
     const weightVal = parseFloat(currentDetail.Weight) || 0;
-    if (salesPCS) {
+    if (currentDetail.PurchaseType === 'P' || currentDetail.PurchaseType === 'B' || salesPCS) {
       if (weightVal < 0) {
         showToast("Invalid weight!", "error");
         return false;
@@ -955,13 +982,18 @@ export default function PurchaseScreen() {
       }
     }
     const costPerGramVal = parseFloat(currentDetail.CostPerGram) || 0;
-    if (costPerGramVal <= 0) {
+    if (currentDetail.PurchaseType !== 'P' && costPerGramVal <= 0) {
       showToast("Invalid cost per gram!", "error");
       return false;
     }
     const pcsVal = parseInt(currentDetail.PCS, 10) || 0;
     if (pcsVal < 1) {
       showToast("Invalid pcs!", "error");
+      return false;
+    }
+    const stoneWeightVal = parseFloat(currentDetail.StoneWeight) || 0;
+    if (stoneWeightVal > 0 && weightVal > 0 && stoneWeightVal >= weightVal) {
+      showToast("Stone weight cannot exceed total weight!", "error");
       return false;
     }
 
@@ -996,33 +1028,51 @@ export default function PurchaseScreen() {
     return true;
   };
 
-  // ================= CHECK WEIGHT / PCS (fncCheckWtPCS in purchase.txt) =================
-  const checkWtPCS = (): boolean => {
+  // ================= CHECK WEIGHT / PCS (fncCheckWtPCS in frmPurchase.vb) =================
+  const checkWtPCS = (customWeight?: number): boolean => {
     const catCode = (currentDetail.CatalogueCode || '').trim();
-    const currWt = (parseFloat(currentDetail.Weight) || 0) - (parseFloat(currentDetail.StoneWeight) || 0);
+    if (!catCode) return true;
+
+    const inputWeight = customWeight !== undefined ? customWeight : (parseFloat(currentDetail.Weight) || 0);
+    const currNetWt = inputWeight - (parseFloat(currentDetail.StoneWeight) || 0);
+    const currPCS = parseInt(currentDetail.PCS, 10) || 1;
 
     // Sum previous lines for this catalogue
-    let totalWt = currWt;
+    let totalWt = currNetWt;
+    let totalPCS = currPCS;
     details.forEach((d, idx) => {
       if (selectedIndex !== null && idx === selectedIndex) return; // skip currently edited line
       if ((d.CatalogueCode || '').trim().toUpperCase() === catCode.toUpperCase()) {
         const netW = (parseFloat(d.Weight) || 0) - (parseFloat(d.StoneWeight) || 0);
         totalWt += netW;
+        totalPCS += (parseInt(d.PCS, 10) || 1);
       }
     });
 
     // Lookup max weight from JobSheetDetail
     const jsDetail = jobSheetDetails.find(j => (j.CatalogueCode || '').trim().toUpperCase() === catCode.toUpperCase());
     if (jsDetail) {
-      const maxWt = parseFloat(jsDetail.Weight) || 0;
-      // Allow 5% tolerance as in purchase.txt (dPurWtVarPerc default 5%)
-      const allMaxWt = maxWt + (maxWt * 0.05);
+      const maxWt = parseFloat(jsDetail.Weight ?? jsDetail.weight ?? 0) || 0;
+      const maxPCS = parseInt(jsDetail.PCS ?? jsDetail.Pcs ?? jsDetail.pcs ?? 0, 10) || 0;
+
+      // Check special category flag from header
+      const isSplCategory = String(headerState.Remarks || '').toUpperCase() === 'Y' || (headerState as any).SplCategory === 'Y';
+      // Tolerance: 100% for SplCategory, otherwise 0% (or dPurWtVarPerc default 0-5%)
+      const allMaxWt = isSplCategory ? (maxWt + (maxWt * 1.0)) : maxWt;
 
       if (maxWt > 0 && totalWt > allMaxWt) {
         showToast(
-          `Notice: Inventory Weight(${totalWt.toFixed(2)} gm) exceeds the Catalogue Weight(${maxWt.toFixed(2)} gm)!`,
-          "info"
+          `Inventory Weight(${totalWt.toFixed(2)} gm) exceeds the Catalogue Weight(${maxWt.toFixed(2)} gm)!`,
+          "error"
         );
+        return false;
+      }
+
+      if (currentDetail.PurchaseType === 'P') {
+        if (maxPCS > 0 && totalPCS > maxPCS) {
+          showToast("Inventory pieces exceed the total pieces of the Catalogue!", "error");
+          return false;
+        }
       }
     }
 
@@ -1084,7 +1134,8 @@ export default function PurchaseScreen() {
             if (billNo && invCode) {
               try {
                 setLoading(true);
-                const res = await fetch(`${API_URL}/purchase/${encodeURIComponent(billNo)}/item/${encodeURIComponent(invCode)}`, {
+                const supCode = headerState.SupplierCode?.trim() || "";
+                const res = await fetch(`${API_URL}/purchase/${encodeURIComponent(billNo)}/item/${encodeURIComponent(invCode)}?supplierCode=${encodeURIComponent(supCode)}`, {
                   method: 'DELETE'
                 });
                 const json = await res.json();
@@ -1094,9 +1145,9 @@ export default function PurchaseScreen() {
                   showAlert("Deletion Error", json.message || "Failed to delete item from database");
                   return;
                 }
-              } catch (err) {
+              } catch (err: any) {
                 setLoading(false);
-                showAlert("Server Error", "Could not connect to server to delete item");
+                showAlert("Server Error", err?.message || "Could not connect to server to delete item");
                 return;
               }
             }
@@ -1195,24 +1246,6 @@ export default function PurchaseScreen() {
 
     if (!headerState.PayableGold && !headerState.PayableCash) {
       showToast("Select payment type.", "error");
-      return;
-    }
-
-    const tealPercent = parseFloat(headerState.TaelPercent) || 0;
-    if (tealPercent <= 0) {
-      showToast("Enter TEAL Percent.", "error");
-      return;
-    }
-
-    const tealVal = parseFloat(headerState.TaelValue) || 0;
-    if (tealVal <= 0) {
-      showToast("Enter teal.", "error");
-      return;
-    }
-
-    const costPerGramVal = parseFloat(headerState.TaelCostPerGram) || 0;
-    if (costPerGramVal <= 0) {
-      showToast("Enter cost per gram.", "error");
       return;
     }
 
@@ -1352,6 +1385,7 @@ export default function PurchaseScreen() {
       BillClose: 'N',
       TranType: '',
       TotalWeight24K: '0',
+      SplCategory: '',
     });
     setDetails([]);
     setJobSheetDetails([]);
@@ -1650,18 +1684,11 @@ export default function PurchaseScreen() {
                   <TextInput
                     style={[
                       styles.input,
-                      { flex: 0.8, minWidth: 90 },
-                      isFormLocked && styles.readonlyInput
+                      styles.readonlyInput,
+                      { flex: 0.8, minWidth: 90 }
                     ]}
                     value={headerState.Rate}
-                    onChangeText={(t) => updateHeader('Rate', t)}
-                    onBlur={() => {
-                      if ((parseFloat(headerState.Rate) || 0) <= 0) {
-                        showToast('Enter currency rate.', 'error');
-                      }
-                    }}
-                    keyboardType="numeric"
-                    editable={!isFormLocked}
+                    editable={false}
                   />
                 </View>
 
@@ -2145,8 +2172,16 @@ export default function PurchaseScreen() {
                         onChangeText={(t) => updateDetail('PMC', t)}
                         onBlur={() => {
                           const val = parseFloat(currentDetail.PMC);
-                          if (!isNaN(val)) {
-                            updateDetail('PMC', val.toFixed(2));
+                          const formattedPMC = !isNaN(val) ? val.toFixed(2) : '0.00';
+                          if (autoSMC) {
+                            const calculatedSMC = (parseFloat(formattedPMC) * 4).toFixed(2);
+                            setCurrentDetail((prev: any) => ({
+                              ...prev,
+                              PMC: formattedPMC,
+                              SMC: calculatedSMC
+                            }));
+                          } else {
+                            updateDetail('PMC', formattedPMC);
                           }
                         }}
                         keyboardType="numeric"
@@ -2353,7 +2388,13 @@ export default function PurchaseScreen() {
                         onChangeText={(t) => updateDetail('StoneWeight', t)}
                         onBlur={() => {
                           const val = parseFloat(currentDetail.StoneWeight);
-                          if (!isNaN(val)) updateDetail('StoneWeight', val.toFixed(2));
+                          if (!isNaN(val)) {
+                            const wt = parseFloat(currentDetail.Weight) || 0;
+                            if (wt > 0 && val >= wt) {
+                              showToast("Stone weight cannot exceed total weight!", "error");
+                            }
+                            updateDetail('StoneWeight', val.toFixed(2));
+                          }
                         }}
                         keyboardType="numeric"
                       />

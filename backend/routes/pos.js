@@ -207,7 +207,9 @@ router.post("/", async (req, res) => {
       salesTypeStr = 'INSTALLMENT';
     }
 
-    // Calculate aggregated detail values
+    const reqPaidAmt = parseFloat(req.body.paidAmount !== undefined ? req.body.paidAmount : header.GrandTotal) || 0;
+    const reqBalanceAmt = parseFloat(req.body.balance !== undefined ? req.body.balance : header.BalanceAmt) || 0;
+    const reqCommissionAmt = parseFloat(req.body.commission !== undefined ? req.body.commission : header.Commission) || 0;
     let totalWeight = 0;
     let totalStoneWeight = 0;
     let totalGoldLoss = 0;
@@ -274,14 +276,14 @@ router.post("/", async (req, res) => {
           .input("NetDiscount", sql.Numeric(18, 2), parseFloat(header.NetDiscount) || 0)
           .input("Discount", sql.Numeric(18, 2), parseFloat(header.Discount) || 0)
           .input("NetTotal", sql.Numeric(18, 2), parseFloat(header.GrandTotal) || 0)
-          .input("PaidAmt", sql.Numeric(18, 2), parseFloat(header.GrandTotal) || 0)
-          .input("BalanceAmt", sql.Numeric(18, 2), parseFloat(header.BalanceAmt) || 0)
+          .input("PaidAmt", sql.Numeric(18, 2), reqPaidAmt)
+          .input("BalanceAmt", sql.Numeric(18, 2), reqBalanceAmt)
           .input("TotalValue", sql.Numeric(18, 2), parseFloat(header.TotalSalesAmt) || 0)
           .input("TotalCost", sql.Numeric(18, 2), totalCost || parseFloat(header.TotalCost) || 0)
           .input("TradeInAmt", sql.Numeric(18, 2), tradeInAmt || parseFloat(header.TradeInAmt) || 0)
           .input("DepositAmt", sql.Numeric(18, 2), parseFloat(header.DepositAmt) || 0)
           .input("InsAgreementNo", sql.VarChar, header.InsAgreementNo || "")
-          .input("Commission", sql.Numeric(18, 2), parseFloat(header.Commission) || 0)
+          .input("Commission", sql.Numeric(18, 2), reqCommissionAmt)
           .input("Remarks", sql.VarChar, header.Remarks || "")
           .input("TradeInGst", sql.Numeric(18, 2), tradeInGst || parseFloat(header.TradeInGst) || 0)
           .input("eTRSType", sql.VarChar, eTRSTypeChar)
@@ -336,8 +338,9 @@ router.post("/", async (req, res) => {
       addField("NetDiscount", sql.Numeric(18, 2), parseFloat(header.NetDiscount) || 0);
       addField("Discount", sql.Numeric(18, 2), parseFloat(header.Discount) || 0);
       addField("NetTotal", sql.Numeric(18, 2), parseFloat(header.GrandTotal) || 0);
-      addField("PaidAmt", sql.Numeric(18, 2), parseFloat(header.GrandTotal) || 0);
-      addField("BalanceAmt", sql.Numeric(18, 2), parseFloat(header.BalanceAmt) || 0);
+      addField("PaidAmt", sql.Numeric(18, 2), reqPaidAmt);
+      addField("BalanceAmt", sql.Numeric(18, 2), reqBalanceAmt);
+      addField("Commission", sql.Numeric(18, 2), reqCommissionAmt);
       addField("TotalValue", sql.Numeric(18, 2), parseFloat(header.TotalSalesAmt) || 0);
       addField("TotalCost", sql.Numeric(18, 2), totalCost || 0);
       addField("TradeInAmt", sql.Numeric(18, 2), tradeInAmt || 0);
@@ -417,7 +420,7 @@ router.post("/", async (req, res) => {
             .input("InvoiceNo", sql.VarChar, invNo)
             .input("InventoryCode", sql.VarChar, d.InventoryCode || "")
             .input("Description", sql.VarChar, d.Description || "")
-            .input("LocationCode", sql.VarChar, header.LocationCode || "HQ")
+            .input("LocationCode", sql.VarChar, header.LocationCode || locCode)
             .input("Weight", sql.Numeric(18, 3), parseFloat(d.Weight) || 0)
             .input("StoneWeight", sql.Numeric(18, 3), parseFloat(d.StoneWeight) || 0)
             .input("GoldLoss", sql.Numeric(18, 3), parseFloat(d.GoldLoss) || 0)
@@ -433,7 +436,7 @@ router.post("/", async (req, res) => {
             .input("TotalCost", sql.Numeric(18, 2), parseFloat(d.TotalCost) || 0)
             .input("Commission", sql.Numeric(18, 2), lineCommission)
             .input("Remarks", sql.VarChar, d.Remarks || header.Remarks || "")
-            .input("DailyClassRate", sql.Numeric(18, 2), parseFloat(d.DailyClassRate) || 0)
+            .input("DailyClassRate", sql.Numeric(18, 2), parseFloat(d.DailyClassRate || d.DailyRate || d.CostPerGram) || 0)
             .input("SortCode", sql.Int, i + 1)
             .input("SalesType", sql.VarChar, d.SalesType || salesTypeStr)
             .input("TradeInGst", sql.Numeric(18, 2), parseFloat(d.TradeInGst) || 0)
@@ -472,11 +475,13 @@ router.post("/", async (req, res) => {
         addDetField("InvoiceNo", sql.VarChar, invNo);
         addDetField("InventoryCode", sql.VarChar, d.InventoryCode || "");
         addDetField("Description", sql.VarChar, d.Description || "");
-        addDetField("LocationCode", sql.VarChar, header.LocationCode || "HQ");
+        addDetField("LocationCode", sql.VarChar, header.LocationCode || locCode);
         addDetField("Weight", sql.Numeric(18, 3), parseFloat(d.Weight) || 0);
         addDetField("StoneWeight", sql.Numeric(18, 3), parseFloat(d.StoneWeight) || 0);
         addDetField("GoldLoss", sql.Numeric(18, 3), parseFloat(d.GoldLoss) || 0);
         addDetField("Rate", sql.Numeric(18, 2), parseFloat(d.CostPerGram) || 0);
+        addDetField("DailyClassRate", sql.Numeric(18, 2), parseFloat(d.DailyClassRate || d.DailyRate || d.CostPerGram) || 0);
+        addDetField("DailyRate", sql.Numeric(18, 2), parseFloat(d.DailyRate || d.DailyClassRate || d.CostPerGram) || 0);
         addDetField("SMC", sql.Numeric(18, 2), parseFloat(d.SMC) || 0);
         addDetField("PCS", sql.Numeric(18, 0), pcsVal);
         addDetField("GST", sql.Numeric(18, 2), lineGst);
@@ -580,13 +585,32 @@ router.post("/", async (req, res) => {
             @PCS, @Weight, @PMC, @CostPerGram, @TotalCost, @CustomerCode, @CreateUser, GETDATE()
           )
         `);
+
+      // 3. RFID item status update (matching RFIDItemStatusUpdate: ToDisplayInStockTake = '0', Status = 'SALES')
+      try {
+        await new sql.Request(transaction)
+          .input("ItemCode", sql.VarChar, d.InventoryCode)
+          .query(`
+            UPDATE Item 
+            SET ToDisplayInStockTake = '0', Status = 'SALES' 
+            WHERE ItemCode = @ItemCode
+          `);
+      } catch (rfidErr) {
+        // RFID database or Item table is optional / secondary in certain configurations
+      }
     }
 
     // Insert Payment Modes
-    const payModes = req.body.payModes || [{ PayMode: 'CASH', Amount: header.GrandTotal }];
+    const rawPayModes = req.body.payModes || req.body.paymodeDetails || req.body.payments || [{ PayMode: 'CASH', Amount: header.GrandTotal }];
+    const payModes = Array.isArray(rawPayModes) ? rawPayModes : [];
     for (let i = 0; i < payModes.length; i++) {
         const pm = payModes[i];
-        if (parseFloat(pm.Amount) > 0) {
+        const pmMode = pm.PayMode || pm.paymode || 'CASH';
+        const pmAmt = parseFloat(pm.Amount !== undefined ? pm.Amount : pm.amount) || 0;
+        const pmComm = parseFloat(pm.Commission !== undefined ? pm.Commission : pm.commission) || 0;
+        const pmSlip = pm.SlipNo || pm.slipNo || pm.remarks || "";
+
+        if (pmAmt > 0) {
             let pmSuccess = false;
             if (!useDirectInsert) {
               try {
@@ -594,10 +618,10 @@ router.post("/", async (req, res) => {
                 await pmReq
                     .input("InvoiceNo", sql.VarChar, invNo)
                     .input("Date", sql.SmallDateTime, header.InvoiceDate || curDate)
-                    .input("Paymode", sql.VarChar, pm.PayMode)
-                    .input("Amount", sql.Numeric(18, 2), parseFloat(pm.Amount))
-                    .input("Commission", sql.Numeric(18, 2), parseFloat(pm.Commission) || 0)
-                    .input("SlipNo", sql.VarChar, pm.SlipNo || "")
+                    .input("Paymode", sql.VarChar, pmMode)
+                    .input("Amount", sql.Numeric(18, 2), pmAmt)
+                    .input("Commission", sql.Numeric(18, 2), pmComm)
+                    .input("SlipNo", sql.VarChar, pmSlip)
                     .input("SalesType", sql.VarChar, salesTypeStr)
                     .input("UserID", sql.VarChar, sysUser)
                     .execute("sp_PayModeDetail");
@@ -641,12 +665,12 @@ router.post("/", async (req, res) => {
               }
 
               if (payModeCols.includes("paymode")) {
-                addPmField("PayMode", sql.VarChar, pm.PayMode);
+                addPmField("PayMode", sql.VarChar, pmMode);
               }
 
-              addPmField("Amount", sql.Numeric(18, 2), parseFloat(pm.Amount) || 0);
-              addPmField("Commission", sql.Numeric(18, 2), parseFloat(pm.Commission) || 0);
-              addPmField("SlipNo", sql.VarChar, pm.SlipNo || "");
+              addPmField("Amount", sql.Numeric(18, 2), pmAmt);
+              addPmField("Commission", sql.Numeric(18, 2), pmComm);
+              addPmField("SlipNo", sql.VarChar, pmSlip);
               addPmField("SalesType", sql.VarChar, salesTypeStr);
 
               if (payModeCols.includes("createdate")) {
@@ -714,6 +738,91 @@ router.post("/", async (req, res) => {
         }
       } catch (flexiErr) {
         console.warn("Flexi subscription closure update warning:", flexiErr.message);
+      }
+    }
+
+    // ================= MEMBER TRANSACTION SAVE (Matching ClsSales.MemberTransactionSave) =================
+    if (header.CustomerType === 'M' || (String(header.CustomerCode).trim().toUpperCase() === 'CASH' && header.MemberCode && String(header.MemberCode).trim() !== '')) {
+      try {
+        const memberCode = (header.MemberCode || '').trim();
+        if (memberCode) {
+          const discountAmt = parseFloat(header.Discount) || 0;
+          const netDiscountAmt = parseFloat(header.NetDiscount) || 0;
+          const netTot = parseFloat(header.GrandTotal) || 0;
+          const memReq = new sql.Request(transaction);
+          await memReq
+            .input("MemberCode", sql.VarChar, memberCode)
+            .input("InvoiceNo", sql.VarChar, invNo)
+            .input("Date", sql.SmallDateTime, header.InvoiceDate || curDate)
+            .input("DiscountSalesAmount", sql.Numeric(18, 2), discountAmt)
+            .input("MemberDiscount", sql.Numeric(18, 2), netDiscountAmt)
+            .input("NetTotal", sql.Numeric(18, 2), netTot)
+            .input("LocationCode", sql.VarChar, header.LocationCode || "HQ")
+            .input("UserID", sql.VarChar, sysUser)
+            .execute("sp_MemberTransaction");
+        }
+      } catch (memErr) {
+        console.warn("MemberTransactionSave sp_MemberTransaction warning:", memErr.message);
+      }
+    }
+
+    // ================= TRADE-IN SALES UPDATE (Matching fncUpdateTradeInRefNo) =================
+    if (header.TradeInRefNo || salesTypeStr === 'TRADEIN') {
+      try {
+        const tradeInRefNo = (header.TradeInRefNo || '').trim();
+        if (tradeInRefNo) {
+          const tiInvNo = `TI-${invNo}`;
+          const tiOldInvNo = `TI-${tradeInRefNo}`;
+          await new sql.Request(transaction)
+            .input("NewInvNo", sql.VarChar, invNo)
+            .input("NewTIInvNo", sql.VarChar, tiInvNo)
+            .input("TradeInRefNo", sql.VarChar, tradeInRefNo)
+            .input("OldTIInvNo", sql.VarChar, tiOldInvNo)
+            .query(`
+              UPDATE tblTradeInHeader 
+              SET InventoryCode = @NewTIInvNo, InvoiceNo = @NewInvNo 
+              WHERE InvoiceNo = @TradeInRefNo;
+
+              UPDATE tblTradeInDetail 
+              SET InventoryCode = @NewTIInvNo 
+              WHERE InventoryCode = @OldTIInvNo;
+            `);
+        }
+      } catch (tiErr) {
+        console.warn("TradeInRefNo update warning:", tiErr.message);
+      }
+    }
+
+    // ================= INSTALLMENT REF UPDATE (Matching fncUpdateInstallmentRefNo) =================
+    if (header.InsAgreementNo && String(header.InsAgreementNo).trim() !== '') {
+      try {
+        const insAgrNo = String(header.InsAgreementNo).trim();
+        await new sql.Request(transaction)
+          .input("InvoiceNo", sql.VarChar, invNo)
+          .input("InsAgreementNo", sql.VarChar, insAgrNo)
+          .query(`
+            UPDATE tblInstallmentHeader 
+            SET InvoiceNo = @InvoiceNo 
+            WHERE InsAgreementNo = @InsAgreementNo
+          `);
+      } catch (insErr) {
+        console.warn("InstallmentHeader update warning:", insErr.message);
+      }
+    }
+
+    // ================= COST CHANGE LOG SAVE (Matching ClsSales.fncUpdateCostChangeLogSave) =================
+    if (header.CostChangeSalesman && String(header.CostChangeSalesman).trim() !== '') {
+      try {
+        const costChangeReq = new sql.Request(transaction);
+        await costChangeReq
+          .input("InvoiceNo", sql.VarChar, invNo)
+          .input("InvoiceDate", sql.SmallDateTime, header.InvoiceDate || curDate)
+          .input("SalesmanName", sql.VarChar, header.SalesManName || header.SalesManCode || "")
+          .input("CostChangeSalesmanName", sql.VarChar, String(header.CostChangeSalesman).trim())
+          .input("UserID", sql.VarChar, sysUser)
+          .execute("sp_CostChangeLogSave");
+      } catch (cclErr) {
+        console.warn("sp_CostChangeLogSave warning:", cclErr.message);
       }
     }
 
@@ -848,7 +957,7 @@ router.delete("/:invoiceNo", async (req, res) => {
         `);
     } catch (_) {}
 
-    // 6. Delete bill headers
+    // 6. Delete bill records
     const delSalesReq = new sql.Request(transaction);
     await delSalesReq
       .input("InvoiceNo", sql.VarChar, invoiceNo)
@@ -891,24 +1000,53 @@ router.get("/lov/market-rate/:classCode", async (req, res) => {
 });
 
 // ================= GET ALL MARKET RATES =================
+// Matches VB.NET frmGPOS.vb: subShowClassMarketRate (SELECT * FROM tblClass where DisplayCost = 'Y')
+// and tblClassRate for current date if available
 router.get("/lov/market-rates", async (req, res) => {
     try {
         const pool = req.pool;
         const curDate = new Date().toISOString().slice(0, 10);
         
+        // As per subShowClassMarketRate in frmGPOS.vb:
+        // Reads from tblClass (where DisplayCost = 'Y' or all active classes)
+        // and checks if tblClassRate has a rate for today; otherwise uses tblClass.Rate
         const result = await pool.request()
             .input("SalesDate", sql.Date, curDate)
             .query(`
-                SELECT ClassCode, ISNULL(Rate, 0.00) as Rate
-                FROM tblClassRate 
-                WHERE @SalesDate BETWEEN FromDate AND ToDate
-                ORDER BY ClassCode
+                SELECT 
+                    c.ClassCode,
+                    ISNULL(cr.Rate, ISNULL(c.Rate, 0.00)) AS Rate
+                FROM tblClass c
+                LEFT JOIN tblClassRate cr ON c.ClassCode = cr.ClassCode AND @SalesDate BETWEEN cr.FromDate AND cr.ToDate
+                WHERE ISNULL(c.DisplayCost, 'Y') = 'Y'
+                ORDER BY c.ClassCode ASC
             `);
+
+        if (result.recordset.length === 0) {
+            // Fallback to all from tblClass
+            const fallback = await pool.request().query(`
+                SELECT ClassCode, ISNULL(Rate, 0.00) AS Rate
+                FROM tblClass
+                ORDER BY ClassCode ASC
+            `);
+            return res.status(200).json({ success: true, data: fallback.recordset });
+        }
             
         return res.status(200).json({ success: true, data: result.recordset });
     } catch (err) {
         console.error("🔥 All Market Rates ERROR:", err);
-        return res.status(500).json({ success: false, message: "Server Error", error: err.message });
+        try {
+            // Fallback direct query on tblClass
+            const pool = req.pool;
+            const fallback = await pool.request().query(`
+                SELECT ClassCode, ISNULL(Rate, 0.00) AS Rate
+                FROM tblClass
+                ORDER BY ClassCode ASC
+            `);
+            return res.status(200).json({ success: true, data: fallback.recordset });
+        } catch (fbErr) {
+            return res.status(500).json({ success: false, message: "Server Error", error: err.message });
+        }
     }
 });
 
@@ -1035,7 +1173,13 @@ router.get("/inventoryDetail", async (req, res) => {
 
     const item = result.recordset[0];
 
-    // 1. Check if already sold
+    // 1. Check stock on hand (Matching frmGPOS.vb: Val(dsInv.Tables(0).Rows(0)("QtyOnHand")) < 1)
+    const qtyOnHand = item.QtyOnHand !== null && item.QtyOnHand !== undefined ? parseFloat(item.QtyOnHand) : null;
+    if (qtyOnHand !== null && qtyOnHand < 1) {
+      return res.status(200).json({ success: false, message: "No Stock for this Inventory!" });
+    }
+
+    // 2. Check if already sold
     const isSold = (item.SalesBillNo && item.SalesBillNo.trim() !== '' && item.SalesBillNo.trim() !== '0');
     if (isSold) {
       let dateStr = '';
@@ -1049,11 +1193,6 @@ router.get("/inventoryDetail", async (req, res) => {
         success: false,
         message: `Item Already Sold for Invoice ${item.SalesBillNo || ''}${dateStr}`.trim()
       });
-    }
-
-    // 2. Check stock on hand (only if tblInventoryStock has a record with QtyOnHand <= 0 and item has been sold)
-    if (item.QtyOnHand !== null && parseFloat(item.QtyOnHand) <= 0 && parseFloat(item.QtySold) > 0) {
-      return res.status(200).json({ success: false, message: "No Stock for this Inventory!" });
     }
 
     // 3. Location check
@@ -1246,30 +1385,52 @@ router.get("/audit/stats", async (req, res) => {
     try {
         const pool = req.pool;
 
-        let locationCode = 'HQ';
+        let locationCode = '';
+        let terminalCode = '';
         let rawNextInvoiceNo = '';
 
-        // 1. Fetch LocationCode and NextInvoice / NextInvoiceNo from tblCompany
+        // 1. Fetch TerminalCode and LocationCode from tblTerminal
+        try {
+            const termRes = await pool.request().query(`
+                SELECT TOP 1 TerminalCode, LocationCode FROM tblTerminal ORDER BY TerminalCode ASC
+            `);
+            if (termRes.recordset.length > 0) {
+                const term = termRes.recordset[0];
+                if (term.TerminalCode) terminalCode = String(term.TerminalCode).trim();
+                if (term.LocationCode) locationCode = String(term.LocationCode).trim();
+            }
+        } catch (te) {}
+
+        // 2. Fetch LocationCode and NextInvoice / NextInvoiceNo from tblCompany
         try {
             const compRes = await pool.request().query(`
                 SELECT TOP 1 LocationCode, NextInvoice, NextInvoiceNo, NextSalesNo FROM tblCompany
             `);
             if (compRes.recordset.length > 0) {
                 const comp = compRes.recordset[0];
-                if (comp.LocationCode) locationCode = String(comp.LocationCode).trim();
+                if (!locationCode && comp.LocationCode) locationCode = String(comp.LocationCode).trim();
                 rawNextInvoiceNo = comp.NextInvoice || comp.NextInvoiceNo || comp.NextSalesNo || '';
             }
         } catch (ce) {}
 
-        // 2. If not found in tblCompany, check tblInvoiceNo
+        // Fallback default for LocationCode and TerminalCode if empty in DB
+        if (!locationCode) locationCode = 'HQ';
+        if (!terminalCode) terminalCode = 'T1';
+
+        // 3. If not found in tblCompany, check tblInvoiceNo
         if (!rawNextInvoiceNo) {
             try {
                 const nextInvResult = await pool.request().query(`
-                    SELECT TOP 1 LocationCode, NextInvoice FROM tblInvoiceNo WHERE Terminal = 'T1' OR LocationCode = '${locationCode}'
+                    SELECT TOP 1 LocationCode, Terminal, NextInvoice FROM tblInvoiceNo 
+                    WHERE Terminal = '${terminalCode}' OR LocationCode = '${locationCode}'
+                    ORDER BY NextInvoice DESC
                 `);
                 if (nextInvResult.recordset.length > 0 && nextInvResult.recordset[0].NextInvoice) {
                     if (nextInvResult.recordset[0].LocationCode) {
                         locationCode = String(nextInvResult.recordset[0].LocationCode).trim();
+                    }
+                    if (nextInvResult.recordset[0].Terminal) {
+                        terminalCode = String(nextInvResult.recordset[0].Terminal).trim();
                     }
                     rawNextInvoiceNo = nextInvResult.recordset[0].NextInvoice;
                 }
@@ -1342,7 +1503,7 @@ router.get("/audit/stats", async (req, res) => {
             success: true,
             data: {
                 LocationCode: locationCode,
-                TerminalCode: 'T1',
+                TerminalCode: terminalCode,
                 NextInvoiceNo: formattedNextInvoiceNo,
                 LastSalesMan: lastBill.SalesManName || lastBill.SalesManCode || '0',
                 LastBillNo: formattedLastBillNo || lastBill.InvoiceNo || '0',

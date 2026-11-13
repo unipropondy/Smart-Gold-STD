@@ -26,13 +26,24 @@ async function ensureTableExists(pool) {
   }
 }
 
-// GET all sizes
+// GET all sizes (supports ?category= filter matching VB.NET frmPurchase.vb)
 router.get("/", async (req, res) => {
   try {
     const pool = req.pool;
     await ensureTableExists(pool);
 
-    const result = await pool.request().query("SELECT * FROM tblSize ORDER BY SizeCode ASC");
+    const { category } = req.query;
+    let query = "SELECT * FROM tblSize";
+    const request = pool.request();
+
+    if (category && category.trim() !== "") {
+      query += " WHERE RTRIM(LTRIM(CategoryCode)) = RTRIM(LTRIM(@category))";
+      request.input("category", sql.VarChar, category.trim());
+    }
+
+    query += " ORDER BY SizeCode ASC";
+
+    const result = await request.query(query);
     res.json({ success: true, data: result.recordset });
   } catch (err) {
     console.error("Fetch Size Master Error:", err);

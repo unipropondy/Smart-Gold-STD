@@ -7,7 +7,6 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Stack, useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import {
-  Alert,
   FlatList,
   Modal,
   Platform,
@@ -110,14 +109,617 @@ export default function PurchaseReturnScreen() {
   const [loading, setLoading] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
 
-  // Confirmation Modal State (for duplicate items)
+  // Confirmation Modal State (for duplicate items or print prompt)
   const [confirmDialog, setConfirmDialog] = useState<{
     visible: boolean;
+    title?: string;
     message: string;
+    yesText?: string;
+    noText?: string;
     onConfirm: () => void;
   } | null>(null);
 
-  // LOV State
+  // Past Purchase Return LOV Modal State
+  const [pastReturnModalVisible, setPastReturnModalVisible] = useState(false);
+  const [pastReturnList, setPastReturnList] = useState<any[]>([]);
+  const [pastReturnSearch, setPastReturnSearch] = useState('');
+  const [pastReturnLoading, setPastReturnLoading] = useState(false);
+
+  // Fetch past purchase returns for selection
+  const fetchPastReturns = async () => {
+    try {
+      setPastReturnLoading(true);
+      const res = await fetch(`${API_URL}/purchasereturn/past-list`);
+      const json = await res.json();
+      if (json.success) {
+        setPastReturnList(json.data || []);
+      } else {
+        showToast(json.message || 'Failed to load past purchase returns', 'error');
+      }
+    } catch (e: any) {
+      showToast('Error loading past purchase returns', 'error');
+    } finally {
+      setPastReturnLoading(false);
+    }
+  };
+
+  const openPastReturnLookup = () => {
+    setPastReturnSearch('');
+    setPastReturnModalVisible(true);
+    fetchPastReturns();
+  };
+
+  // Print Report Handler matching rptPurchaseReturn.rpt layout
+  const handlePrintReport = async (overrideRefNo?: string) => {
+    const targetRef = (overrideRefNo || refNo || '').trim();
+    if (!targetRef) {
+      showToast('Please select or save a Purchase Return Ref No first!', 'error');
+      return;
+    }
+
+    try {
+      setLoading(true);
+      const res = await fetch(`${API_URL}/purchasereturn/print-data?returnNo=${encodeURIComponent(targetRef)}`);
+      const json = await res.json();
+
+      if (!json.success || !json.data) {
+        showToast(json.message || 'Purchase Return record not found', 'error');
+        setLoading(false);
+        return;
+      }
+
+      const { company, header, details } = json.data;
+
+      // Format Date DD/MM/YYYY
+      let formattedDate = '';
+      if (header.returnDate) {
+        const dt = new Date(header.returnDate);
+        if (!isNaN(dt.getTime())) {
+          const dd = String(dt.getDate()).padStart(2, '0');
+          const mm = String(dt.getMonth() + 1).padStart(2, '0');
+          const yyyy = dt.getFullYear();
+          formattedDate = `${dd}/${mm}/${yyyy}`;
+        }
+      }
+
+      // Calculations and totals
+      const totalCostNum = Number(header.totalValue || 0);
+      const gstNum = Number(header.totalGst || 0);
+      const netAmountNum = Number(header.netAmount || 0);
+      const totalWeightNum = Number(header.totalWeight || 0);
+      const totalPcsNum = Number(header.totalPCS || 0);
+
+      const itemsRowsHtml = details.map((d: any) => `
+        <tr>
+          <td style="width: 5%; text-align: right; padding-right: 6px;">${d.sNo}</td>
+          <td style="width: 14%; text-align: left; padding-left: 6px;">${d.inventoryCode || ''}</td>
+          <td style="width: 35%; text-align: left; padding-left: 6px;">${d.description || ''}</td>
+          <td style="width: 10%; text-align: right; padding-right: 6px;">${Number(d.weight || 0).toFixed(2)}</td>
+          <td style="width: 10%; text-align: right; padding-right: 6px;">${Number(d.goldLoss || 0).toFixed(2)}</td>
+          <td style="width: 10%; text-align: right; padding-right: 6px;">${Number(d.mc || 0).toFixed(2)}</td>
+          <td style="width: 6%; text-align: center;">${d.pcs || 1}</td>
+          <td style="width: 10%; text-align: right; padding-right: 6px;">${Number(d.amount || 0).toFixed(2)}</td>
+        </tr>
+      `).join('');
+
+      const printHtml = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <meta charset="utf-8" />
+          <title>Purchase Return - ${header.returnNo}</title>
+          <style>
+            @page {
+              size: A4 portrait;
+              margin: 0 !important;
+            }
+            * {
+              box-sizing: border-box;
+              -webkit-print-color-adjust: exact !important;
+              print-color-adjust: exact !important;
+            }
+            html, body {
+              margin: 0;
+              padding: 0;
+              background-color: #fbf9f5;
+              font-family: Cambria, Georgia, "Times New Roman", serif !important;
+              color: #3b2d17;
+              font-size: 11px;
+            }
+            .page-sheet {
+              width: 210mm;
+              min-height: 297mm;
+              margin: 15px auto;
+              background: #ffffff;
+              padding: 10mm 12mm;
+              box-sizing: border-box;
+              border: none;
+              box-shadow: 0 4px 16px rgba(0,0,0,0.06);
+              display: flex;
+              flex-direction: column;
+              justify-content: space-between;
+              font-family: Cambria, Georgia, "Times New Roman", serif !important;
+            }
+            /* HEADER SECTION (Royal Gold Styling like Master Reports) */
+            .header-row {
+              display: flex;
+              justify-content: space-between;
+              align-items: flex-start;
+              margin-bottom: 8px;
+              position: relative;
+            }
+            .header-left {
+              width: 50%;
+            }
+            .company-info {
+              font-size: 11px;
+              line-height: 1.35;
+            }
+            .company-title {
+              font-family: Cambria, Georgia, "Times New Roman", serif !important;
+              font-size: 22px;
+              font-weight: 700;
+              color: #996515;
+              letter-spacing: 1.5px;
+              text-transform: uppercase;
+              margin-bottom: 3px;
+              line-height: 1.15;
+            }
+            .company-address {
+              font-size: 11px;
+              color: #4a3b22;
+              font-weight: 600;
+              text-transform: uppercase;
+            }
+            .attn-box {
+              margin-top: 12px;
+              font-size: 11px;
+              line-height: 1.35;
+              background-color: #fffbf2;
+              border: 1px solid #d4a742;
+              border-radius: 6px;
+              padding: 8px 12px;
+              width: 95%;
+            }
+            .attn-label {
+              font-style: italic;
+              font-weight: 700;
+              color: #996515;
+              margin-bottom: 2px;
+              text-transform: uppercase;
+              font-size: 10px;
+            }
+            .supplier-title {
+              font-weight: 700;
+              color: #3b2d17;
+              font-size: 12px;
+              text-transform: uppercase;
+            }
+            .header-right {
+              width: 45%;
+              display: flex;
+              flex-direction: column;
+              align-items: flex-end;
+            }
+            .report-main-title {
+              font-family: Cambria, Georgia, "Times New Roman", serif !important;
+              font-size: 22px;
+              font-weight: 700;
+              color: #3b2d17;
+              letter-spacing: 1px;
+              text-transform: uppercase;
+              text-align: right;
+              margin-bottom: 8px;
+            }
+            .meta-table {
+              border-collapse: collapse;
+              border: 1px solid #d4a742;
+              border-radius: 6px;
+              overflow: hidden;
+              width: 220px;
+            }
+            .meta-table td {
+              border: 0.75px solid #d4a742;
+              padding: 5px 8px;
+              font-size: 11px;
+            }
+            .meta-table td.label-col {
+              background-color: #fff8e7 !important;
+              font-weight: 700;
+              color: #996515;
+              width: 44%;
+              text-transform: uppercase;
+            }
+            .meta-table td.value-col {
+              text-align: left;
+              font-weight: 700;
+              color: #3b2d17;
+              background-color: #ffffff;
+            }
+
+            .header-ornament {
+              text-align: center;
+              margin: 10px 0 14px 0;
+              color: #d4a742;
+              font-size: 15px;
+              position: relative;
+            }
+            .header-ornament::before,
+            .header-ornament::after {
+              content: "";
+              position: absolute;
+              top: 50%;
+              width: calc(50% - 20px);
+              height: 1.5px;
+              background: #d4a742;
+            }
+            .header-ornament::before {
+              left: 0;
+            }
+            .header-ornament::after {
+              right: 0;
+            }
+
+            /* Main Table (Royal Gold Master Reports Theme) */
+            .table-wrapper {
+              margin-top: 8px;
+              flex: 1;
+              display: flex;
+              flex-direction: column;
+            }
+            .data-table {
+              width: 100% !important;
+              border-collapse: collapse;
+              font-family: Cambria, Georgia, "Times New Roman", serif !important;
+              font-size: 11px;
+              border: 0.75px solid #d4a742;
+              box-sizing: border-box;
+            }
+            .data-table thead th {
+              background-color: #996515 !important;
+              color: #ffffff !important;
+              font-weight: 700 !important;
+              font-family: Cambria, Georgia, "Times New Roman", serif !important;
+              padding: 8px 6px;
+              letter-spacing: 0.3px;
+              border: 0.75px solid #d4a742;
+              font-size: 11px;
+              line-height: 1.25;
+              text-transform: uppercase !important;
+            }
+            .data-table tbody tr td {
+              padding: 6px 6px;
+              color: #3b2d17;
+              font-family: Cambria, Georgia, "Times New Roman", serif !important;
+              border: 0.75px solid #f0d9a0;
+              font-size: 11px;
+              line-height: 1.3;
+              vertical-align: middle;
+            }
+            /* Alternating Gold/Cream Rows */
+            .data-table tbody tr:nth-child(even) td {
+              background-color: #fffbf2 !important;
+            }
+            .data-table tbody tr:nth-child(odd) td {
+              background-color: #ffffff !important;
+            }
+
+            /* Footer Section */
+            .footer-section {
+              margin-top: auto;
+              padding-top: 14px;
+            }
+            .footer-divider {
+              width: 100%;
+              height: 1.5px;
+              background: #d4a742;
+              margin-bottom: 12px;
+            }
+            .footer-row {
+              display: flex;
+              justify-content: space-between;
+              align-items: flex-start;
+            }
+            .footer-left {
+              width: 48%;
+              display: flex;
+              flex-direction: column;
+              justify-content: space-between;
+              min-height: 130px;
+            }
+            .remarks-box {
+              background-color: #fffbf2;
+              border: 1px solid #d4a742;
+              border-radius: 6px;
+              padding: 8px 10px;
+              font-size: 11px;
+            }
+            .remarks-label {
+              font-weight: 700;
+              color: #996515;
+              margin-bottom: 3px;
+              text-transform: uppercase;
+            }
+            .remarks-val {
+              color: #3b2d17;
+              font-weight: 600;
+            }
+            .signatures {
+              display: flex;
+              justify-content: space-between;
+              margin-top: auto;
+              padding-top: 25px;
+            }
+            .sign-col {
+              font-size: 10px;
+              font-weight: 700;
+              color: #5c4314;
+              border-top: 1.5px solid #996515;
+              width: 44%;
+              padding-top: 5px;
+              text-align: center;
+              text-transform: uppercase;
+            }
+
+            .footer-right {
+              width: 48%;
+              display: flex;
+              flex-direction: column;
+              align-items: flex-end;
+            }
+            .totals-list {
+              width: 100%;
+              max-width: 240px;
+              margin-bottom: 12px;
+              background-color: #fffdf8;
+              border: 1px solid #d4a742;
+              border-radius: 6px;
+              padding: 6px 12px;
+            }
+            .total-line {
+              display: flex;
+              justify-content: space-between;
+              font-size: 11px;
+              padding: 3px 0;
+              color: #4a3b22;
+              font-weight: 600;
+            }
+            .total-line.bold {
+              font-weight: 700;
+              font-size: 12px;
+              color: #996515;
+              border-top: 1px dashed #d4a742;
+              margin-top: 3px;
+              padding-top: 5px;
+            }
+
+            .summary-box-table {
+              border-collapse: collapse;
+              border: 1px solid #d4a742;
+              border-radius: 6px;
+              overflow: hidden;
+              width: 200px;
+            }
+            .summary-box-table td {
+              border: 0.75px solid #d4a742;
+              padding: 5px 8px;
+              font-size: 11px;
+            }
+            .summary-box-table td.header-col {
+              background-color: #996515 !important;
+              color: #ffffff !important;
+              font-weight: 700;
+              width: 55%;
+              text-transform: uppercase;
+            }
+            .summary-box-table td.val-col {
+              text-align: right;
+              font-weight: 700;
+              color: #3b2d17;
+              background-color: #fff8e7;
+            }
+
+            .report-foot-brand {
+              text-align: center;
+              margin-top: 14px;
+              font-size: 10px;
+              color: #705832;
+              font-weight: 600;
+              letter-spacing: 0.5px;
+            }
+
+            .print-btn-bar {
+              position: fixed;
+              top: 15px;
+              right: 15px;
+              z-index: 9999;
+            }
+            .print-btn {
+              background: #996515;
+              color: #fff;
+              border: none;
+              padding: 9px 20px;
+              font-family: Cambria, Georgia, serif;
+              font-size: 12px;
+              font-weight: 700;
+              border-radius: 6px;
+              cursor: pointer;
+              box-shadow: 0 4px 12px rgba(153, 101, 21, 0.25);
+            }
+            .print-btn:hover {
+              background: #7a5408;
+            }
+            @media print {
+              .print-btn-bar {
+                display: none !important;
+              }
+              html, body {
+                background: #fff !important;
+              }
+              .page-sheet {
+                box-shadow: none !important;
+                margin: 0 !important;
+                width: 100% !important;
+                min-height: 297mm;
+                padding: 10mm 12mm !important;
+              }
+            }
+          </style>
+        </head>
+        <body>
+          <div class="print-btn-bar">
+            <button class="print-btn" onclick="window.print()">Print Report</button>
+          </div>
+
+          <div class="page-sheet">
+            <div>
+              <!-- TOP SECTION -->
+              <div class="header-row">
+                <div class="header-left">
+                  <div class="company-info">
+                    <div class="company-title">${company.name || 'SMART'}</div>
+                    <div class="company-address">${company.address1 || 'SINGAPORE'}</div>
+                    ${company.address2 ? `<div class="company-address">${company.address2}</div>` : ''}
+                  </div>
+
+                  <div class="attn-box">
+                    <div class="attn-label">Attn:</div>
+                    <div class="supplier-title">${header.supplierName || ''}</div>
+                    ${header.address1 ? `<div>${header.address1}</div>` : ''}
+                    ${header.address2 ? `<div>${header.address2}</div>` : ''}
+                  </div>
+                </div>
+
+                <div class="header-right">
+                  <div class="report-main-title">Purchase Return</div>
+                  <table class="meta-table">
+                    <tr>
+                      <td class="label-col">Date</td>
+                      <td class="value-col">${formattedDate}</td>
+                    </tr>
+                    <tr>
+                      <td class="label-col">Return No</td>
+                      <td class="value-col">${header.returnNo || ''}</td>
+                    </tr>
+                    <tr>
+                      <td class="label-col">Page</td>
+                      <td class="value-col">Page 1 of 1</td>
+                    </tr>
+                  </table>
+                </div>
+              </div>
+
+              <div class="header-ornament">◆</div>
+
+              <!-- ITEMS TABLE -->
+              <div class="table-wrapper">
+                <table class="data-table">
+                  <thead>
+                    <tr>
+                      <th style="width: 5%; text-align: center;">SNO.</th>
+                      <th style="width: 16%; text-align: left; padding-left: 8px;">INVENTORY CODE</th>
+                      <th style="width: 32%; text-align: left; padding-left: 8px;">DESCRIPTION</th>
+                      <th style="width: 10%; text-align: right; padding-right: 8px;">WEIGHT</th>
+                      <th style="width: 10%; text-align: right; padding-right: 8px;">GOLD LOSS</th>
+                      <th style="width: 10%; text-align: right; padding-right: 8px;">MC</th>
+                      <th style="width: 6%; text-align: center;">PCS</th>
+                      <th style="width: 11%; text-align: right; padding-right: 8px;">AMOUNT</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    ${itemsRowsHtml}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <!-- FOOTER TOTALS & SIGNATURES -->
+            <div class="footer-section">
+              <div class="footer-divider"></div>
+              <div class="footer-row">
+                <div class="footer-left">
+                  <div class="remarks-box">
+                    <div class="remarks-label">For</div>
+                    <div class="remarks-val">${header.remarks || 'N/A'}</div>
+                  </div>
+
+                  <div class="signatures">
+                    <div class="sign-col">Authorised Signatory</div>
+                    <div class="sign-col">Received By</div>
+                  </div>
+                </div>
+
+                <div class="footer-right">
+                  <div class="totals-list">
+                    <div class="total-line">
+                      <span>TOTAL</span>
+                      <span>$ ${totalCostNum.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                    </div>
+                    <div class="total-line">
+                      <span>GST</span>
+                      <span>$ ${gstNum.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                    </div>
+                    <div class="total-line bold">
+                      <span>NET AMOUNT</span>
+                      <span>$ ${netAmountNum.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                    </div>
+                  </div>
+
+                  <table class="summary-box-table">
+                    <tr>
+                      <td class="header-col">Total Items</td>
+                      <td class="val-col">${details.length}</td>
+                    </tr>
+                    <tr>
+                      <td class="header-col">Total Weight</td>
+                      <td class="val-col">${totalWeightNum.toFixed(2)}</td>
+                    </tr>
+                    <tr>
+                      <td class="header-col">Total PCS</td>
+                      <td class="val-col">${totalPcsNum}</td>
+                    </tr>
+                  </table>
+                </div>
+              </div>
+              <div class="report-foot-brand">*** System Generated Report &bull; Powered by Unipro SG ***</div>
+            </div>
+          </div>
+
+          <script>
+            window.onload = function() {
+              setTimeout(function() {
+                window.print();
+              }, 300);
+            };
+          </script>
+        </body>
+        </html>
+      `;
+
+      if (Platform.OS === 'web' && typeof window !== 'undefined') {
+        const printWin = window.open('', '_blank', 'width=900,height=750');
+        if (printWin) {
+          printWin.document.open();
+          printWin.document.write(printHtml);
+          printWin.document.close();
+        } else {
+          const blob = new Blob([printHtml], { type: 'text/html;charset=utf-8;' });
+          const url = URL.createObjectURL(blob);
+          const fallbackWin = window.open(url, '_blank');
+          if (!fallbackWin) {
+            showToast('Popup blocker prevented opening print window. Please allow popups.', 'error');
+          }
+        }
+      } else {
+        showToast(`Print report prepared for ${targetRef}`, 'success');
+      }
+    } catch (err: any) {
+      console.error('Print Error:', err);
+      showToast('Error generating print report: ' + (err.message || 'Server error'), 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
   const [lovVisible, setLovVisible] = useState(false);
   const [lovTitle, setLovTitle] = useState('');
   const [lovData, setLovData] = useState<any[]>([]);
@@ -510,10 +1112,24 @@ export default function PurchaseReturnScreen() {
       });
       const json = await res.json();
       if (json.success) {
-        setRefNo(json.returnNo);
-        showToast(json.message || `Please take Note Reference No : ${json.returnNo}`, 'success');
+        const savedNo = json.returnNo;
+        setRefNo(savedNo);
+        showToast(json.message || `Please take Note Reference No : ${savedNo}`, 'success');
         setDetails([]);
         setSelectedIndex(null);
+
+        // In-app prompt to print report immediately matching VB.NET frmPurchaseReturn
+        setConfirmDialog({
+          visible: true,
+          title: 'Print Purchase Return',
+          message: 'Would you like to print the Purchase Return report now?',
+          yesText: 'Print',
+          noText: 'Cancel',
+          onConfirm: () => {
+            setConfirmDialog(null);
+            handlePrintReport(savedNo);
+          }
+        });
       } else {
         const errorDetail = json.error ? `\nDetails: ${json.error}` : '';
         showToast(`${json.message || 'Failed to save purchase return'}${errorDetail}`, 'error');
@@ -561,9 +1177,14 @@ export default function PurchaseReturnScreen() {
           </TouchableOpacity>
 
           <TouchableOpacity
-            style={[styles.printBtn, !refNo && { opacity: 0.5 }]}
-            onPress={() => refNo && showToast(`Printing Ref: ${refNo}`, 'success')}
-            disabled={!refNo}
+            style={[styles.printBtn, !refNo && { opacity: 0.8 }]}
+            onPress={() => {
+              if (refNo) {
+                handlePrintReport(refNo);
+              } else {
+                openPastReturnLookup();
+              }
+            }}
           >
             <ThemedText style={styles.printBtnText}>Print</ThemedText>
           </TouchableOpacity>
@@ -585,12 +1206,17 @@ export default function PurchaseReturnScreen() {
             {/* Row 1: Ref. No, Return Date, Total Cost */}
             <View style={styles.row}>
               <ThemedText style={styles.label}>Ref. No.</ThemedText>
-              <TextInput
-                style={[styles.input, styles.readonlyInput, { width: 140 }]}
-                value={refNo}
-                editable={false}
-                placeholder="Auto"
-              />
+              <View style={{ width: 140, flexDirection: 'row' }}>
+                <TextInput
+                  style={[styles.input, styles.readonlyInput, { width: 108, borderTopRightRadius: 0, borderBottomRightRadius: 0, borderRightWidth: 0 }]}
+                  value={refNo}
+                  editable={false}
+                  placeholder="Auto"
+                />
+                <TouchableOpacity style={styles.lookupBtn} onPress={openPastReturnLookup}>
+                  <ThemedText style={styles.lookupBtnText}>...</ThemedText>
+                </TouchableOpacity>
+              </View>
 
               <ThemedText style={[styles.labelRight, { width: 95 }]}>Return Date</ThemedText>
               {Platform.OS === 'web' ? (
@@ -894,7 +1520,9 @@ export default function PurchaseReturnScreen() {
             <View style={[styles.modalContainer, { maxWidth: 440, padding: 20 }]}>
               <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
                 <Ionicons name="help-circle-outline" size={24} color="#B48218" style={{ marginRight: 8 }} />
-                <ThemedText style={{ fontSize: 16, fontWeight: 'bold', color: '#3B2D17' }}>Confirmation</ThemedText>
+                <ThemedText style={{ fontSize: 16, fontWeight: 'bold', color: '#3B2D17' }}>
+                  {confirmDialog.title || 'Confirmation'}
+                </ThemedText>
               </View>
               <ThemedText style={{ fontSize: 13, color: '#4A3B22', lineHeight: 20, marginBottom: 20 }}>
                 {confirmDialog.message}
@@ -904,13 +1532,13 @@ export default function PurchaseReturnScreen() {
                   style={[styles.modalCloseBtn, { paddingHorizontal: 16 }]}
                   onPress={() => setConfirmDialog(null)}
                 >
-                  <ThemedText style={styles.modalCloseBtnText}>No</ThemedText>
+                  <ThemedText style={styles.modalCloseBtnText}>{confirmDialog.noText || 'No'}</ThemedText>
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={[styles.saveBtn, { paddingHorizontal: 16 }]}
                   onPress={confirmDialog.onConfirm}
                 >
-                  <ThemedText style={styles.saveBtnText}>Yes</ThemedText>
+                  <ThemedText style={styles.saveBtnText}>{confirmDialog.yesText || 'Yes'}</ThemedText>
                 </TouchableOpacity>
               </View>
             </View>
@@ -1003,9 +1631,131 @@ export default function PurchaseReturnScreen() {
         </TouchableWithoutFeedback>
       </Modal>
 
+      {/* Past Purchase Returns LOV Modal */}
+      <Modal visible={pastReturnModalVisible} transparent={true} animationType="fade">
+        <TouchableWithoutFeedback onPress={() => setPastReturnModalVisible(false)}>
+          <View style={styles.modalOverlay}>
+            <TouchableWithoutFeedback>
+              <View style={[styles.modalContainer, { maxWidth: 750 }]}>
+                <View style={styles.modalHeader}>
+                  <ThemedText style={styles.modalTitle}>Select Purchase Return</ThemedText>
+                  <TouchableOpacity onPress={() => setPastReturnModalVisible(false)} style={styles.modalCloseIconBtn}>
+                    <Ionicons name="close" size={20} color="#3B2D17" />
+                  </TouchableOpacity>
+                </View>
+
+                <View style={{ padding: 12 }}>
+                  <TextInput
+                    style={styles.modalSearchInput}
+                    placeholder="Search by Return No or Supplier..."
+                    placeholderTextColor="#7D6F5B"
+                    value={pastReturnSearch}
+                    onChangeText={setPastReturnSearch}
+                    autoFocus
+                  />
+
+                  <View style={styles.lovHeaderRow}>
+                    <ThemedText style={[styles.lovHeaderText, { width: 120 }]}>Return No</ThemedText>
+                    <ThemedText style={[styles.lovHeaderText, { width: 95 }]}>Date</ThemedText>
+                    <ThemedText style={[styles.lovHeaderText, { flex: 2 }]}>Supplier</ThemedText>
+                    <ThemedText style={[styles.lovHeaderText, { width: 75, textAlign: 'right' }]}>Weight</ThemedText>
+                    <ThemedText style={[styles.lovHeaderText, { width: 50, textAlign: 'center' }]}>PCS</ThemedText>
+                    <ThemedText style={[styles.lovHeaderText, { width: 85, textAlign: 'right' }]}>Net Amt</ThemedText>
+                  </View>
+
+                  {pastReturnLoading ? (
+                    <View style={{ padding: 24, alignItems: 'center' }}>
+                      <ThemedText style={{ color: '#7D6F5B', fontSize: 13 }}>Loading Purchase Returns...</ThemedText>
+                    </View>
+                  ) : (
+                    <FlatList
+                      data={pastReturnList.filter((item: any) => {
+                        if (!pastReturnSearch.trim()) return true;
+                        const s = pastReturnSearch.toLowerCase();
+                        return (
+                          (item.ReturnNo || '').toLowerCase().includes(s) ||
+                          (item.SupplierName || '').toLowerCase().includes(s) ||
+                          (item.SupplierCode || '').toLowerCase().includes(s)
+                        );
+                      })}
+                      keyExtractor={(item, index) => index.toString()}
+                      style={{ maxHeight: 320 }}
+                      renderItem={({ item, index }) => {
+                        let dStr = item.ReturnDate;
+                        if (dStr) {
+                          const dt = new Date(dStr);
+                          if (!isNaN(dt.getTime())) {
+                            dStr = `${String(dt.getDate()).padStart(2, '0')}/${String(dt.getMonth() + 1).padStart(2, '0')}/${dt.getFullYear()}`;
+                          }
+                        }
+                        return (
+                          <TouchableOpacity
+                            activeOpacity={0.7}
+                            style={[
+                              styles.lovItem,
+                              index % 2 === 1 && { backgroundColor: '#FCFAF6' },
+                            ]}
+                            onPress={() => {
+                              setRefNo(item.ReturnNo);
+                              setPastReturnModalVisible(false);
+                              handlePrintReport(item.ReturnNo);
+                            }}
+                          >
+                            <ThemedText style={[styles.lovItemText, { width: 120, fontWeight: 'bold' }]}>
+                              {item.ReturnNo}
+                            </ThemedText>
+                            <ThemedText style={[styles.lovItemText, { width: 95 }]}>
+                              {dStr || '-'}
+                            </ThemedText>
+                            <ThemedText style={[styles.lovItemText, { flex: 2 }]} numberOfLines={1}>
+                              {item.SupplierName || item.SupplierCode || '-'}
+                            </ThemedText>
+                            <ThemedText style={[styles.lovItemText, { width: 75, textAlign: 'right' }]}>
+                              {Number(item.TotalWeight || 0).toFixed(2)}
+                            </ThemedText>
+                            <ThemedText style={[styles.lovItemText, { width: 50, textAlign: 'center' }]}>
+                              {item.TotalPCS || 0}
+                            </ThemedText>
+                            <ThemedText style={[styles.lovItemText, { width: 85, textAlign: 'right', fontWeight: 'bold' }]}>
+                              {Number(item.NetAmount || item.TotalValue || 0).toFixed(2)}
+                            </ThemedText>
+                          </TouchableOpacity>
+                        );
+                      }}
+                      ListEmptyComponent={
+                        <View style={{ padding: 20, alignItems: 'center' }}>
+                          <ThemedText style={{ color: '#7D6F5B', fontSize: 13, fontStyle: 'italic' }}>
+                            No purchase return records found
+                          </ThemedText>
+                        </View>
+                      }
+                    />
+                  )}
+                </View>
+
+                <View style={styles.modalFooter}>
+                  <TouchableOpacity style={styles.modalCloseBtn} onPress={() => setPastReturnModalVisible(false)}>
+                    <ThemedText style={styles.modalCloseBtnText}>Close</ThemedText>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </TouchableWithoutFeedback>
+          </View>
+        </TouchableWithoutFeedback>
+      </Modal>
+
       {/* Toast Notification */}
       {toast && (
-        <View style={[styles.toast, { backgroundColor: toast.type === 'success' ? '#2E7D32' : '#C62828' }]}>
+        <View style={[
+          styles.toast,
+          { backgroundColor: toast.type === 'success' ? '#2E7D32' : '#C62828' }
+        ]}>
+          <Ionicons
+            name={toast.type === 'success' ? 'checkmark-circle' : 'alert-circle'}
+            size={18}
+            color="#FFFFFF"
+            style={{ marginRight: 8 }}
+          />
           <ThemedText style={styles.toastText}>{toast.message}</ThemedText>
         </View>
       )}
@@ -1447,6 +2197,8 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: 40,
     alignSelf: 'center',
+    flexDirection: 'row',
+    alignItems: 'center',
     paddingHorizontal: 20,
     paddingVertical: 10,
     borderRadius: 8,

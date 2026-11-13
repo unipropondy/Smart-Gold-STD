@@ -7,7 +7,6 @@ import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   FlatList,
   Modal,
   Platform,
@@ -955,7 +954,7 @@ export default function DirectPurchaseScreen() {
     visible: false,
     title: '',
     message: '',
-    onConfirm: () => {},
+    onConfirm: () => { },
     confirmText: 'OK',
     confirmStyle: 'primary',
   });
@@ -1065,6 +1064,8 @@ export default function DirectPurchaseScreen() {
 
   // Update Header field with automatic TEAL <-> CostPerGram conversions matching VB reference
   const updateHeader = (key: string, value: any) => {
+    let updatedCostPerGram: string | null = null;
+
     setHeaderState((prev: any) => {
       const next = { ...prev, [key]: value };
 
@@ -1077,6 +1078,7 @@ export default function DirectPurchaseScreen() {
         );
         if (parseFloat(costG) > 0) {
           next.CostPerGram = costG;
+          updatedCostPerGram = costG;
         }
       } else if (key === 'CostPerGram') {
         const teal = calculateTealFromCostPerGram(
@@ -1088,9 +1090,7 @@ export default function DirectPurchaseScreen() {
         if (parseFloat(teal) > 0) {
           next.TEAL = teal;
         }
-        if (parseFloat(value) > 0) {
-          setCurrentDetail((d: any) => ({ ...d, CostPerGram: value }));
-        }
+        updatedCostPerGram = value;
       } else if (key === 'GSTActive') {
         const costG = calculateCostPerGramFromTeal(
           next.TEAL,
@@ -1100,11 +1100,22 @@ export default function DirectPurchaseScreen() {
         );
         if (parseFloat(costG) > 0) {
           next.CostPerGram = costG;
+          updatedCostPerGram = costG;
         }
       }
 
       return next;
     });
+
+    // When Header CostPerGram changes (directly or computed from TEAL / GST),
+    // automatically sync with line items and currently active line detail
+    if (updatedCostPerGram !== null) {
+      const cpgVal = updatedCostPerGram;
+      setCurrentDetail((d: any) => recalculateDetailCosts({ ...d, CostPerGram: cpgVal }, autoSMC, headerState.CurrencyRate));
+      setDetails((prevList: any[]) =>
+        prevList.map((item: any) => recalculateDetailCosts({ ...item, CostPerGram: cpgVal }, autoSMC, headerState.CurrencyRate))
+      );
+    }
   };
 
   // Update Detail line item input with instant recalculation
@@ -1719,7 +1730,10 @@ export default function DirectPurchaseScreen() {
       showToast('Line item added successfully');
     }
 
-    setCurrentDetail(getInitialDetailState());
+    setCurrentDetail({
+      ...getInitialDetailState(),
+      CostPerGram: headerState.CostPerGram || '',
+    });
     setDetailModalVisible(false);
   };
 
@@ -1808,7 +1822,6 @@ export default function DirectPurchaseScreen() {
   const handleSavePurchase = async () => {
     if (headerState.BillClose === 'Y') {
       showToast('This bill is closed. Cannot modify!', 'error');
-      showAlert('Warning', 'This bill is closed. Cannot modify!');
       return;
     }
 
@@ -2008,18 +2021,7 @@ export default function DirectPurchaseScreen() {
                 )}
               </TouchableOpacity>
 
-              {/* Report Button */}
-              <TouchableOpacity
-                style={[
-                  styles.topActionBtn,
-                  { backgroundColor: '#E8EAF6', borderColor: '#7986CB', flexDirection: 'row', alignItems: 'center', gap: 4 }
-                ]}
-                onPress={handlePrintReport}
-                disabled={reportLoading}
-              >
-                <Ionicons name="document-text-outline" size={13} color="#283593" />
-                <ThemedText style={{ color: '#283593', fontWeight: 'bold', fontSize: 11 }}>Report</ThemedText>
-              </TouchableOpacity>
+
 
               {/* Save Button (F8) */}
               <TouchableOpacity
@@ -2205,16 +2207,9 @@ export default function DirectPurchaseScreen() {
 
                   <ThemedText style={[styles.labelRight, { width: 70 }]}>Rate</ThemedText>
                   <TextInput
-                    style={[styles.input, { width: 90, textAlign: 'right' }]}
+                    style={[styles.input, styles.readonlyInput, { width: 90, textAlign: 'right' }]}
                     value={headerState.CurrencyRate}
-                    onChangeText={(t) => updateHeader('CurrencyRate', t)}
-                    onBlur={() => {
-                      if ((parseFloat(headerState.CurrencyRate) || 0) <= 0) {
-                        showToast('Enter currency rate.', 'error');
-                      }
-                    }}
-                    keyboardType="numeric"
-                    editable={!isFormLocked}
+                    editable={false}
                   />
                 </View>
 
@@ -2464,7 +2459,10 @@ export default function DirectPurchaseScreen() {
                     return;
                   }
                   setSelectedIndex(null);
-                  setCurrentDetail(getInitialDetailState());
+                  setCurrentDetail({
+                    ...getInitialDetailState(),
+                    CostPerGram: headerState.CostPerGram || '',
+                  });
                   setDetailModalVisible(true);
                 }}
                 disabled={isFormLocked}

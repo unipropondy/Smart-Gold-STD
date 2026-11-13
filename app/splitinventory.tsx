@@ -310,10 +310,21 @@ export default function SplitInventoryScreen() {
       const res = await fetch(`${API_URL}/categories`);
       const json = await res.json();
       if (json.success) {
-        openLov("Select Category", json.data, ["CategoryCode", "CategoryName"], (item) => {
-          setOrgCategory(item.CategoryCode.trim());
-          if (item.CategoryCode.trim() !== originalDetails.CategoryCode.trim()) {
-            setOriginalInvCode(item.NextInventoryCode.trim());
+        openLov("Select Category", json.data, ["CategoryCode", "CategoryName"], async (item) => {
+          const selectedCat = item.CategoryCode.trim();
+          setOrgCategory(selectedCat);
+          if (selectedCat !== originalDetails.CategoryCode.trim()) {
+            try {
+              const codeRes = await fetch(`${API_URL}/nextCode?categoryCode=${encodeURIComponent(selectedCat)}`);
+              const codeJson = await codeRes.json();
+              if (codeJson.success && codeJson.data) {
+                setOriginalInvCode(codeJson.data);
+              } else {
+                setOriginalInvCode(item.NextInventoryCode.trim());
+              }
+            } catch {
+              setOriginalInvCode(item.NextInventoryCode.trim());
+            }
           } else {
             setOriginalInvCode(originalDetails.InventoryCode.trim());
           }
@@ -335,9 +346,20 @@ export default function SplitInventoryScreen() {
       const res = await fetch(`${API_URL}/categories`);
       const json = await res.json();
       if (json.success) {
-        openLov("Select Category", json.data, ["CategoryCode", "CategoryName"], (item) => {
-          setSplitCategory(item.CategoryCode.trim());
-          setSplitInvCode(item.NextInventoryCode.trim());
+        openLov("Select Category", json.data, ["CategoryCode", "CategoryName"], async (item) => {
+          const selectedCat = item.CategoryCode.trim();
+          setSplitCategory(selectedCat);
+          try {
+            const codeRes = await fetch(`${API_URL}/nextCode?categoryCode=${encodeURIComponent(selectedCat)}`);
+            const codeJson = await codeRes.json();
+            if (codeJson.success && codeJson.data) {
+              setSplitInvCode(codeJson.data);
+            } else {
+              setSplitInvCode(item.NextInventoryCode.trim());
+            }
+          } catch {
+            setSplitInvCode(item.NextInventoryCode.trim());
+          }
           setLovVisible(false);
         });
       }

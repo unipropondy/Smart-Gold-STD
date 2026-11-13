@@ -108,21 +108,6 @@ router.post("/", async (req, res) => {
       return res.status(400).json({ success: false, message: "Select payment type." });
     }
 
-    const tealPercent = parseFloat(header.TaelPercent) || 0;
-    if (tealPercent <= 0) {
-      return res.status(400).json({ success: false, message: "Enter TEAL Percent." });
-    }
-
-    const tealVal = parseFloat(header.TaelValue || header.TaelRate) || 0;
-    if (tealVal <= 0) {
-      return res.status(400).json({ success: false, message: "Enter teal." });
-    }
-
-    const costPerGram = parseFloat(header.TaelCostPerGram || header.CostPerGram) || 0;
-    if (costPerGram <= 0) {
-      return res.status(400).json({ success: false, message: "Enter cost per gram." });
-    }
-
     const sysUser = userId || "SYSTEM";
     const curDate = new Date();
     const purchaseBillNo = header.PurchaseBillNo.trim();
@@ -471,12 +456,14 @@ router.delete("/:purchaseBillNo", async (req, res) => {
 // ================= DELETE SINGLE INVENTORY ITEM FROM PURCHASE (btnDelete in frmPurchase.vb) =================
 router.delete("/:purchaseBillNo/item/:inventoryCode", async (req, res) => {
   const pool = req.pool;
-  const transaction = new sql.Transaction(pool);
+  let transaction;
 
   try {
     const { purchaseBillNo, inventoryCode } = req.params;
     const invCode = inventoryCode.trim();
-    const billNo = purchaseBillNo.trim();
+    const billNo = (purchaseBillNo || "").trim();
+    const supplierCode = (req.query.supplierCode || "").trim();
+    const userId = (req.query.userId || req.headers['x-user-id'] || "SYSTEM").trim();
 
     // Check business rules from frmPurchase.vb btnDelete_Click
     const chkResult = await pool.request()
@@ -486,17 +473,17 @@ router.delete("/:purchaseBillNo/item/:inventoryCode", async (req, res) => {
           i.InventoryCode, 
           i.SalesBillNo, 
           i.CreateDate, 
-          i.PCS, 
           i.LocationCode,
           i.JobSheetNo,
           st.QtyOnHand,
+          st.PCS,
           jh.BillClose,
           jh.TranType,
           loc.EODDate
-        FROM tblInventory i
-        LEFT JOIN tblInventoryStock st ON i.InventoryCode = st.InventoryCode AND i.LocationCode = st.LocationCode
-        LEFT JOIN tblJobSheetHeader jh ON i.JobSheetNo = jh.JobSheetNo
-        LEFT JOIN tblLocation loc ON i.LocationCode = loc.LocationCode
+        FROM tblInventory i WITH (NOLOCK)
+        LEFT JOIN tblInventoryStock st WITH (NOLOCK) ON i.InventoryCode = st.InventoryCode AND i.LocationCode = st.LocationCode
+        LEFT JOIN tblJobSheetHeader jh WITH (NOLOCK) ON i.JobSheetNo = jh.JobSheetNo
+        LEFT JOIN tblLocation loc WITH (NOLOCK) ON i.LocationCode = loc.LocationCode
         WHERE i.InventoryCode = @InventoryCode
       `);
 
@@ -511,7 +498,7 @@ router.delete("/:purchaseBillNo/item/:inventoryCode", async (req, res) => {
       if (item.SalesBillNo && item.SalesBillNo.trim() !== '') {
         return res.status(400).json({ success: false, message: "Item sold. Cannot delete!" });
       }
-      if (item.QtyOnHand != null && parseFloat(item.QtyOnHand) !== parseFloat(item.PCS)) {
+      if (item.QtyOnHand != null && item.PCS != null && parseFloat(item.QtyOnHand) !== parseFloat(item.PCS)) {
         return res.status(400).json({ success: false, message: "Qty on hand is not the same as no. of pieces purchased. Cannot delete!" });
       }
       if (item.EODDate && item.CreateDate) {
@@ -523,18 +510,41 @@ router.delete("/:purchaseBillNo/item/:inventoryCode", async (req, res) => {
       }
     }
 
+    transaction = new sql.Transaction(pool);
     await transaction.begin();
 
-    const delReq = new sql.Request(transaction);
-    delReq.input("PurchaseBillNo", sql.VarChar, billNo);
-    delReq.input("InventoryCode", sql.VarChar, invCode);
+    // 1. Try sp_JpInventorydelete first (matching clsPurchase.vb PurchaseDelete)
+    let spDeleteExecuted = false;
+    try {
+      const spDelReq = new sql.Request(transaction);
+      spDelReq
+        .input("sinventorycode", sql.VarChar, invCode)
+        .input("sInvoiceNo", sql.VarChar, billNo)
+        .input("sSupplierCode", sql.VarChar, supplierCode)
+        .input("sUserID", sql.VarChar, userId);
 
-    await delReq.query(`
-      DELETE FROM tblInventoryAddlDescription WHERE InventoryCode = @InventoryCode;
-      DELETE FROM tblPurchase WHERE PurchaseBillNo = @PurchaseBillNo AND InventoryCode = @InventoryCode;
-      DELETE FROM tblInventory WHERE InventoryCode = @InventoryCode;
-      DELETE FROM tblInventoryStock WHERE InventoryCode = @InventoryCode;
-    `);
+      await spDelReq.execute("sp_JpInventorydelete");
+      spDeleteExecuted = true;
+    } catch (spErr) {
+      // If SP does not exist or parameter mismatch, proceed with table deletion
+      console.warn("sp_JpInventorydelete failed or not found, falling back to direct SQL deletion:", spErr.message);
+    }
+
+    // 2. Direct SQL deletion fallback if SP did not execute
+    if (!spDeleteExecuted) {
+      const delReq = new sql.Request(transaction);
+      delReq.input("PurchaseBillNo", sql.VarChar, billNo);
+      delReq.input("InventoryCode", sql.VarChar, invCode);
+
+      await delReq.query(`
+        DELETE FROM tblInventoryMovement WHERE InventoryCode = @InventoryCode;
+        DELETE FROM tblInventoryBarCoin WHERE InventoryCode = @InventoryCode;
+        DELETE FROM tblInventoryAddlDescription WHERE InventoryCode = @InventoryCode;
+        DELETE FROM tblInventoryStock WHERE InventoryCode = @InventoryCode;
+        DELETE FROM tblPurchase WHERE InventoryCode = @InventoryCode;
+        DELETE FROM tblInventory WHERE InventoryCode = @InventoryCode;
+      `);
+    }
 
     await transaction.commit();
     return res.status(200).json({ success: true, message: `Item ${invCode} deleted successfully` });
@@ -543,7 +553,7 @@ router.delete("/:purchaseBillNo/item/:inventoryCode", async (req, res) => {
       try { await transaction.rollback(); } catch (_) {}
     }
     console.error("🔥 DELETE INVENTORY ITEM ERROR:", err);
-    return res.status(500).json({ success: false, message: "Server Error", error: err.message });
+    return res.status(500).json({ success: false, message: err.message || "Server Error", error: err.message });
   }
 });
 

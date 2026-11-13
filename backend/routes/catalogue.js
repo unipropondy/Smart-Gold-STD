@@ -68,16 +68,30 @@ router.get('/lov/category', async (req, res) => {
 router.get('/lov/catalogue', async (req, res) => {
     try {
         const pool = req.pool;
-        const { category } = req.query;
+        const { category, jobSheetNo } = req.query;
         let query = `
             SELECT CatalogueCode, CatalogueName, CategoryCode, GoldLoss 
             FROM tblCatalogue
         `;
         const request = pool.request();
+        const conditions = [];
+
         if (category && category.trim() !== '') {
-            query += " WHERE CategoryCode = @category";
+            conditions.push("CategoryCode = @category");
             request.input('category', mssql.VarChar, category.trim());
         }
+
+        // VB Reference frmPurchase.vb btnCatalogueCodeSearch_Click:
+        // CatalogueCode in (Select DISTINCT(CatalogueCode) From tblJobsheetDetail Where JobSheetNo = ...)
+        if (jobSheetNo && jobSheetNo.trim() !== '') {
+            conditions.push("CatalogueCode IN (SELECT DISTINCT RTRIM(LTRIM(CatalogueCode)) FROM tblJobSheetDetail WHERE RTRIM(LTRIM(JobSheetNo)) = RTRIM(LTRIM(@jobSheetNo)))");
+            request.input('jobSheetNo', mssql.VarChar, jobSheetNo.trim());
+        }
+
+        if (conditions.length > 0) {
+            query += " WHERE " + conditions.join(" AND ");
+        }
+
         query += " ORDER BY CatalogueCode";
         
         const result = await request.query(query);
