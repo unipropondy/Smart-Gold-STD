@@ -8,28 +8,24 @@ import { ThemedText } from '@/components/themed-text';
 import { MENU_STRUCTURE, MenuItem } from '@/constants/menuConfig';
 import { useThemeColors } from '@/hooks/useThemeColors';
 import { useThemeContext } from '@/contexts/ThemeContext';
+import { useUserPermissions } from '@/contexts/UserPermissionContext';
 
 export default function SubmenuScreen() {
   const themeColors = useThemeColors();
   const { accentColor } = useThemeContext();
   const { background: backgroundColor, card: cardColor, text: textColor, border: borderColor, subtitle: subtitleColor, primaryGold: GOLD_COLOR } = themeColors;
-
-  
-  
-  
+  const { isNodeVisible } = useUserPermissions();
 
   const { id } = useLocalSearchParams();
   const menuId = typeof id === 'string' ? id : '';
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
 
-  
-
   const windowWidth = Dimensions.get('window').width;
   const numColumns = windowWidth >= 1024 ? 4 : windowWidth >= 768 ? 3 : 2;
   const cardWidth = `${100 / numColumns}%`;
 
-  const submenuItems: MenuItem[] = MENU_STRUCTURE[menuId] || [];
+  const submenuItems: MenuItem[] = (MENU_STRUCTURE[menuId] || []).filter(item => isNodeVisible(item));
 
   const handleMenuNavigation = (item: MenuItem) => {
     if (item.hasSubmenu) {

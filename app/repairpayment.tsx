@@ -1080,7 +1080,7 @@ export default function RepairPaymentScreen() {
                         onPress={() => router.push('/tradeinsales')}
                         activeOpacity={0.8}
                       >
-                        <ThemedText style={styles.tradeInGoBtnText}>Go</ThemedText>
+                        <ThemedText style={styles.tradeInGoBtnText}>Trade IN</ThemedText>
                         <Ionicons name="arrow-forward" size={11} color="#9E6D08" />
                       </TouchableOpacity>
                     )}

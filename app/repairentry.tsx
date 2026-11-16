@@ -7,7 +7,7 @@ import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  
+
   Alert,
   FlatList,
   KeyboardAvoidingView,
@@ -158,7 +158,7 @@ export default function RepairEntryScreen() {
           setCustomers(fallbackJson.data);
           return;
         }
-      } catch (fErr) {}
+      } catch (fErr) { }
       showToast('Failed to load customers', 'error');
     } finally {
       setLoading(false);
@@ -1565,7 +1565,7 @@ export default function RepairEntryScreen() {
                           onPress={() => router.push('/tradeinsales')}
                           activeOpacity={0.8}
                         >
-                          <ThemedText style={styles.tradeInGoBtnText}>Go</ThemedText>
+                          <ThemedText style={styles.tradeInGoBtnText}>Trade IN</ThemedText>
                           <Ionicons name="arrow-forward" size={11} color="#9E6D08" />
                         </TouchableOpacity>
                       )}

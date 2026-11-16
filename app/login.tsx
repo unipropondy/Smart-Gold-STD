@@ -1,6 +1,7 @@
 import { API_BASE_URL } from '@/constants/api';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useUserPermissions } from '@/contexts/UserPermissionContext';
 import { Ionicons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router } from 'expo-router';
 import React, { useState } from 'react';
 import {
@@ -35,9 +36,11 @@ interface PremiumInputProps {
   secureTextEntry?: boolean;
   value: string;
   onChangeText: (text: string) => void;
+  autoComplete?: any;
+  textContentType?: any;
 }
 
-const PremiumInput = ({ icon, placeholder, secureTextEntry, value, onChangeText }: PremiumInputProps) => {
+const PremiumInput = ({ icon, placeholder, secureTextEntry, value, onChangeText, autoComplete, textContentType }: PremiumInputProps) => {
   const [isFocused, setIsFocused] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
 
@@ -60,6 +63,9 @@ const PremiumInput = ({ icon, placeholder, secureTextEntry, value, onChangeText 
         placeholder={placeholder}
         placeholderTextColor="#999"
         autoCapitalize="none"
+        autoCorrect={false}
+        autoComplete={autoComplete}
+        textContentType={textContentType}
         selectionColor={accentGold}
       />
       {secureTextEntry && (
@@ -72,6 +78,7 @@ const PremiumInput = ({ icon, placeholder, secureTextEntry, value, onChangeText 
 };
 
 export default function LoginScreen() {
+  const { setUserSession } = useUserPermissions();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
@@ -99,23 +106,31 @@ export default function LoginScreen() {
       if (data.success) {
         const uCode = data.user?.userCode || username;
         const uName = data.user?.userName || username;
+        const uGroup = data.user?.userGroupCode || '';
         try {
-          await AsyncStorage.setItem('@logged_user', JSON.stringify(data.user || { userCode: uCode, userName: uName }));
+          await AsyncStorage.setItem('@logged_user', JSON.stringify(data.user || { userCode: uCode, userName: uName, userGroupCode: uGroup }));
           await AsyncStorage.setItem('@user_id', uCode);
           await AsyncStorage.setItem('@user_name', uName);
-        } catch (_) {}
+          await AsyncStorage.setItem('@user_group', uGroup);
+        } catch (_) { }
         if (Platform.OS === 'web' && typeof window !== 'undefined') {
           try {
             window.localStorage.setItem('userCode', uCode);
             window.localStorage.setItem('userId', uCode);
             window.localStorage.setItem('userName', uName);
-            window.localStorage.setItem('user', JSON.stringify(data.user || { userCode: uCode, userName: uName }));
+            window.localStorage.setItem('userGroup', uGroup);
+            window.localStorage.setItem('user', JSON.stringify(data.user || { userCode: uCode, userName: uName, userGroupCode: uGroup }));
             window.sessionStorage.setItem('userCode', uCode);
             window.sessionStorage.setItem('userId', uCode);
             window.sessionStorage.setItem('userName', uName);
-            window.sessionStorage.setItem('user', JSON.stringify(data.user || { userCode: uCode, userName: uName }));
-          } catch (_) {}
+            window.sessionStorage.setItem('userGroup', uGroup);
+            window.sessionStorage.setItem('user', JSON.stringify(data.user || { userCode: uCode, userName: uName, userGroupCode: uGroup }));
+          } catch (_) { }
         }
+
+        // Immediately update permissions context with newly authenticated user data before navigating
+        await setUserSession(data.user || { userCode: uCode, userName: uName, userGroupCode: uGroup });
+
         router.replace({ pathname: '/(tabs)/home', params: { username: uCode, userId: uCode } });
       } else {
         setErrorMsg(data.message || 'Invalid credentials');
@@ -162,6 +177,8 @@ export default function LoginScreen() {
             placeholder="Username"
             value={username}
             onChangeText={setUsername}
+            autoComplete="username"
+            textContentType="username"
           />
 
           <View style={{ height: 20 }} />
@@ -172,6 +189,8 @@ export default function LoginScreen() {
             value={password}
             onChangeText={setPassword}
             secureTextEntry
+            autoComplete="current-password"
+            textContentType="password"
           />
 
           <View style={styles.formOptions}>

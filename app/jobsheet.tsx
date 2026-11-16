@@ -141,7 +141,7 @@ export default function JobSheetScreen() {
         clearForm();
       } else if (e.key === 'F7') {
         e.preventDefault();
-        saveJobSheet();
+        saveJobSheet(undefined, undefined, true);
       } else if (e.key === 'F8') {
         e.preventDefault();
         deleteJobSheet();
@@ -550,7 +550,7 @@ export default function JobSheetScreen() {
     ]);
   };
 
-  const clearForm = () => {
+  const clearForm = async () => {
     setChkGST1(false);
     setSummaryGSTActive(false);
     setMatchJobSheetVisible(false);
@@ -570,7 +570,7 @@ export default function JobSheetScreen() {
     setDetails([]);
     setSelectedIndex(null);
     setCurrentDetail({ CatalogueCode: '', CategoryCode: '', Description: '', Weight: '', CostPerGram: '', MC: '', PCS: '', GoldLoss: '', TotalCost: '' });
-    generateJobSheetNo();
+    await generateJobSheetNo();
   };
 
   const openLov = async () => {
@@ -931,7 +931,7 @@ export default function JobSheetScreen() {
   };
 
   // Save JobSheet matching fncJobSheet in frmJobSheet.vb
-  const saveJobSheet = async (overrideDetails?: DetailItem[], successMessage?: string) => {
+  const saveJobSheet = async (overrideDetails?: DetailItem[], successMessage?: string, isMainSave = false) => {
     const activeDetails = overrideDetails || details;
     if (!fncCheckValidity(activeDetails)) {
       return;
@@ -985,9 +985,12 @@ export default function JobSheetScreen() {
       });
       const data = await res.json();
       if (data.success) {
-        if (isNew) {
+        if (isMainSave) {
+          showToast(successMessage || `JobSheet ${activeJobSheetNo} saved successfully!`, 'success');
+          await clearForm();
+        } else if (isNew) {
           showToast(successMessage || `JobSheet created: ${activeJobSheetNo}`, 'success');
-          clearForm();
+          await clearForm();
         } else {
           showToast(successMessage || 'JobSheet updated successfully!', 'success');
           loadJobSheet(activeJobSheetNo, true);
@@ -1165,7 +1168,7 @@ export default function JobSheetScreen() {
           <TouchableOpacity style={[styles.mainActionBtn, { backgroundColor: '#FFFFFF', borderColor: '#DFD5C3', marginBottom: 0 }]} onPress={clearForm}>
             <ThemedText style={{ color: '#5C4A28', fontWeight: 'bold', fontSize: 12 }}>Clear</ThemedText>
           </TouchableOpacity>
-          <TouchableOpacity style={[styles.mainActionBtn, { backgroundColor: '#F9F2E2', borderColor: '#B8903B', marginBottom: 0 }]} onPress={() => saveJobSheet()}>
+          <TouchableOpacity style={[styles.mainActionBtn, { backgroundColor: '#F9F2E2', borderColor: '#B8903B', marginBottom: 0 }]} onPress={() => saveJobSheet(undefined, undefined, true)}>
             <ThemedText style={{ color: '#9E6D08', fontWeight: 'bold', fontSize: 12 }}>Save</ThemedText>
           </TouchableOpacity>
           <TouchableOpacity style={[styles.mainActionBtn, { backgroundColor: '#FFFFFF', borderColor: '#F2A8A2', marginBottom: 0 }]} onPress={deleteJobSheet}>

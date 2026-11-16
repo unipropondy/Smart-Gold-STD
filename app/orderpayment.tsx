@@ -4,7 +4,7 @@ import { useThemeColors } from '@/hooks/useThemeColors';
 import { UNIPRO_LOGO_DATA_URI } from '@/utils/uniproLogo';
 import { Ionicons } from '@expo/vector-icons';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
@@ -519,11 +519,10 @@ export default function OrderPaymentScreen() {
                 </tr>
               </thead>
               <tbody>
-                ${
-                  history.length > 0
-                    ? history
-                        .map(
-                          (h: any, idx: number) => `
+                ${history.length > 0
+            ? history
+              .map(
+                (h: any, idx: number) => `
                         <tr class="${h.OrderPaymentNo === sOrderPaymentNo ? 'highlight-row' : ''}">
                           <td style="text-align: center;">${idx + 1}</td>
                           <td style="text-align: left; font-weight: 600;">${h.OrderPaymentNo} ${h.OrderPaymentNo === sOrderPaymentNo ? '*(This Voucher)*' : ''}</td>
@@ -532,10 +531,10 @@ export default function OrderPaymentScreen() {
                           <td style="text-align: right; font-weight: 700;">$${parseFloat(h.AmountPaid || 0).toFixed(2)}</td>
                         </tr>
                       `
-                        )
-                        .join('')
-                    : `<tr><td colspan="5" style="text-align: center; color: #888; padding: 10px;">Initial Deposit Voucher: $${currentAmtPaid.toFixed(2)}</td></tr>`
-                }
+              )
+              .join('')
+            : `<tr><td colspan="5" style="text-align: center; color: #888; padding: 10px;">Initial Deposit Voucher: $${currentAmtPaid.toFixed(2)}</td></tr>`
+          }
               </tbody>
             </table>
 
@@ -1203,7 +1202,7 @@ export default function OrderPaymentScreen() {
                         onPress={() => router.push('/tradeinsales')}
                         activeOpacity={0.8}
                       >
-                        <ThemedText style={styles.tradeInGoBtnText}>Go</ThemedText>
+                        <ThemedText style={styles.tradeInGoBtnText}>Trade IN</ThemedText>
                         <Ionicons name="arrow-forward" size={11} color="#9E6D08" />
                       </TouchableOpacity>
                     )}

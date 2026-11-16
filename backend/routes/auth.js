@@ -9,8 +9,8 @@ router.post("/login", async (req, res) => {
     let { username, password } = req.body;
 
     // ✅ Validation
-    username = username?.trim();
-    password = password?.trim();
+    username = username ? String(username).trim() : '';
+    password = password ? String(password).trim() : '';
 
     if (!username || !password) {
       return res.status(400).json({
@@ -21,10 +21,9 @@ router.post("/login", async (req, res) => {
 
     const pool = req.pool;
 
-    // Check tblUserMaster first (by UserCode or UserName)
+    // Step 1: Query user from tblUserMaster by UserName or UserCode
     let userResult = await pool.request()
       .input("username", sql.VarChar(50), username)
-      .input("password", sql.VarChar(50), password)
       .query(`
         SELECT 
           RTRIM(UserCode) AS UserCode,
@@ -34,17 +33,29 @@ router.post("/login", async (req, res) => {
           RTRIM(Email) AS Email,
           RTRIM(Phone) AS Phone,
           RTRIM(StoreCode) AS StoreCode,
-          Admin
+          Admin,
+          RTRIM(ISNULL(Password, '')) AS Password
         FROM tblUserMaster
         WHERE (RTRIM(UserName) = @username OR RTRIM(UserCode) = @username)
-        AND RTRIM(Password) = @password
       `);
 
-    // If not found in tblUserMaster, check tblSalesMan (common POS cashier/salesman login)
-    if (userResult.recordset.length === 0) {
+    let matchedUser = null;
+
+    if (userResult.recordset.length > 0) {
+      const dbUser = userResult.recordset[0];
+      // If the user exists in tblUserMaster:
+      // If password is blank or NULL in database, or password does NOT match entered password, REJECT!
+      if (!dbUser.Password || dbUser.Password !== password) {
+        return res.status(401).json({
+          success: false,
+          message: !dbUser.Password ? "Account has no password set. Please contact administrator." : "Invalid username or password"
+        });
+      }
+      matchedUser = dbUser;
+    } else {
+      // Step 2: Check tblSalesMan if not in tblUserMaster
       const smResult = await pool.request()
         .input("username", sql.VarChar(50), username)
-        .input("password", sql.VarChar(50), password)
         .query(`
           SELECT 
             RTRIM(SalesManCode) AS UserCode,
@@ -54,44 +65,48 @@ router.post("/login", async (req, res) => {
             NULL AS Email,
             NULL AS Phone,
             'HQ' AS StoreCode,
-            CASE WHEN UPPER(RTRIM(SalesManGroup)) IN ('ADMIN', 'SUPER ADMIN') THEN 1 ELSE 0 END AS Admin
+            CASE WHEN UPPER(RTRIM(SalesManGroup)) IN ('ADMIN', 'SUPER ADMIN') THEN 1 ELSE 0 END AS Admin,
+            RTRIM(ISNULL(Password, '')) AS Password
           FROM tblSalesMan
           WHERE (
             RTRIM(SalesManCode) = @username 
             OR RTRIM(SalesManName) = @username
-            OR RTRIM(Password) = @username
           )
-          AND RTRIM(Password) = @password
         `);
 
       if (smResult.recordset.length > 0) {
-        userResult = smResult;
+        const smUser = smResult.recordset[0];
+        if (!smUser.Password || smUser.Password !== password) {
+          return res.status(401).json({
+            success: false,
+            message: !smUser.Password ? "Account has no password set. Please contact administrator." : "Invalid username or password"
+          });
+        }
+        matchedUser = smUser;
       }
     }
 
-    // ❌ Invalid credentials
-    if (userResult.recordset.length === 0) {
+    // ❌ Invalid credentials / User not found
+    if (!matchedUser) {
       return res.status(401).json({
         success: false,
         message: "Invalid username or password"
       });
     }
 
-    const user = userResult.recordset[0];
-
     // ✅ Success
     return res.status(200).json({
       success: true,
       message: "Login successful",
       user: {
-        userCode: user.UserCode,
-        userName: user.UserName,
-        userGroupCode: user.UserGroupCode,
-        designation: user.Designation,
-        email: user.Email,
-        phone: user.Phone,
-        storeCode: user.StoreCode,
-        admin: user.Admin
+        userCode: matchedUser.UserCode,
+        userName: matchedUser.UserName,
+        userGroupCode: matchedUser.UserGroupCode,
+        designation: matchedUser.Designation,
+        email: matchedUser.Email,
+        phone: matchedUser.Phone,
+        storeCode: matchedUser.StoreCode,
+        admin: matchedUser.Admin
       }
     });
 

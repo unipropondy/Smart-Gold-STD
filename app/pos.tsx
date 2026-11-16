@@ -6,7 +6,6 @@ import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   FlatList,
   Modal,
   Platform,
@@ -177,6 +176,9 @@ export default function PosScreen() {
 
   // Save & Print Confirmation State (MsgBox: "Do you want to print ?")
   const [printConfirmInvoiceNo, setPrintConfirmInvoiceNo] = useState<string | null>(null);
+
+  // Cancellation Modal Confirmation State
+  const [cancelModalVisible, setCancelModalVisible] = useState(false);
 
   const verifySalesmanPassword = async () => {
     if (!salesmanPassword) {
@@ -514,11 +516,6 @@ export default function PosScreen() {
 
       if (!res.ok || !json || !json.success) {
         const errorMsg = (json && json.message) || "Inventory Not Found ...";
-        if (Platform.OS === 'web') {
-          window.alert(errorMsg);
-        } else {
-          Alert.alert("Notice", errorMsg);
-        }
         showToast(errorMsg, 'error');
         updateDetail('InventoryCode', '');
         updateDetail('Description', '');
@@ -970,36 +967,28 @@ export default function PosScreen() {
       showToast("Validation Error: Please select an existing invoice to cancel", 'error');
       return;
     }
-    Alert.alert(
-      "Confirm Cancellation",
-      "Are you sure you want to cancel this bill? This cannot be undone.",
-      [
-        { text: "No", style: "cancel" },
-        {
-          text: "Yes, Cancel It",
-          style: "destructive",
-          onPress: async () => {
-            setLoading(true);
-            try {
-              const res = await fetch(`${API_URL}/pos/${headerState.InvoiceNo}`, {
-                method: 'DELETE'
-              });
-              const json = await res.json();
-              if (json.success) {
-                showToast("Invoice cancelled successfully!", 'success');
-                clearForm();
-              } else {
-                showToast(`Error: ${json.message}`, 'error');
-              }
-            } catch (e) {
-              showToast("Network error during cancellation", 'error');
-            } finally {
-              setLoading(false);
-            }
-          }
-        }
-      ]
-    );
+    setCancelModalVisible(true);
+  };
+
+  const executeCancelBill = async () => {
+    setCancelModalVisible(false);
+    setLoading(true);
+    try {
+      const res = await fetch(`${API_URL}/pos/${headerState.InvoiceNo}`, {
+        method: 'DELETE'
+      });
+      const json = await res.json();
+      if (json.success) {
+        showToast("Invoice cancelled successfully!", 'success');
+        clearForm();
+      } else {
+        showToast(`Error: ${json.message}`, 'error');
+      }
+    } catch (e) {
+      showToast("Network error during cancellation", 'error');
+    } finally {
+      setLoading(false);
+    }
   };
 
   // subPrintBill: Migrated Crystal Report printing logic from frmGPOS.vb
@@ -2453,6 +2442,57 @@ export default function PosScreen() {
                       <ActivityIndicator size="small" color="#9E6D08" />
                     ) : (
                       <ThemedText style={styles.saveBtnText}>Print</ThemedText>
+                    )}
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </View>
+          </TouchableWithoutFeedback>
+        </TouchableOpacity>
+      </Modal>
+
+      {/* CONFIRM BILL CANCELLATION MODAL */}
+      <Modal visible={cancelModalVisible} transparent animationType="fade" onRequestClose={() => setCancelModalVisible(false)}>
+        <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setCancelModalVisible(false)}>
+          <TouchableWithoutFeedback>
+            <View style={[styles.passwordModalContent, { maxWidth: 330, width: '100%' }]}>
+              <View style={[styles.passwordModalHeader, { backgroundColor: '#FDECEA', borderBottomColor: '#F5C6CB' }]}>
+                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                  <View style={[styles.headerIconBadgeSmall, { backgroundColor: '#FCE8E6', borderColor: '#F5C6CB' }]}>
+                    <Ionicons name="trash-outline" size={14} color="#D93829" />
+                  </View>
+                  <ThemedText style={[styles.passwordModalTitle, { color: '#842029' }]}>Confirm Cancellation</ThemedText>
+                </View>
+                <TouchableOpacity onPress={() => setCancelModalVisible(false)} style={{ padding: 4 }}>
+                  <Ionicons name="close" size={18} color="#842029" />
+                </TouchableOpacity>
+              </View>
+              <View style={{ padding: 18, alignItems: 'center' }}>
+                <Ionicons name="warning-outline" size={36} color="#D93829" style={{ marginBottom: 10 }} />
+                <ThemedText style={{ fontSize: 13, color: '#3B2D17', textAlign: 'center', marginBottom: 4, fontWeight: 'bold' }}>
+                  Cancel Bill {headerState.InvoiceNo}?
+                </ThemedText>
+                <ThemedText style={{ fontSize: 11.5, color: '#666', textAlign: 'center', marginBottom: 16 }}>
+                  Are you sure you want to cancel this bill? This cannot be undone.
+                </ThemedText>
+                <View style={{ flexDirection: 'row', gap: 12, width: '100%' }}>
+                  <TouchableOpacity
+                    style={[styles.actionBtn, styles.clearBtn, { flex: 1, justifyContent: 'center' }]}
+                    onPress={() => setCancelModalVisible(false)}
+                    activeOpacity={0.7}
+                  >
+                    <ThemedText style={styles.clearBtnText}>No</ThemedText>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.actionBtn, styles.destructiveBtn, { flex: 1, justifyContent: 'center', backgroundColor: '#D93829', borderColor: '#D93829' }]}
+                    onPress={executeCancelBill}
+                    activeOpacity={0.8}
+                    disabled={loading}
+                  >
+                    {loading ? (
+                      <ActivityIndicator size="small" color="#FFFFFF" />
+                    ) : (
+                      <ThemedText style={[styles.destructiveBtnText, { color: '#FFFFFF' }]}>Yes, Cancel</ThemedText>
                     )}
                   </TouchableOpacity>
                 </View>

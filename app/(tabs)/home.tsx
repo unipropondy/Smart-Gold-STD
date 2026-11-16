@@ -1,7 +1,9 @@
 import { Ionicons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router, useLocalSearchParams } from 'expo-router';
 import React from 'react';
 import {
+  ActivityIndicator,
   Animated,
   Dimensions,
   Easing,
@@ -30,22 +32,52 @@ import { API_BASE_URL } from '@/constants/api';
 import { MENU_STRUCTURE } from '@/constants/menuConfig';
 import { useThemeContext } from '@/contexts/ThemeContext';
 import { useThemeColors } from '@/hooks/useThemeColors';
+import { useUserPermissions } from '@/contexts/UserPermissionContext';
 
 export default function HomeScreen() {
   const themeColors = useThemeColors();
   const theme = themeColors;
   const { accentColor, setAccentColor, setTheme } = useThemeContext();
   const { background: backgroundColor, card: cardColor, text: textColor, border: borderColor, subtitle: subtitleColor, primaryGold: GOLD_COLOR, primaryGold, card, text, border, subtitle, background } = themeColors;
-
-
-
+  const { isNodeVisible, isCategoryVisible, userGroupCode, loading: permLoading, clearPermissions, refreshPermissions } = useUserPermissions();
 
   const { username } = useLocalSearchParams();
-  const displayUsername = typeof username === 'string' && username ? username : 'Admin';
+  const [sessionUserName, setSessionUserName] = React.useState<string>('');
+  const [sessionUserGroup, setSessionUserGroup] = React.useState<string>('');
+
+  React.useEffect(() => {
+    // Sync session user attributes whenever screen mounts or userGroupCode changes
+    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      try {
+        const u = window.localStorage.getItem('userName') || window.sessionStorage.getItem('userName') || '';
+        const g = window.localStorage.getItem('userGroup') || window.sessionStorage.getItem('userGroup') || '';
+        if (u) setSessionUserName(u);
+        if (g) setSessionUserGroup(g);
+      } catch (_) {}
+    }
+  }, [userGroupCode]);
+
+  const displayUsername = sessionUserName || (typeof username === 'string' && username ? username : 'User');
+  const displayUserGroup = userGroupCode || sessionUserGroup || 'Staff';
 
   const [activeMenu, setActiveMenu] = React.useState('master');
   const [viewMode, setViewMode] = React.useState<'grid' | 'list'>('grid');
   const [searchQuery, setSearchQuery] = React.useState('');
+
+  // Sidebar visible menu categories
+  const visibleSidebarItems = React.useMemo(() => {
+    return (MENU_STRUCTURE.home || []).filter(item => isNodeVisible(item));
+  }, [isNodeVisible]);
+
+  // If current activeMenu is not visible to this user, switch to first visible menu
+  React.useEffect(() => {
+    if (!permLoading && visibleSidebarItems.length > 0) {
+      const isCurrentActiveVisible = visibleSidebarItems.some(item => item.id === activeMenu);
+      if (!isCurrentActiveVisible) {
+        setActiveMenu(visibleSidebarItems[0].id);
+      }
+    }
+  }, [visibleSidebarItems, activeMenu, permLoading]);
 
 
   const windowWidth = Dimensions.get('window').width;
@@ -96,10 +128,10 @@ export default function HomeScreen() {
   }, []);
 
   const getSubmenuItems = (menuId: string) => {
-    return MENU_STRUCTURE[menuId] || [];
+    return (MENU_STRUCTURE[menuId] || []).filter(item => isNodeVisible(item));
   };
 
-  const activeGridItems = MENU_STRUCTURE[activeMenu] || [];
+  const activeGridItems = (MENU_STRUCTURE[activeMenu] || []).filter(item => isNodeVisible(item));
   const filteredGridItems = activeGridItems.filter(item =>
     item.title.toLowerCase().includes(searchQuery.toLowerCase())
   );
@@ -140,7 +172,7 @@ export default function HomeScreen() {
 
             {/* Menu List */}
             <ScrollView style={styles.sidebarMenu} showsVerticalScrollIndicator={false}>
-              {MENU_STRUCTURE.home?.map((item) => {
+              {visibleSidebarItems.map((item) => {
                 const isActive = activeMenu === item.id;
                 return (
                   <Pressable
@@ -329,7 +361,7 @@ export default function HomeScreen() {
                 </View>
                 <View style={styles.userInfo}>
                   <ThemedText style={[styles.userName, { color: textColor }]}>{displayUsername}</ThemedText>
-                  <ThemedText style={[styles.userRole, { color: subtitleColor }]}>Administrator</ThemedText>
+                  <ThemedText style={[styles.userRole, { color: subtitleColor }]}>{displayUserGroup}</ThemedText>
                 </View>
               </View>
 
@@ -349,26 +381,42 @@ export default function HomeScreen() {
 
             {/* Grid Area */}
             <View style={styles.cardsGrid}>
-              {filteredGridItems.map((item, index) => {
-                return (
-                  <AnimatedGridCard
-                    key={item.id}
-                    item={item}
-                    index={index}
-                    viewMode={viewMode}
-                    cardThemes={cardThemes}
-                    expandedCards={expandedCards}
-                    setExpandedCards={setExpandedCards}
-                    router={router}
-                    styles={styles}
-                    card={cardColor}
-                    border={borderColor}
-                    text={textColor}
-                    subtitle={subtitleColor}
-                    getSubmenuItems={getSubmenuItems}
-                  />
-                );
-              })}
+              {permLoading ? (
+                <View style={{ flex: 1, padding: 40, alignItems: 'center', justifyContent: 'center', width: '100%' }}>
+                  <ActivityIndicator size="large" color={accentColor} />
+                  <ThemedText style={{ color: subtitleColor, marginTop: 12, fontSize: 14 }}>
+                    Loading menu permissions...
+                  </ThemedText>
+                </View>
+              ) : filteredGridItems.length === 0 ? (
+                <View style={{ flex: 1, padding: 40, alignItems: 'center', justifyContent: 'center', width: '100%' }}>
+                  <Ionicons name="lock-closed-outline" size={40} color={subtitleColor} />
+                  <ThemedText style={{ color: subtitleColor, marginTop: 12, fontSize: 14 }}>
+                    No menu items accessible for this group.
+                  </ThemedText>
+                </View>
+              ) : (
+                filteredGridItems.map((item, index) => {
+                  return (
+                    <AnimatedGridCard
+                      key={item.id}
+                      item={item}
+                      index={index}
+                      viewMode={viewMode}
+                      cardThemes={cardThemes}
+                      expandedCards={expandedCards}
+                      setExpandedCards={setExpandedCards}
+                      router={router}
+                      styles={styles}
+                      card={cardColor}
+                      border={borderColor}
+                      text={textColor}
+                      subtitle={subtitleColor}
+                      getSubmenuItems={getSubmenuItems}
+                    />
+                  );
+                })
+              )}
             </View>
 
           </Animated.ScrollView>
@@ -400,8 +448,30 @@ export default function HomeScreen() {
               </TouchableOpacity>
               <TouchableOpacity
                 style={[styles.modalBtn, styles.modalBtnConfirm]}
-                onPress={() => {
+                onPress={async () => {
                   setIsLogoutModalVisible(false);
+                  // Clear local storage and session storage
+                  if (Platform.OS === 'web' && typeof window !== 'undefined') {
+                    try {
+                      window.localStorage.removeItem('user');
+                      window.localStorage.removeItem('userCode');
+                      window.localStorage.removeItem('userId');
+                      window.localStorage.removeItem('userName');
+                      window.localStorage.removeItem('userGroup');
+                      window.sessionStorage.clear();
+                    } catch (_) {}
+                  }
+                  // Clear AsyncStorage
+                  try {
+                    await AsyncStorage.removeItem('@logged_user');
+                    await AsyncStorage.removeItem('@user_id');
+                    await AsyncStorage.removeItem('@user_name');
+                    await AsyncStorage.removeItem('@user_group');
+                  } catch (_) {}
+
+                  // Clear permissions from context state immediately
+                  await clearPermissions();
+
                   router.replace('/login');
                 }}
               >

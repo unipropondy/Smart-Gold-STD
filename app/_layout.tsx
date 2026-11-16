@@ -6,6 +6,7 @@ import 'react-native-reanimated';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { Text, TextInput } from 'react-native';
 import { ThemeProvider as CustomThemeProvider } from '@/contexts/ThemeContext';
+import { UserPermissionProvider } from '@/contexts/UserPermissionContext';
 import { useThemeColors } from '@/hooks/useThemeColors';
 import { useThemeContext } from '@/contexts/ThemeContext';
 
@@ -48,16 +49,18 @@ export default function RootLayout() {
 
   return (
     <CustomThemeProvider>
-      <NavigationThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-        <Stack initialRouteName="login">
-          <Stack.Screen name="index" options={{ headerShown: false }} />
-          <Stack.Screen name="login" options={{ headerShown: false }} />
-          <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-          <Stack.Screen name="class" options={{ headerShown: false }} />
-          <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal' }} />
-        </Stack>
-        <StatusBar style="auto" />
-      </NavigationThemeProvider>
+      <UserPermissionProvider>
+        <NavigationThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
+          <Stack initialRouteName="login">
+            <Stack.Screen name="index" options={{ headerShown: false }} />
+            <Stack.Screen name="login" options={{ headerShown: false }} />
+            <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+            <Stack.Screen name="class" options={{ headerShown: false }} />
+            <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal' }} />
+          </Stack>
+          <StatusBar style="auto" />
+        </NavigationThemeProvider>
+      </UserPermissionProvider>
     </CustomThemeProvider>
   );
 }
