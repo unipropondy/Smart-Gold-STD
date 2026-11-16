@@ -140,44 +140,71 @@ router.post("/changepassword", async (req, res) => {
     const pool = req.pool;
     console.log("Changing password for user:", userId);
 
-    // Verify current password
-    const result = await pool.request()
+    // Verify current password - check against UserName OR UserCode in tblUserMaster
+    let result = await pool.request()
       .input("username", sql.VarChar(50), userId)
-      .input("password", sql.VarChar(10), currentPassword)
+      .input("password", sql.VarChar(50), currentPassword)
       .query(`
-        SELECT UserCode 
+        SELECT UserCode, UserName 
         FROM tblUserMaster
-        WHERE UserName = @username 
-        AND Password = @password
+        WHERE (RTRIM(UserName) = @username OR RTRIM(UserCode) = @username)
+        AND RTRIM(Password) = @password
       `);
       
-    console.log("Verify result:", result.recordset);
+    console.log("Verify result tblUserMaster:", result.recordset);
 
-    if (result.recordset.length === 0) {
-      return res.status(401).json({
-        success: false,
-        message: "Invalid current password"
+    if (result.recordset.length > 0) {
+      const actualUserName = result.recordset[0].UserName;
+      console.log("Updating password in tblUserMaster for:", actualUserName);
+      await pool.request()
+        .input("username", sql.VarChar(50), actualUserName)
+        .input("newPassword", sql.VarChar(50), newPassword)
+        .query(`
+          UPDATE tblUserMaster
+          SET Password = @newPassword,
+              ChangePassword = 'Y',
+              ChangeDate = GETDATE()
+          WHERE RTRIM(UserName) = @username
+        `);
+
+      return res.status(200).json({
+        success: true,
+        message: "Password changed successfully"
       });
     }
 
-    console.log("Updating password...");
-    // Update password
-    await pool.request()
+    // Check tblSalesMan if not found in tblUserMaster
+    const smResult = await pool.request()
       .input("username", sql.VarChar(50), userId)
-      .input("newPassword", sql.VarChar(10), newPassword)
+      .input("password", sql.VarChar(50), currentPassword)
       .query(`
-        UPDATE tblUserMaster
-        SET Password = @newPassword,
-            ChangePassword = 'Y',
-            ChangeDate = GETDATE()
-        WHERE UserName = @username
+        SELECT SalesManCode, SalesManName 
+        FROM tblSalesMan
+        WHERE (RTRIM(SalesManName) = @username OR RTRIM(SalesManCode) = @username)
+        AND RTRIM(Password) = @password
       `);
-      
-    console.log("Password updated successfully.");
 
-    return res.status(200).json({
-      success: true,
-      message: "Password changed successfully"
+    if (smResult.recordset.length > 0) {
+      const smCode = smResult.recordset[0].SalesManCode;
+      console.log("Updating password in tblSalesMan for:", smCode);
+      await pool.request()
+        .input("code", sql.VarChar(50), smCode)
+        .input("newPassword", sql.VarChar(50), newPassword)
+        .query(`
+          UPDATE tblSalesMan
+          SET Password = @newPassword
+          WHERE RTRIM(SalesManCode) = @code
+        `);
+
+      return res.status(200).json({
+        success: true,
+        message: "Password changed successfully"
+      });
+    }
+
+    return res.status(401).json({
+      success: false,
+      message: "Invalid current password"
     });
 
   } catch (err) {

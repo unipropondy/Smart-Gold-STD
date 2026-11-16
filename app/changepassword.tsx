@@ -1,6 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router, Stack, useLocalSearchParams } from 'expo-router';
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, TextInput, TouchableOpacity, useColorScheme, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -27,25 +28,53 @@ export default function ChangePasswordScreen() {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [saving, setSaving] = useState(false);
 
+  useEffect(() => {
+    // If username wasn't passed directly in route params, resolve from session or localStorage
+    if (!userId) {
+      if (Platform.OS === 'web' && typeof window !== 'undefined') {
+        try {
+          const storedUser = window.localStorage.getItem('userName') || window.sessionStorage.getItem('userName') ||
+                             window.localStorage.getItem('userCode') || window.sessionStorage.getItem('userCode');
+          if (storedUser) {
+            setUserId(storedUser);
+            return;
+          }
+        } catch (_) {}
+      }
+      AsyncStorage.getItem('@user_name').then(u => {
+        if (u) setUserId(u);
+      }).catch(() => {});
+    }
+  }, [userId]);
+
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+
+  const showToast = (message: string, type: 'success' | 'error' = 'success', onComplete?: () => void) => {
+    setToast({ message, type });
+    setTimeout(() => {
+      setToast(null);
+      if (onComplete) onComplete();
+    }, 2500);
+  };
+
   const inputBg = isDark ? '#222' : '#F5F5F5';
 
   const handleUpdate = async () => {
     if (!userId) {
-      return Alert.alert('Validation Error', 'User ID is missing.');
+      return showToast('User ID is missing.', 'error');
     }
     if (!currentPassword) {
-      return Alert.alert('Validation Error', 'Current Password is required.');
+      return showToast('Current Password is required.', 'error');
     }
     if (!newPassword) {
-      return Alert.alert('Validation Error', 'New Password is required.');
+      return showToast('New Password is required.', 'error');
     }
     if (!confirmPassword) {
-      return Alert.alert('Validation Error', 'Confirm Password is required.');
+      return showToast('Confirm Password is required.', 'error');
     }
 
     if (newPassword !== confirmPassword) {
-      Alert.alert('Validation Error', 'New Password and Confirm Password do not match.');
-      return;
+      return showToast('New Password and Confirm Password do not match.', 'error');
     }
 
     setSaving(true);
@@ -58,15 +87,13 @@ export default function ChangePasswordScreen() {
 
       const json = await response.json();
       if (json.success) {
-        Alert.alert('Success', 'Password changed successfully', [
-          { text: 'OK', onPress: () => router.back() }
-        ]);
+        showToast('Password changed successfully!', 'success', () => router.back());
       } else {
-        Alert.alert('Error', json.message || 'Failed to change password');
+        showToast(json.message || 'Failed to change password', 'error');
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Update error:', error);
-      Alert.alert('Error', 'Network error connecting to API');
+      showToast(error?.message || 'Network error connecting to API', 'error');
     } finally {
       setSaving(false);
     }
@@ -158,6 +185,22 @@ export default function ChangePasswordScreen() {
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
+
+      {/* Floating Toast Notification */}
+      {toast && (
+        <View style={[
+          styles.toastContainer,
+          toast.type === 'error' ? styles.toastError : styles.toastSuccess
+        ]}>
+          <Ionicons
+            name={toast.type === 'error' ? 'alert-circle' : 'checkmark-circle'}
+            size={20}
+            color="#FFF"
+            style={{ marginRight: 8 }}
+          />
+          <ThemedText style={styles.toastText}>{toast.message}</ThemedText>
+        </View>
+      )}
     </SafeAreaView>
   );
 }
@@ -226,5 +269,36 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     minWidth: 120,
     alignItems: 'center',
+  },
+  toastContainer: {
+    position: 'absolute',
+    top: 24,
+    left: '50%',
+    transform: [{ translateX: -180 }],
+    width: 360,
+    maxWidth: '90%',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 9999,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 6,
+    elevation: 10,
+  },
+  toastSuccess: {
+    backgroundColor: '#10B981',
+  },
+  toastError: {
+    backgroundColor: '#EF4444',
+  },
+  toastText: {
+    color: '#FFFFFF',
+    fontWeight: '600',
+    fontSize: 14,
   },
 });

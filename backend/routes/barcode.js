@@ -10,7 +10,7 @@ const { sql } = require('../db');
 router.get('/company', async (req, res) => {
     try {
         const pool = req.pool;
-        let companyName = "MILLION";
+        let companyName = "";
         let shortCode = "";
         
         try {
@@ -18,7 +18,7 @@ router.get('/company', async (req, res) => {
             if (compRes.recordset.length > 0) {
                 const comp = compRes.recordset[0];
                 shortCode = (comp.ShortCode || '').toUpperCase().trim();
-                const dbName = (comp.Name || '').toUpperCase().trim();
+                const dbName = (comp.Name || '').trim();
 
                 if (shortCode === "ES") {
                     companyName = "SRI PINANG";
@@ -28,9 +28,9 @@ router.get('/company', async (req, res) => {
                     companyName = "APPOLLO";
                 } else if (shortCode === "GMT") {
                     companyName = "GMT JEWELLERS PTE LTD";
-                } else if (shortCode === "HN" && dbName.includes("HANIFFA")) {
+                } else if (shortCode === "HN" && dbName.toUpperCase().includes("HANIFFA")) {
                     companyName = "HANIFFA TEXTILES PTE LTD";
-                } else if (shortCode === "HN" && dbName.includes("JEWEL PALACE")) {
+                } else if (shortCode === "HN" && dbName.toUpperCase().includes("JEWEL PALACE")) {
                     companyName = "JEWEL PALACE PTE LTD";
                 } else if (shortCode === "SSJ") {
                     companyName = "SS JEWELLERS";
@@ -47,7 +47,7 @@ router.get('/company', async (req, res) => {
         res.json({ success: true, company: companyName, shortCode });
     } catch (error) {
         console.error("Error fetching company:", error);
-        res.status(500).json({ success: false, message: "Server error", company: "MILLION" });
+        res.status(500).json({ success: false, message: "Server error", company: "" });
     }
 });
 

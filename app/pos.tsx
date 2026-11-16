@@ -1814,27 +1814,23 @@ export default function PosScreen() {
                   </View>
                 </View>
 
-                {/* Row 4: Address & Passport */}
+                {/* Row 4: Address, Passport & Remarks */}
                 <View style={styles.formGridRow}>
-                  <View style={{ flex: 1.5 }}>
+                  <View style={{ flex: 1.2 }}>
                     {renderInputRow("Address", "CustomerAddress", headerState.CustomerAddress, updateHeader, undefined, false, 65)}
                   </View>
-                  <View style={{ flex: 1 }}>
-                    {renderInputRow("Passport", "PassportNo", headerState.PassportNo, updateHeader, undefined, false, 60)}
+                  <View style={{ flex: 0.9 }}>
+                    {renderInputRow("Passport", "PassportNo", headerState.PassportNo, updateHeader, undefined, false, 55)}
+                  </View>
+                  <View style={{ flex: 1.1 }}>
+                    {renderInputRow("Remarks", "Remarks", headerState.Remarks, updateHeader, undefined, false, 55)}
                   </View>
                 </View>
 
-                {/* Row 5: Remarks */}
-                <View style={styles.formGridRow}>
-                  <View style={{ flex: 1 }}>
-                    {renderInputRow("Remarks", "Remarks", headerState.Remarks, updateHeader, undefined, false, 65)}
-                  </View>
-                </View>
-
-                {/* Row 6: eTRS Radios, Flexi Amount & Flexi Bonus (Matching frmgpos.vb Panel8 & txtFlexiAmount/txtFlexiBonus) */}
-                <View style={[styles.formGridRow, { alignItems: 'center' }]}>
+                {/* Row 5: eTRS Radios, Flexi Amount, Flexi Bonus & Checkboxes */}
+                <View style={[styles.formGridRow, { borderBottomWidth: 0, paddingBottom: 0, alignItems: 'center' }]}>
                   {/* eTRS Radio Group */}
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, borderWidth: 1, borderColor: '#D8C59A', borderRadius: 4, paddingHorizontal: 10, paddingVertical: 4, backgroundColor: '#FCFAF6' }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, borderWidth: 1, borderColor: '#D8C59A', borderRadius: 4, paddingHorizontal: 6, paddingVertical: 2, backgroundColor: '#FCFAF6' }}>
                     <RadioButton
                       label="For eTRS"
                       selected={headerState.eTRS === 'For eTRS'}
@@ -1858,19 +1854,17 @@ export default function PosScreen() {
                   </View>
 
                   {/* Flexi Amount */}
-                  <View style={{ flex: 1, marginLeft: 12 }}>
-                    {renderInputRow("Flexi Amount", "FlexiAmount", headerState.FlexiAmount, updateHeader, fetchFlexiSubscriptions, true, 80)}
+                  <View style={{ flex: 1, marginLeft: 8 }}>
+                    {renderInputRow("Flexi Amount", "FlexiAmount", headerState.FlexiAmount, updateHeader, fetchFlexiSubscriptions, true, 72)}
                   </View>
 
                   {/* Flexi Bonus */}
-                  <View style={{ flex: 1, marginLeft: 8 }}>
-                    {renderInputRow("Flexi Bonus", "FlexiBonus", headerState.FlexiBonus, updateHeader, undefined, true, 75)}
+                  <View style={{ flex: 1, marginLeft: 6 }}>
+                    {renderInputRow("Flexi Bonus", "FlexiBonus", headerState.FlexiBonus, updateHeader, undefined, true, 68)}
                   </View>
-                </View>
 
-                {/* Row 7: Checkboxes matching frmgpos.vb (chkPrintMC, chkPrintImage, and TradeIn) */}
-                <View style={[styles.formGridRow, { borderBottomWidth: 0, paddingBottom: 0, justifyContent: 'flex-end', flexWrap: 'wrap' }]}>
-                  <View style={{ flexDirection: 'row', gap: 16, alignItems: 'center' }}>
+                  {/* Checkboxes matching frmgpos.vb (chkPrintMC, chkPrintImage, and TradeIn) */}
+                  <View style={{ flexDirection: 'row', gap: 10, alignItems: 'center', marginLeft: 8 }}>
                     <Checkbox label="Print MC" selected={headerState.PrintMC} onPress={() => updateHeader('PrintMC', !headerState.PrintMC)} />
                     <Checkbox label="Print Img" selected={headerState.PrintImage} onPress={() => updateHeader('PrintImage', !headerState.PrintImage)} />
                     <Checkbox label="Trade In" selected={paymentState.TradeIn} onPress={() => updatePayment('TradeIn', !paymentState.TradeIn)} />
@@ -2700,7 +2694,7 @@ const styles = StyleSheet.create({
   cardHeaderBanner: {
     backgroundColor: '#F5E7CA',
     paddingHorizontal: 10,
-    paddingVertical: 6,
+    paddingVertical: 4,
     borderBottomWidth: 1,
     borderBottomColor: '#E2D3B3',
     flexDirection: 'row',
@@ -2713,9 +2707,9 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   headerIconBadgeSmall: {
-    width: 22,
-    height: 22,
-    borderRadius: 5,
+    width: 20,
+    height: 20,
+    borderRadius: 4,
     backgroundColor: '#FFF8EA',
     borderWidth: 1,
     borderColor: '#E2D2AF',
@@ -2723,13 +2717,14 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   cardHeaderTitleSmall: {
-    fontSize: 12,
+    fontSize: 11.5,
     fontWeight: 'bold',
     color: '#3B2D17',
     letterSpacing: 0.3,
   },
   cardBody: {
-    padding: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
   },
 
   // ===== CLASS RATES CARD =====
@@ -2740,7 +2735,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     backgroundColor: '#FCFAF6',
     paddingHorizontal: 8,
-    paddingVertical: 5,
+    paddingVertical: 3,
     borderBottomWidth: 1,
     borderBottomColor: '#F0E6D4',
   },
@@ -2752,7 +2747,7 @@ const styles = StyleSheet.create({
   classRateRow: {
     flexDirection: 'row',
     paddingHorizontal: 8,
-    paddingVertical: 5,
+    paddingVertical: 3,
     borderBottomWidth: 1,
     borderBottomColor: '#F5EFE4',
   },
@@ -2770,7 +2765,7 @@ const styles = StyleSheet.create({
   formGridRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 4,
+    paddingVertical: 2,
     borderBottomWidth: 1,
     borderBottomColor: '#F7F2E9',
     gap: 8,
@@ -2794,7 +2789,7 @@ const styles = StyleSheet.create({
     minWidth: 0,
   },
   formInput: {
-    height: 26,
+    height: 24,
     backgroundColor: '#FFFFFF',
     borderWidth: 1,
     borderColor: '#E2D7C5',
@@ -2811,8 +2806,8 @@ const styles = StyleSheet.create({
     borderBottomRightRadius: 0,
   },
   attachedLookupBtn: {
-    width: 24,
-    height: 26,
+    width: 22,
+    height: 24,
     flexShrink: 0,
     backgroundColor: '#FAF5EA',
     borderWidth: 1,

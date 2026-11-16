@@ -67,6 +67,7 @@ export const MENU_STRUCTURE: MenuStructure = {
     { id: 'usergroup', title: 'User Group', icon: 'people-outline', color: '#3B82F6', route: '/usergroup' },
     { id: 'usermaster', title: 'User Master', icon: 'person-outline', color: '#10B981', route: '/usermaster' },
     { id: 'userpermission', title: 'User Permission', icon: 'key-outline', color: '#F59E0B', route: '/userpermission' },
+    { id: 'changepassword', title: 'Change Password', icon: 'lock-closed-outline', color: '#EC4899', route: '/changepassword' },
   ],
   purchase: [
     { id: 'jobsheet', title: 'JobSheet', icon: 'document-text-outline', color: '#3B82F6', route: '/jobsheet' },

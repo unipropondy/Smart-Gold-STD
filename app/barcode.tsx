@@ -28,8 +28,8 @@ export default function BarcodeScreen() {
   const router = useRouter();
 
   // Field states matching frmBarcode.vb
-  const [company, setCompany] = useState('MILLION');
-  const [defaultCompany, setDefaultCompany] = useState('MILLION');
+  const [company, setCompany] = useState('');
+  const [defaultCompany, setDefaultCompany] = useState('');
   const [barCode, setBarCode] = useState('');
   const [inventoryCode, setInventoryCode] = useState('');
   const [description, setDescription] = useState('');
@@ -156,7 +156,7 @@ export default function BarcodeScreen() {
   // btnNew_Click
   const handleClear = (fullClear = true) => {
     if (fullClear) {
-      setCompany(defaultCompany || 'MILLION');
+      setCompany(defaultCompany || '');
       setInventoryCode('');
     }
     setBarCode('');
@@ -201,10 +201,6 @@ export default function BarcodeScreen() {
     }
     if (!weight || weight.trim() === '') {
       showToast('Please Enter Weight', 'error');
-      return;
-    }
-    if (!company || !company.trim()) {
-      showToast('Please Enter Company Name', 'error');
       return;
     }
     if (!barCode || !barCode.trim()) {

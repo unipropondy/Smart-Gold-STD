@@ -1574,16 +1574,13 @@ export default function DirectPurchaseScreen() {
           setDetails([]);
         }
       } else {
-        if (!isManualBlur) {
-          showToast('Job sheet no. is invalid!', 'error');
-          handleClearForm();
-        }
+        showAlert('Warning', 'Invalid Job Sheet Number');
+        updateHeader('JobSheetNo', '');
       }
     } catch (e: any) {
       setLoading(false);
-      if (!isManualBlur) {
-        showToast(e.message || 'Failed to load JobSheet details', 'error');
-      }
+      showAlert('Warning', 'Invalid Job Sheet Number');
+      updateHeader('JobSheetNo', '');
     }
   };
 
@@ -2071,7 +2068,10 @@ export default function DirectPurchaseScreen() {
                       value={headerState.JobSheetNo}
                       onChangeText={(t) => updateHeader('JobSheetNo', t)}
                       onBlur={() => {
-                        if (headerState.JobSheetNo) loadJobSheetByNo(headerState.JobSheetNo, true);
+                        if (headerState.JobSheetNo?.trim()) loadJobSheetByNo(headerState.JobSheetNo, false);
+                      }}
+                      onSubmitEditing={() => {
+                        if (headerState.JobSheetNo?.trim()) loadJobSheetByNo(headerState.JobSheetNo, false);
                       }}
                       editable={!isFormLocked}
                     />
