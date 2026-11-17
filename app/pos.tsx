@@ -3018,6 +3018,7 @@ const styles = StyleSheet.create({
   footerCol: {
     flex: 1,
     alignItems: 'center',
+    justifyContent: 'center',
     borderRightWidth: 1,
     borderRightColor: '#F2E8D7',
   },
@@ -3026,12 +3027,14 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#8F816E',
     textTransform: 'uppercase',
+    textAlign: 'center',
   },
   footerVal: {
     fontSize: 11,
     fontWeight: 'bold',
     color: '#3B2D17',
     marginTop: 1,
+    textAlign: 'center',
   },
 
   // ===== MODALS & CALENDAR =====

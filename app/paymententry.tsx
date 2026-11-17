@@ -605,20 +605,6 @@ export default function PaymentEntry() {
 
         {/* MIDDLE SECTION: INVOICES GRID */}
         <View style={[styles.goldCard, { flex: 1.1, marginTop: 8 }]}>
-          <View style={styles.cardHeaderBanner}>
-            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-              <View style={styles.headerIconBadge}>
-                <Ionicons name="receipt-outline" size={14} color="#B48218" />
-              </View>
-              <ThemedText style={styles.cardHeaderTitle}>
-                {mode === 'Invoice' ? 'Bills (Invoices)' : mode === 'Flexi' ? 'Flexi Details' : 'eTRS Statement Invoices'}
-              </ThemedText>
-              <View style={styles.counterBadge}>
-                <ThemedText style={styles.counterBadgeText}>{invoices.length} Records</ThemedText>
-              </View>
-            </View>
-          </View>
-
           <View style={{ flex: 1, width: '100%' }}>
             {/* Table Header */}
             <View style={styles.tableHeader}>
@@ -740,27 +726,6 @@ export default function PaymentEntry() {
         <View style={styles.bottomSection}>
           {/* Left: Paymodes Grid with editable NewAmount & NewSlipNo */}
           <View style={[styles.goldCard, styles.paymodeContainer]}>
-            <View style={styles.cardHeaderBanner}>
-              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                <View style={styles.headerIconBadge}>
-                  <Ionicons name="card-outline" size={14} color="#B48218" />
-                </View>
-                <ThemedText style={styles.cardHeaderTitle}>Payment Modes Breakdown</ThemedText>
-                <View style={styles.counterBadge}>
-                  <ThemedText style={styles.counterBadgeText}>{paymodes.length} Items</ThemedText>
-                </View>
-              </View>
-
-              {/* <TouchableOpacity
-                style={styles.lovTriggerBtn}
-                onPress={handleOpenPaymodeLOV}
-                activeOpacity={0.7}
-              >
-                <Ionicons name="list" size={13} color="#7D5E19" style={{ marginRight: 3 }} />
-                <ThemedText style={styles.lovTriggerBtnText}>Pick Paymode</ThemedText>
-              </TouchableOpacity> */}
-            </View>
-
             <View style={{ flex: 1 }}>
               {/* Paymodes Table Header matching dgvPaymode */}
               <View style={styles.tableHeader}>
@@ -1183,8 +1148,6 @@ const styles = StyleSheet.create({
     backgroundColor: '#F5E7CA',
     paddingHorizontal: 10,
     paddingVertical: 6,
-    borderBottomWidth: 1,
-    borderBottomColor: '#E2D3B3',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',

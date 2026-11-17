@@ -84,7 +84,7 @@ export default function MasterReportsScreen() {
   const [customerDateType, setCustomerDateType] = useState<string>('Date of Birth');
   const [actionOption, setActionOption] = useState<ActionOption>('Preview');
   const [fromDate, setFromDate] = useState<string>(getTodayDisp('/'));
-  const [toDate, setToDate] = useState<string>(getTodayDisp());
+  const [toDate, setToDate] = useState<string>(getTodayDisp('/'));
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
 

@@ -992,7 +992,7 @@ export default function DirectPurchaseScreen() {
 
     // Replace all alert popups with Toast message
     const toastType: 'success' | 'error' | 'info' =
-      title.toLowerCase().includes('error') ? 'error' :
+      (title.toLowerCase().includes('error') || title.toLowerCase().includes('warning') || message.toLowerCase().includes('invalid')) ? 'error' :
         title.toLowerCase().includes('success') ? 'success' : 'info';
     showToast(message, toastType);
     if (buttons && buttons[0]?.onPress) {
@@ -1574,12 +1574,12 @@ export default function DirectPurchaseScreen() {
           setDetails([]);
         }
       } else {
-        showAlert('Warning', 'Invalid Job Sheet Number');
+        showToast('Invalid Job Sheet Number', 'error');
         updateHeader('JobSheetNo', '');
       }
     } catch (e: any) {
       setLoading(false);
-      showAlert('Warning', 'Invalid Job Sheet Number');
+      showToast('Invalid Job Sheet Number', 'error');
       updateHeader('JobSheetNo', '');
     }
   };

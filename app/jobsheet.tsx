@@ -1118,10 +1118,10 @@ export default function JobSheetScreen() {
   );
 
   const renderRightSideField = (label: string, key: string, value: string, isReadOnly = false) => (
-    <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 7, width: '100%' }}>
+    <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 4, width: '100%' }}>
       <ThemedText style={{ fontSize: 11, color: '#3C2E19', fontWeight: 'bold', width: 95 }}>{label}</ThemedText>
       <TextInput
-        style={[styles.input, isReadOnly ? styles.readonlyInput : null, { flex: 1, textAlign: 'right' }]}
+        style={[styles.input, isReadOnly ? styles.readonlyInput : null, { flex: 1, textAlign: 'right', height: 25 }]}
         value={value}
         onChangeText={(text) => updateHeader(key, text)}
         editable={!isReadOnly}
@@ -1227,10 +1227,10 @@ export default function JobSheetScreen() {
                         flex: 1,
                         minWidth: 110,
                         border: '1px solid #E2D7C5',
-                        borderRadius: '6px',
-                        padding: '4px 8px',
-                        fontSize: '12px',
-                        height: '28px',
+                        borderRadius: '5px',
+                        padding: '2px 6px',
+                        fontSize: '11.5px',
+                        height: '25px',
                         color: '#2C2519',
                         backgroundColor: '#FFFFFF',
                         outline: 'none',
@@ -1362,16 +1362,16 @@ export default function JobSheetScreen() {
                   />
                 </View>
 
-                {/* Row 4: Payable, GST, TEAL %, Cost/g */}
-                <View style={[styles.row, { alignItems: 'center' }]}>
-                  <ThemedText style={styles.label}>Payable</ThemedText>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', marginRight: 10 }}>
+                {/* Row 4: Payable, GST, 22K/24, TEAL %, TAEL, Cost/g - ALL IN A SINGLE ROW */}
+                <View style={[styles.row, { alignItems: 'center', flexWrap: 'nowrap' }]}>
+                  <ThemedText style={[styles.label, { width: 'auto', marginRight: 8 }]}>Payable</ThemedText>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', marginRight: 8 }}>
                     <RadioButton label="Gold" selected={headerState.PaymentType === 'G'} onPress={() => updateHeader('PaymentType', 'G')} />
                     <RadioButton label="Cash" selected={headerState.PaymentType === 'C'} onPress={() => updateHeader('PaymentType', 'C')} />
                     <RadioButton label="Both" selected={headerState.PaymentType === 'B'} onPress={() => updateHeader('PaymentType', 'B')} />
                   </View>
 
-                  <ThemedText style={{ marginRight: 6, color: '#3B3020', fontWeight: 'bold', fontSize: 11 }}>GST</ThemedText>
+                  <ThemedText style={{ marginRight: 4, color: '#3B3020', fontWeight: 'bold', fontSize: 11 }}>GST</ThemedText>
                   <Checkbox
                     label=""
                     selected={chkGST1}
@@ -1385,7 +1385,7 @@ export default function JobSheetScreen() {
                   />
 
                   {/* 22K / 24 Pill Box */}
-                  <View style={styles.pillBox}>
+                  <View style={[styles.pillBox, { marginLeft: 4, marginRight: 8 }]}>
                     <RadioButton
                       label="22K"
                       selected={Number(headerState.GST) === 22}
@@ -1399,43 +1399,43 @@ export default function JobSheetScreen() {
                   </View>
 
                   {/* TEAL % */}
-                  <View style={{ flexDirection: 'row', marginLeft: 12, alignItems: 'center' }}>
-                    <ThemedText style={{ color: '#4A3B25', fontSize: 11, marginRight: 5, fontWeight: 'bold' }}>TEAL %</ThemedText>
-                    <View style={{ width: 76, flexDirection: 'row' }}>
-                      <TextInput
-                        style={[styles.input, { width: 50, borderTopRightRadius: 0, borderBottomRightRadius: 0, borderRightWidth: 0 }]}
-                        value={headerState.TaelPercent}
-                        onChangeText={(text) => updateHeader('TaelPercent', text.replace(/[^0-9.]/g, ''))}
-                        keyboardType="numeric"
-                      />
-                      <TouchableOpacity style={[styles.lookupBtn, { width: 26 }]} onPress={openTaelPercentLov}>
-                        <ThemedText style={styles.lookupBtnText}>...</ThemedText>
-                      </TouchableOpacity>
-                    </View>
-
-                    <ThemedText style={{ color: '#4A3B25', fontSize: 11, marginLeft: 8, marginRight: 5, fontWeight: 'bold' }}>TAEL</ThemedText>
+                  <ThemedText style={{ color: '#4A3B25', fontSize: 11, marginRight: 4, fontWeight: 'bold' }}>TEAL %</ThemedText>
+                  <View style={{ width: 70, flexDirection: 'row', marginRight: 8 }}>
                     <TextInput
-                      style={[styles.input, { width: 58 }]}
-                      value={headerState.TaelRate}
-                      onChangeText={(text) => updateHeader('TaelRate', text.replace(/[^0-9.]/g, ''))}
+                      style={[styles.input, { width: 44, borderTopRightRadius: 0, borderBottomRightRadius: 0, borderRightWidth: 0 }]}
+                      value={headerState.TaelPercent}
+                      onChangeText={(text) => updateHeader('TaelPercent', text.replace(/[^0-9.]/g, ''))}
                       keyboardType="numeric"
                     />
-
-                    <ThemedText style={{ color: '#4A3B25', fontSize: 11, marginLeft: 8, marginRight: 5, fontWeight: 'bold' }}>
-                      Cost/Gram <ThemedText style={{ color: '#EF4444' }}>*</ThemedText>
-                    </ThemedText>
-                    <TextInput
-                      style={[styles.input, { width: 68 }]}
-                      value={headerState.CostPerGram}
-                      onChangeText={(text) => updateHeader('CostPerGram', text.replace(/[^0-9.]/g, ''))}
-                      onBlur={() => {
-                        if ((parseFloat(headerState.CostPerGram) || 0) <= 0) {
-                          showToast('Enter cost per gram.', 'error');
-                        }
-                      }}
-                      keyboardType="numeric"
-                    />
+                    <TouchableOpacity style={[styles.lookupBtn, { width: 26 }]} onPress={openTaelPercentLov}>
+                      <ThemedText style={styles.lookupBtnText}>...</ThemedText>
+                    </TouchableOpacity>
                   </View>
+
+                  {/* TAEL */}
+                  <ThemedText style={{ color: '#4A3B25', fontSize: 11, marginRight: 4, fontWeight: 'bold' }}>TAEL</ThemedText>
+                  <TextInput
+                    style={[styles.input, { width: 56, marginRight: 8 }]}
+                    value={headerState.TaelRate}
+                    onChangeText={(text) => updateHeader('TaelRate', text.replace(/[^0-9.]/g, ''))}
+                    keyboardType="numeric"
+                  />
+
+                  {/* Cost/Gram */}
+                  <ThemedText style={{ color: '#4A3B25', fontSize: 11, marginRight: 4, fontWeight: 'bold' }}>
+                    Cost/Gram <ThemedText style={{ color: '#EF4444' }}>*</ThemedText>
+                  </ThemedText>
+                  <TextInput
+                    style={[styles.input, { width: 64 }]}
+                    value={headerState.CostPerGram}
+                    onChangeText={(text) => updateHeader('CostPerGram', text.replace(/[^0-9.]/g, ''))}
+                    onBlur={() => {
+                      if ((parseFloat(headerState.CostPerGram) || 0) <= 0) {
+                        showToast('Enter cost per gram.', 'error');
+                      }
+                    }}
+                    keyboardType="numeric"
+                  />
                 </View>
 
                 {/* Row 5: Options, Fix/UnFix, Due Date */}
@@ -1458,10 +1458,10 @@ export default function JobSheetScreen() {
                         flex: 1,
                         minWidth: 110,
                         border: '1px solid #E2D7C5',
-                        borderRadius: '6px',
-                        padding: '4px 8px',
-                        fontSize: '12px',
-                        height: '28px',
+                        borderRadius: '5px',
+                        padding: '2px 6px',
+                        fontSize: '11.5px',
+                        height: '25px',
                         color: '#2C2519',
                         backgroundColor: '#FFFFFF',
                         outline: 'none',
@@ -1526,11 +1526,11 @@ export default function JobSheetScreen() {
                   {renderRightSideField('GoldValue+MC', 'TotalCost', headerState.TotalCost, true)}
 
                   {/* GST Field */}
-                  <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 7, width: '100%' }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 4, width: '100%' }}>
                     <ThemedText style={{ fontSize: 11, color: '#3C2E19', fontWeight: 'bold', width: 95 }}>GST</ThemedText>
                     <Checkbox label="" selected={summaryGSTActive} onPress={() => handleChkGST(!summaryGSTActive)} />
                     <TextInput
-                      style={[styles.input, styles.readonlyInput, { flex: 1, marginLeft: 4 }]}
+                      style={[styles.input, styles.readonlyInput, { flex: 1, marginLeft: 4, height: 25 }]}
                       editable={false}
                       value={headerState.GSTAmountDisplay}
                     />
@@ -2315,32 +2315,33 @@ const styles = StyleSheet.create({
     backgroundColor: '#F5E7CA',
     borderBottomWidth: 1,
     borderBottomColor: '#E2D3B3',
-    paddingVertical: 7,
-    paddingHorizontal: 12,
+    paddingVertical: 4,
+    paddingHorizontal: 10,
   },
   headerIconBadge: {
-    width: 24,
-    height: 24,
-    borderRadius: 5,
+    width: 20,
+    height: 20,
+    borderRadius: 4,
     backgroundColor: '#FFF8EA',
     borderWidth: 1,
     borderColor: '#E2D2AF',
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 8,
+    marginRight: 6,
   },
   cardHeaderTitle: {
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: 'bold',
     color: '#3B2D17',
     letterSpacing: 0.3,
   },
   cardBody: {
-    padding: 10,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
   },
 
   // Rows and Labels
-  row: { flexDirection: 'row', alignItems: 'center', marginBottom: 7, flexWrap: 'wrap' },
+  row: { flexDirection: 'row', alignItems: 'center', marginBottom: 4, flexWrap: 'wrap' },
   fieldContainer: { marginBottom: 2, paddingHorizontal: 4 },
   label: { fontSize: 11, fontWeight: 'bold', width: 96, marginRight: 6, color: '#3A2E19' },
   labelRight: { fontSize: 11, fontWeight: 'bold', textAlign: 'right', marginRight: 8, color: '#3A2E19' },
@@ -2349,11 +2350,11 @@ const styles = StyleSheet.create({
   input: {
     borderWidth: 1,
     borderColor: '#E2D7C5',
-    borderRadius: 6,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    fontSize: 12,
-    height: 28,
+    borderRadius: 5,
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+    fontSize: 11.5,
+    height: 25,
     backgroundColor: '#FFFFFF',
     color: '#2C2519',
   },
@@ -2366,21 +2367,21 @@ const styles = StyleSheet.create({
   // Lookups & Buttons
   lookupContainer: { flexDirection: 'row' },
   lookupBtn: {
-    width: 32,
-    height: 28,
+    width: 28,
+    height: 25,
     borderWidth: 1,
     borderColor: '#E2D7C5',
     borderLeftWidth: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    borderTopRightRadius: 6,
-    borderBottomRightRadius: 6,
+    borderTopRightRadius: 5,
+    borderBottomRightRadius: 5,
     backgroundColor: '#FAF5EA',
   },
   lookupBtnText: {
     color: '#6E5528',
     fontWeight: 'bold',
-    fontSize: 12,
+    fontSize: 11.5,
   },
 
   // Pill Box for Grouped Choices
@@ -2390,41 +2391,41 @@ const styles = StyleSheet.create({
     marginLeft: 8,
     borderWidth: 1,
     borderColor: '#DFD3BC',
-    borderRadius: 14,
-    paddingHorizontal: 6,
+    borderRadius: 12,
+    paddingHorizontal: 5,
     paddingVertical: 1,
-    height: 26,
+    height: 23,
     backgroundColor: '#FBF8F2',
   },
 
   // Radios and Checkboxes
-  radioContainer: { flexDirection: 'row', alignItems: 'center', marginVertical: 2, marginRight: 10 },
+  radioContainer: { flexDirection: 'row', alignItems: 'center', marginVertical: 1, marginRight: 10 },
   radioCircle: {
-    width: 15,
-    height: 15,
-    borderRadius: 8,
+    width: 14,
+    height: 14,
+    borderRadius: 7,
     borderWidth: 1.5,
     borderColor: '#B8903B',
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 5,
+    marginRight: 4,
     backgroundColor: '#FFFFFF',
   },
   radioInner: {
-    width: 7,
-    height: 7,
-    borderRadius: 4,
+    width: 6,
+    height: 6,
+    borderRadius: 3,
     backgroundColor: '#B8903B',
   },
   radioLabel: { fontSize: 11, color: '#362B1A', fontWeight: '500' },
   checkboxSquare: {
-    width: 15,
-    height: 15,
+    width: 14,
+    height: 14,
     borderWidth: 1.5,
     borderColor: '#B8903B',
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 5,
+    marginRight: 4,
     borderRadius: 3,
   },
 
@@ -2436,26 +2437,26 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFF4DC',
     borderWidth: 1,
     borderColor: '#ECD8AB',
-    borderRadius: 6,
-    paddingVertical: 5,
-    paddingHorizontal: 10,
-    marginTop: 8,
+    borderRadius: 5,
+    paddingVertical: 3,
+    paddingHorizontal: 8,
+    marginTop: 4,
   },
   totalCostLabelGroup: {
     flexDirection: 'row',
     alignItems: 'center',
   },
   totalCostIconBadge: {
-    width: 22,
-    height: 22,
-    borderRadius: 11,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
     backgroundColor: '#9B6E16',
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 8,
+    marginRight: 6,
   },
   totalCostTitle: {
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: 'bold',
     color: '#473210',
   },
@@ -2463,14 +2464,14 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
     borderWidth: 1,
     borderColor: '#E8D4A2',
-    borderRadius: 5,
-    paddingVertical: 3,
-    paddingHorizontal: 16,
-    minWidth: 110,
+    borderRadius: 4,
+    paddingVertical: 2,
+    paddingHorizontal: 12,
+    minWidth: 100,
     alignItems: 'flex-end',
   },
   totalCostValueText: {
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: 'bold',
     color: '#281B08',
   },

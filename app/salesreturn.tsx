@@ -1433,18 +1433,6 @@ export default function SalesReturnScreen() {
 
         {/* RETURN ITEMS CARD & TABLE */}
         <View style={[styles.goldCard, { marginTop: 8 }]}>
-          <View style={styles.cardHeaderBanner}>
-            <View style={styles.headerTitleContainer}>
-              <View style={styles.headerIconBadgeSmall}>
-                <Ionicons name="cart-outline" size={13} color="#B48218" />
-              </View>
-              <ThemedText style={styles.cardHeaderTitleSmall}>Return Items</ThemedText>
-              <View style={styles.counterBadge}>
-                <ThemedText style={styles.counterBadgeText}>{returnItems.length} items</ThemedText>
-              </View>
-            </View>
-          </View>
-
           {/* Table Header */}
           <View style={styles.tableHeaderRow}>
             <ThemedText style={[styles.tableHeadCell, { flex: 1.5 }]}>Inventory Code</ThemedText>
@@ -2168,9 +2156,9 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     borderWidth: 1,
     borderColor: '#E8DCB8',
-    paddingVertical: 8,
+    paddingVertical: 3,
     paddingHorizontal: 12,
-    marginTop: 8,
+    marginTop: 6,
     elevation: 2,
     shadowColor: '#A38035',
     shadowOffset: { width: 0, height: 1 },
@@ -2183,20 +2171,20 @@ const styles = StyleSheet.create({
   },
   summaryDivider: {
     width: 1,
-    height: 28,
+    height: 20,
     backgroundColor: '#F0E6D4',
   },
   summaryLabel: {
-    fontSize: 10,
+    fontSize: 9.5,
     fontWeight: '600',
     color: '#7D6F5B',
     textTransform: 'uppercase',
   },
   summaryValue: {
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: 'bold',
     color: '#3B2D17',
-    marginTop: 2,
+    marginTop: 1,
   },
   summaryItemHighlight: {
     flex: 1.4,
@@ -2205,18 +2193,18 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#B8903B',
     borderRadius: 6,
-    paddingVertical: 4,
+    paddingVertical: 2,
     paddingHorizontal: 8,
   },
   summaryHighlightLabel: {
-    fontSize: 10,
+    fontSize: 9.5,
     fontWeight: 'bold',
     color: '#8D6409',
     textTransform: 'uppercase',
     letterSpacing: 0.5,
   },
   summaryHighlightValue: {
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: 'bold',
     color: '#9E6D08',
     marginTop: 1,

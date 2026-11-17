@@ -741,7 +741,16 @@ export default function PurchaseScreen() {
 
   const handleWeightOnBlur = async () => {
     const num = parseFloat(currentDetail.Weight);
-    if (isNaN(num)) return;
+    if (isNaN(num)) {
+      if (isAutoManual) {
+        showToast("Invalid weight!", "error");
+      }
+      return;
+    }
+    if (isAutoManual && num <= 0) {
+      showToast("Invalid weight!", "error");
+      return;
+    }
     const formatted = num.toFixed(2);
     
     // Validate inventory weight against catalogue weight on weight blur
@@ -761,14 +770,24 @@ export default function PurchaseScreen() {
       }
     }
 
+    let calculated: any = null;
     setCurrentDetail((prev: any) => {
       const updated = {
         ...prev,
         Weight: formatted,
         GoldLoss: newGoldLoss || prev.GoldLoss
       };
-      return recalculateDetailCosts(updated);
+      calculated = recalculateDetailCosts(updated);
+      return calculated;
     });
+
+    // In AUTO (F10) mode, automatic line addition matching VB.NET frmPurchase.vb:
+    // If lblAutoManual.Text = "AUTO (F10)" ... btnAdd_Click
+    if (isAutoManual && num > 0) {
+      setTimeout(() => {
+        addDetail();
+      }, 100);
+    }
   };
 
   const fetchCategories = async () => {
@@ -970,6 +989,10 @@ export default function PurchaseScreen() {
       return false;
     }
     const weightVal = parseFloat(currentDetail.Weight) || 0;
+    if (isAutoManual && weightVal <= 0) {
+      showToast("Invalid weight!", "error");
+      return false;
+    }
     if (currentDetail.PurchaseType === 'P' || currentDetail.PurchaseType === 'B' || salesPCS) {
       if (weightVal < 0) {
         showToast("Invalid weight!", "error");
@@ -994,6 +1017,18 @@ export default function PurchaseScreen() {
     const stoneWeightVal = parseFloat(currentDetail.StoneWeight) || 0;
     if (stoneWeightVal > 0 && weightVal > 0 && stoneWeightVal >= weightVal) {
       showToast("Stone weight cannot exceed total weight!", "error");
+      return false;
+    }
+
+    // PMC & SMC Validations
+    const pmcVal = parseFloat(currentDetail.PMC);
+    if (currentDetail.PMC !== '' && currentDetail.PMC !== undefined && !isNaN(pmcVal) && pmcVal < 0) {
+      showToast("Invalid Purchase MC!", "error");
+      return false;
+    }
+    const smcVal = parseFloat(currentDetail.SMC);
+    if (currentDetail.SMC !== '' && currentDetail.SMC !== undefined && !isNaN(smcVal) && smcVal < 0) {
+      showToast("Invalid Sales MC!", "error");
       return false;
     }
 
@@ -2042,7 +2077,7 @@ export default function PurchaseScreen() {
 
             <View style={[styles.section, { backgroundColor: backgroundColor, padding: 8, borderColor: borderColor }]}>
               <ScrollView horizontal={true} showsHorizontalScrollIndicator={true} contentContainerStyle={{ flexGrow: 1 }}>
-                <View style={{ width: '100%', minWidth: 1300, borderWidth: 1, borderColor: '#aaa', backgroundColor: backgroundColor, padding: 2, marginBottom: 8 }}>
+                <View style={{ borderWidth: 1, borderColor: '#aaa', backgroundColor: backgroundColor, padding: 2, marginBottom: 8, alignSelf: 'flex-start' }}>
                   {/* ROW 1: Headers */}
                   <View style={{ flexDirection: 'row' }}>
                     <View style={{ width: 130, backgroundColor: cardColor, borderWidth: 1, borderColor: '#aaa', justifyContent: 'center' }}>
@@ -2066,15 +2101,15 @@ export default function PurchaseScreen() {
                     <View style={{ width: 90, backgroundColor: cardColor, borderWidth: 1, borderColor: '#aaa', borderLeftWidth: 0, justifyContent: 'center' }}>
                       <ThemedText style={{ color: textColor, fontSize: 11, fontWeight: 'bold', textAlign: 'center' }}>Inv. PCS</ThemedText>
                     </View>
-                    <View style={{ width: 170, backgroundColor: cardColor, borderWidth: 1, borderColor: '#aaa', borderLeftWidth: 0, paddingLeft: 4, justifyContent: 'center' }}>
+                    <View style={{ width: 140, backgroundColor: cardColor, borderWidth: 1, borderColor: '#aaa', borderLeftWidth: 0, paddingLeft: 4, justifyContent: 'center' }}>
                       <ThemedText style={{ color: textColor, fontSize: 11, fontWeight: 'bold' }}>Purchase MC</ThemedText>
                     </View>
-                    <View style={{ width: 170, backgroundColor: cardColor, borderWidth: 1, borderColor: '#aaa', borderLeftWidth: 0, paddingLeft: 4, justifyContent: 'center' }}>
+                    <View style={{ width: 240, backgroundColor: cardColor, borderWidth: 1, borderColor: '#aaa', borderLeftWidth: 0, paddingHorizontal: 6, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
                       <ThemedText style={{ color: textColor, fontSize: 11, fontWeight: 'bold' }}>Sales MC</ThemedText>
-                    </View>
-                    <View style={{ flex: 1, minWidth: 140, backgroundColor: cardColor, borderWidth: 1, borderColor: '#aaa', borderLeftWidth: 0, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-around' }}>
-                      <Checkbox label="AUTO" selected={autoSMC} onPress={() => setAutoSMC(!autoSMC)} />
-                      <Checkbox label="PCS" selected={salesPCS} onPress={() => setSalesPCS(!salesPCS)} />
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                        <Checkbox label="AUTO" selected={autoSMC} onPress={() => setAutoSMC(!autoSMC)} />
+                        <Checkbox label="PCS" selected={salesPCS} onPress={() => setSalesPCS(!salesPCS)} />
+                      </View>
                     </View>
                   </View>
 
@@ -2165,66 +2200,31 @@ export default function PurchaseScreen() {
                       />
                     </View>
 
-                    <View style={{ width: 170, borderWidth: 1, borderColor: '#aaa', borderTopWidth: 0, borderLeftWidth: 0, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-around', paddingVertical: 2 }}>
-                      <TextInput
-                        style={{ width: 44, borderWidth: 1, borderColor: borderColor, padding: 1, fontSize: 10, textAlign: 'right' }}
-                        value={currentDetail.PMC}
-                        onChangeText={(t) => updateDetail('PMC', t)}
-                        onBlur={() => {
-                          const val = parseFloat(currentDetail.PMC);
-                          const formattedPMC = !isNaN(val) ? val.toFixed(2) : '0.00';
-                          if (autoSMC) {
-                            const calculatedSMC = (parseFloat(formattedPMC) * 4).toFixed(2);
-                            setCurrentDetail((prev: any) => ({
-                              ...prev,
-                              PMC: formattedPMC,
-                              SMC: calculatedSMC
-                            }));
-                          } else {
-                            updateDetail('PMC', formattedPMC);
-                          }
-                        }}
-                        keyboardType="numeric"
-                      />
+                    <View style={{ width: 140, borderWidth: 1, borderColor: '#aaa', borderTopWidth: 0, borderLeftWidth: 0, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-around', paddingVertical: 2, paddingHorizontal: 4 }}>
                       <Checkbox
-                        label="Gram"
+                        label="Per Gram"
                         selected={currentDetail.PurchaseMCType === 'PerGram'}
                         onPress={() => updateDetail('PurchaseMCType', 'PerGram')}
                       />
                       <Checkbox
-                        label="PCS"
+                        label="Per PCS"
                         selected={currentDetail.PurchaseMCType === 'PerPCS'}
                         onPress={() => updateDetail('PurchaseMCType', 'PerPCS')}
                       />
                     </View>
 
-                    <View style={{ width: 170, borderWidth: 1, borderColor: '#aaa', borderTopWidth: 0, borderLeftWidth: 0, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-around', paddingVertical: 2 }}>
-                      <TextInput
-                        style={{ width: 44, borderWidth: 1, borderColor: borderColor, padding: 1, fontSize: 10, textAlign: 'right' }}
-                        value={currentDetail.SMC}
-                        onChangeText={(t) => updateDetail('SMC', t)}
-                        onBlur={() => {
-                          const val = parseFloat(currentDetail.SMC);
-                          if (!isNaN(val)) {
-                            updateDetail('SMC', val.toFixed(2));
-                          }
-                        }}
-                        keyboardType="numeric"
-                        editable={!autoSMC}
-                      />
+                    <View style={{ width: 240, borderWidth: 1, borderColor: '#aaa', borderTopWidth: 0, borderLeftWidth: 0, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-around', paddingVertical: 2, paddingHorizontal: 4 }}>
                       <Checkbox
-                        label="Gram"
+                        label="Per Gram"
                         selected={currentDetail.SalesMCType === 'PerGram'}
                         onPress={() => updateDetail('SalesMCType', 'PerGram')}
                       />
                       <Checkbox
-                        label="PCS"
+                        label="Per PCS"
                         selected={currentDetail.SalesMCType === 'PerPCS'}
                         onPress={() => updateDetail('SalesMCType', 'PerPCS')}
                       />
                     </View>
-
-                    <View style={{ flex: 1, minWidth: 140, borderWidth: 1, borderColor: '#aaa', borderTopWidth: 0, borderLeftWidth: 0, backgroundColor: backgroundColor }} />
                   </View>
 
                   {/* ROW 3: Headers */}
@@ -2250,13 +2250,13 @@ export default function PurchaseScreen() {
                     <View style={{ width: 90, backgroundColor: cardColor, borderWidth: 1, borderColor: '#aaa', borderTopWidth: 0, borderLeftWidth: 0, justifyContent: 'center' }}>
                       <ThemedText style={{ color: textColor, fontSize: 11, fontWeight: 'bold', textAlign: 'center' }}>PMC</ThemedText>
                     </View>
-                    <View style={{ width: 170, backgroundColor: cardColor, borderWidth: 1, borderColor: '#aaa', borderTopWidth: 0, borderLeftWidth: 0, justifyContent: 'center' }}>
+                    <View style={{ width: 140, backgroundColor: cardColor, borderWidth: 1, borderColor: '#aaa', borderTopWidth: 0, borderLeftWidth: 0, justifyContent: 'center' }}>
                       <ThemedText style={{ color: textColor, fontSize: 11, fontWeight: 'bold', textAlign: 'center' }}>SMC</ThemedText>
                     </View>
-                    <View style={{ width: 170, backgroundColor: cardColor, borderWidth: 1, borderColor: '#aaa', borderTopWidth: 0, borderLeftWidth: 0, justifyContent: 'center' }}>
+                    <View style={{ width: 60, backgroundColor: cardColor, borderWidth: 1, borderColor: '#aaa', borderTopWidth: 0, borderLeftWidth: 0, justifyContent: 'center' }}>
                       <ThemedText style={{ color: textColor, fontSize: 11, fontWeight: 'bold', textAlign: 'center' }}>PCS</ThemedText>
                     </View>
-                    <View style={{ flex: 1, minWidth: 140, backgroundColor: cardColor, borderWidth: 1, borderColor: '#aaa', borderTopWidth: 0, borderLeftWidth: 0, justifyContent: 'center' }}>
+                    <View style={{ width: 180, backgroundColor: cardColor, borderWidth: 1, borderColor: '#aaa', borderTopWidth: 0, borderLeftWidth: 0, justifyContent: 'center' }}>
                       <ThemedText style={{ color: textColor, fontSize: 11, fontWeight: 'bold', textAlign: 'center' }}>Total Cost</ThemedText>
                     </View>
                   </View>
@@ -2325,23 +2325,57 @@ export default function PurchaseScreen() {
                         keyboardType="numeric"
                       />
                     </View>
-                    <View style={{ width: 90, borderWidth: 1, borderColor: '#aaa', borderTopWidth: 0, borderLeftWidth: 0, backgroundColor: '#F8F5EE' }}>
+                    <View style={{ width: 90, borderWidth: 1, borderColor: '#aaa', borderTopWidth: 0, borderLeftWidth: 0 }}>
                       <TextInput
                         style={{ flex: 1, padding: 2, fontSize: 11, color: textColor, textAlign: 'right' }}
-                        value={currentDetail.PMCCost || currentDetail.PMC}
-                        editable={false}
+                        value={currentDetail.PMC}
+                        onChangeText={(t) => updateDetail('PMC', t)}
+                        onBlur={() => {
+                          const val = parseFloat(currentDetail.PMC);
+                          if (currentDetail.PMC !== '' && !isNaN(val) && val < 0) {
+                            showToast("Invalid Purchase MC!", "error");
+                            updateDetail('PMC', '0.00');
+                            return;
+                          }
+                          const formattedPMC = !isNaN(val) && val >= 0 ? val.toFixed(2) : '0.00';
+                          if (autoSMC) {
+                            const calculatedSMC = (parseFloat(formattedPMC) * 4).toFixed(2);
+                            setCurrentDetail((prev: any) => ({
+                              ...prev,
+                              PMC: formattedPMC,
+                              SMC: calculatedSMC
+                            }));
+                          } else {
+                            updateDetail('PMC', formattedPMC);
+                          }
+                        }}
+                        keyboardType="numeric"
+                        editable={!isFormLocked}
                       />
                     </View>
-                    <View style={{ width: 170, borderWidth: 1, borderColor: '#aaa', borderTopWidth: 0, borderLeftWidth: 0, backgroundColor: '#F8F5EE' }}>
+                    <View style={{ width: 140, borderWidth: 1, borderColor: '#aaa', borderTopWidth: 0, borderLeftWidth: 0, backgroundColor: autoSMC ? '#F8F5EE' : undefined }}>
+                      <TextInput
+                        style={{ flex: 1, padding: 2, fontSize: 11, color: autoSMC ? '#888' : textColor, textAlign: 'right' }}
+                        value={currentDetail.SMC}
+                        onChangeText={(t) => updateDetail('SMC', t)}
+                        onBlur={() => {
+                          const val = parseFloat(currentDetail.SMC);
+                          if (currentDetail.SMC !== '' && !isNaN(val) && val < 0) {
+                            showToast("Invalid Sales MC!", "error");
+                            updateDetail('SMC', '0.00');
+                            return;
+                          }
+                          if (!isNaN(val) && val >= 0) {
+                            updateDetail('SMC', val.toFixed(2));
+                          }
+                        }}
+                        keyboardType="numeric"
+                        editable={!isFormLocked && !autoSMC}
+                      />
+                    </View>
+                    <View style={{ width: 60, borderWidth: 1, borderColor: '#aaa', borderTopWidth: 0, borderLeftWidth: 0 }}>
                       <TextInput
                         style={{ flex: 1, padding: 2, fontSize: 11, color: textColor, textAlign: 'right' }}
-                        value={currentDetail.SMCCost || currentDetail.SMC}
-                        editable={false}
-                      />
-                    </View>
-                    <View style={{ width: 170, borderWidth: 1, borderColor: '#aaa', borderTopWidth: 0, borderLeftWidth: 0, backgroundColor: (!salesPCS && currentDetail.PurchaseType !== 'P' && currentDetail.PurchaseType !== 'B') ? '#F8F5EE' : undefined }}>
-                      <TextInput
-                        style={{ flex: 1, padding: 2, fontSize: 11, color: (!salesPCS && currentDetail.PurchaseType !== 'P' && currentDetail.PurchaseType !== 'B') ? '#888' : textColor, textAlign: 'right' }}
                         value={currentDetail.PCS}
                         onChangeText={(t) => updateDetail('PCS', t)}
                         onBlur={() => {
@@ -2349,10 +2383,10 @@ export default function PurchaseScreen() {
                           updateDetail('PCS', (!isNaN(val) && val > 0 ? val : 1).toString());
                         }}
                         keyboardType="numeric"
-                        editable={salesPCS || currentDetail.PurchaseType === 'P' || currentDetail.PurchaseType === 'B'}
+                        editable={!isFormLocked}
                       />
                     </View>
-                    <View style={{ flex: 1, minWidth: 140, borderWidth: 1, borderColor: '#aaa', borderTopWidth: 0, borderLeftWidth: 0, backgroundColor: '#F8F5EE' }}>
+                    <View style={{ width: 180, borderWidth: 1, borderColor: '#aaa', borderTopWidth: 0, borderLeftWidth: 0, backgroundColor: '#F8F5EE' }}>
                       <TextInput
                         style={{ flex: 1, padding: 2, fontSize: 11, color: textColor, textAlign: 'right', fontWeight: 'bold' }}
                         value={currentDetail.TotalCost}
@@ -2369,7 +2403,6 @@ export default function PurchaseScreen() {
                     <View style={{ width: 120, backgroundColor: cardColor, borderWidth: 1, borderColor: '#aaa', borderTopWidth: 0, borderLeftWidth: 0, justifyContent: 'center' }}>
                       <ThemedText style={{ color: textColor, fontSize: 11, fontWeight: 'bold', textAlign: 'center' }}>Stone Weight</ThemedText>
                     </View>
-                    <View style={{ flex: 1, minWidth: 870, backgroundColor: cardColor, borderWidth: 1, borderColor: '#aaa', borderTopWidth: 0, borderLeftWidth: 0 }} />
                   </View>
 
                   {/* ROW 6: Inputs */}
@@ -2399,7 +2432,6 @@ export default function PurchaseScreen() {
                         keyboardType="numeric"
                       />
                     </View>
-                    <View style={{ flex: 1, minWidth: 870, borderWidth: 1, borderColor: '#aaa', borderTopWidth: 0, borderLeftWidth: 0, backgroundColor: backgroundColor }} />
                   </View>
                 </View>
               </ScrollView>
@@ -2512,7 +2544,22 @@ export default function PurchaseScreen() {
                   />
                 </View>
 
-                <View style={{ flexDirection: 'row', gap: 8 }}>
+                <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
+                  <TouchableOpacity
+                    style={[
+                      styles.actionBtn,
+                      {
+                        backgroundColor: isAutoManual ? '#D32F2F' : '#2E7D32',
+                        borderColor: isAutoManual ? '#B71C1C' : '#1B5E20'
+                      }
+                    ]}
+                    onPress={() => setIsAutoManual(!isAutoManual)}
+                  >
+                    <ThemedText style={{ color: '#FFFFFF', fontWeight: 'bold', fontSize: 11, textAlign: 'center' }}>
+                      {isAutoManual ? 'AUTO (F10)' : 'MANUAL (F10)'}
+                    </ThemedText>
+                  </TouchableOpacity>
+
                   <TouchableOpacity
                     style={[
                       styles.actionBtn,

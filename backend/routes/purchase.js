@@ -108,6 +108,85 @@ router.post("/", async (req, res) => {
       return res.status(400).json({ success: false, message: "Select payment type." });
     }
 
+    // Detail lines validations matching VB.NET frmPurchase.vb and clsPurchase
+    if (Array.isArray(details)) {
+      for (let i = 0; i < details.length; i++) {
+        const d = details[i];
+        const lineNum = i + 1;
+        if (!d.InventoryCode || !d.InventoryCode.trim()) {
+          return res.status(400).json({ success: false, message: `Line ${lineNum}: Inventory Code Cannot be Blank ....` });
+        }
+        if (!d.CatalogueCode || !d.CatalogueCode.trim()) {
+          return res.status(400).json({ success: false, message: `Line ${lineNum}: Catalogue Code Cannot be Blank ....` });
+        }
+        if (!d.CategoryCode || !d.CategoryCode.trim()) {
+          return res.status(400).json({ success: false, message: `Line ${lineNum}: Category Code Cannot be Blank ....` });
+        }
+        if (!d.TrayId || !d.TrayId.trim()) {
+          return res.status(400).json({ success: false, message: `Line ${lineNum}: Tray Id Cannot be Blank ....` });
+        }
+        const desc = d.InventoryDescription || d.Description || '';
+        if (!desc.trim()) {
+          return res.status(400).json({ success: false, message: `Line ${lineNum}: Description Cannot be Blank ....` });
+        }
+        const wtVal = parseFloat(d.Weight) || 0;
+        const pType = (d.PurchaseType || '').trim().toUpperCase();
+        if (pType === 'P' || pType === 'B' || d.PCSCheck || d.SalesPCS) {
+          if (wtVal < 0) {
+            return res.status(400).json({ success: false, message: `Line ${lineNum}: Invalid weight!` });
+          }
+        } else {
+          if (wtVal <= 0) {
+            return res.status(400).json({ success: false, message: `Line ${lineNum}: Invalid weight!` });
+          }
+        }
+        const costVal = parseFloat(d.CostPerGram) || 0;
+        if (pType !== 'P' && costVal <= 0) {
+          return res.status(400).json({ success: false, message: `Line ${lineNum}: Invalid cost per gram!` });
+        }
+        const pcsVal = parseInt(d.PCS, 10) || 0;
+        if (pcsVal < 1) {
+          return res.status(400).json({ success: false, message: `Line ${lineNum}: Invalid pcs!` });
+        }
+        const stoneVal = parseFloat(d.StoneWeight) || 0;
+        if (stoneVal > 0 && wtVal > 0 && stoneVal >= wtVal) {
+          return res.status(400).json({ success: false, message: `Line ${lineNum}: Stone weight cannot exceed total weight!` });
+        }
+
+        // PMC and SMC validations
+        const pmcVal = parseFloat(d.PMC);
+        if (d.PMC !== '' && d.PMC !== undefined && !isNaN(pmcVal) && pmcVal < 0) {
+          return res.status(400).json({ success: false, message: `Line ${lineNum}: Invalid Purchase MC!` });
+        }
+        const smcVal = parseFloat(d.SMC);
+        if (d.SMC !== '' && d.SMC !== undefined && !isNaN(smcVal) && smcVal < 0) {
+          return res.status(400).json({ success: false, message: `Line ${lineNum}: Invalid Sales MC!` });
+        }
+
+        // IPM Validations
+        if (d.IPM) {
+          if (!d.IPMType || !d.IPMType.trim()) {
+            return res.status(400).json({ success: false, message: `Line ${lineNum}: Type Cannot be Blank ....` });
+          }
+          if (!d.IPMBarNo || !d.IPMBarNo.trim()) {
+            return res.status(400).json({ success: false, message: `Line ${lineNum}: BarNo Cannot be Blank ....` });
+          }
+          if (!d.IPMPurity || !d.IPMPurity.trim()) {
+            return res.status(400).json({ success: false, message: `Line ${lineNum}: Purity Cannot be Blank ....` });
+          }
+          if (!d.IPMGSTType || !d.IPMGSTType.trim()) {
+            return res.status(400).json({ success: false, message: `Line ${lineNum}: GST Type Cannot be Blank ....` });
+          }
+          if (!d.IPMRefiner || !d.IPMRefiner.trim()) {
+            return res.status(400).json({ success: false, message: `Line ${lineNum}: Refiner Cannot be Blank ....` });
+          }
+          if (!d.IPMCountry || !d.IPMCountry.trim()) {
+            return res.status(400).json({ success: false, message: `Line ${lineNum}: Country Cannot be Blank ....` });
+          }
+        }
+      }
+    }
+
     const sysUser = userId || "SYSTEM";
     const curDate = new Date();
     const purchaseBillNo = header.PurchaseBillNo.trim();
