@@ -1,6 +1,8 @@
 import { ThemedText } from '@/components/themed-text';
+import { PrintReportModal } from '@/components/PrintReportModal';
 import { API_BASE_URL } from '@/constants/api';
 import { useThemeColors } from '@/hooks/useThemeColors';
+import { getStandardReportCss, renderStandardReportFooter, renderStandardReportHeader } from '@/utils/standardPrintReport';
 import { UNIPRO_LOGO_DATA_URI } from '@/utils/uniproLogo';
 import { Ionicons } from '@expo/vector-icons';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
@@ -84,6 +86,11 @@ export default function RepairEntryScreen() {
   // RePrint Modal State
   const [isReprintModalVisible, setIsReprintModalVisible] = useState(false);
   const [reprintBillNo, setReprintBillNo] = useState('');
+
+  // Standardized Print Report Modal state
+  const [isPrintModalVisible, setIsPrintModalVisible] = useState(false);
+  const [activePrintRepairNo, setActivePrintRepairNo] = useState('');
+  const [activePrintIsReprint, setActivePrintIsReprint] = useState(false);
 
   const showToast = (message: string, type: 'success' | 'error' = 'success') => {
     setToast({ message, type });
@@ -381,11 +388,12 @@ export default function RepairEntryScreen() {
       if (json.success) {
         showToast('Repair Entry Saved Successfully', 'success');
         const savedRepairNo = (json.repairNo || payload.repairNo || invoiceNo || '').trim();
-        // Original VB.NET: If txtInvoiceNo.Text.Trim <> "" Then subPrintBill(txtInvoiceNo.Text.Trim)
-        if (savedRepairNo) {
-          subPrintBill(savedRepairNo);
-        }
         handleClear();
+        if (savedRepairNo) {
+          setActivePrintRepairNo(savedRepairNo);
+          setActivePrintIsReprint(false);
+          setIsPrintModalVisible(true);
+        }
       } else {
         showToast(json.error || json.message || 'Failed to save', 'error');
       }
@@ -402,30 +410,18 @@ export default function RepairEntryScreen() {
       const savedNo = (params.repairNo as string) || (params.savedInvoiceNo as string) || invoiceNo;
       if (savedNo && savedNo.trim()) {
         const cleanNo = savedNo.trim();
-        subPrintBill(cleanNo);
+        setActivePrintRepairNo(cleanNo);
+        setActivePrintIsReprint(false);
+        setIsPrintModalVisible(true);
       }
     }
   }, [params?.paymentSuccess]);
 
-  // Original Print Document Generators
-  // Mode 1: subPrintBill(sInvoiceNo) -> rptRepairEntry.rpt (Job Sheet / Entry Docket)
-  // Mode 2: subPrintRepair(sInvoiceNo) -> rptRepairInvoice_AJ.rpt (Invoice Docket / RePrint)
-  const renderRepairReportHtml = (
-    reportType: 'BILL' | 'REPAIR',
-    sInvoiceNo: string,
-    company: any,
-    header: any,
-    details: any[],
-    payments: any[],
-    isReprint: boolean
-  ) => {
+  // Standardized Cambria Report Generator for Repair Entry
+  const buildRepairEntryHtml = (sInvoiceNo: string, isReprint: boolean, printData: any) => {
+    const { company, header, details, payments, rates } = printData || {};
+
     const now = new Date();
-    const sgDateStr = now.toLocaleDateString('en-GB', {
-      timeZone: 'Asia/Singapore',
-      day: '2-digit',
-      month: '2-digit',
-      year: 'numeric',
-    });
     const sgTimeStr = now.toLocaleTimeString('en-US', {
       timeZone: 'Asia/Singapore',
       hour: '2-digit',
@@ -433,29 +429,25 @@ export default function RepairEntryScreen() {
       hour12: true,
     });
 
-    const sCompanyname = (company.name || 'SMART GOLD').trim();
-    const sAddress = [company.address1, company.address2, company.country].filter(Boolean).join(' ');
-    const sPhone = (company.phone || '').trim();
-    const sFax = (company.fax || '').trim();
+    const sCompanyName = (company?.name || 'SMART').trim();
+    const sCompAddress2 = [company?.address1, company?.address2, company?.country].filter(Boolean).join(' ');
+    const sCompAddress3 = [company?.phone, company?.fax].filter(Boolean).join(' ');
 
-    // Report Title matching VB.NET formula fields
-    let sReportTitle = 'REPAIR JOB DOCKET / ENTRY RECEIPT';
-    if (reportType === 'REPAIR') {
-      const isDuplicateCopy = Boolean(isReprint && company.companyShortCode === 'HN');
-      sReportTitle = isDuplicateCopy ? 'Duplicate Copy' : 'REPAIR INVOICE / REPAIR DOCKET';
-    }
+    const sCustomerName = (header?.CustomerName || customerName || '').trim();
+    const sCustomerCode = (header?.CustomerCode || customerCode || '').trim();
+    const sCustomerAddress = [
+      header?.CustomerAddress1 || header?.Address1 || address,
+      header?.CustomerAddress2 || header?.Address2,
+      header?.CustomerAddress3 || header?.Address3,
+    ].filter(Boolean).map((s: string) => String(s).trim()).join(' ');
+    const sCustomerPhone = (header?.CustomerPhone || header?.Phone1 || header?.Phone || header?.Mobile || '').trim();
 
-    // Customer info mapping (formula fields: Customer1, Customer2, Customer3)
-    const sCustomerName = (header.CustomerName || customerName || '').trim();
-    const sCustomerCode = (header.CustomerCode || customerCode || '').trim();
-    const sCustomerAddress1 = (header.CustomerAddress1 || header.Address1 || '').trim();
-    const sCustomerAddress2 = (header.CustomerAddress2 || header.Address2 || '').trim();
-    const sCustomerAddress3 = (header.CustomerAddress3 || header.Address3 || '').trim();
-    const sCustomerPhone = (header.CustomerPhone || header.Phone || '').trim();
+    const s999 = rates?.rate999 || '-';
+    const s916 = rates?.rate916 || '-';
+    const s835 = rates?.rate835 || '-';
 
-    // Financial figures
-    const totalEstimatedCost = parseFloat(header.TotalCostEstimated ?? totalCost) || 0;
-    const advancePaidAmt = parseFloat(header.AdvancePaid ?? advancePaid) || 0;
+    const totalEstimatedCost = parseFloat(header?.TotalCostEstimated ?? totalCost) || 0;
+    const advancePaidAmt = parseFloat(header?.AdvancePaid ?? advancePaid) || 0;
 
     let totalInstallmentsPaid = 0;
     if (payments && Array.isArray(payments)) {
@@ -464,7 +456,7 @@ export default function RepairEntryScreen() {
       });
     }
     const grandTotalPaid = advancePaidAmt + totalInstallmentsPaid;
-    const balanceDue = totalEstimatedCost - grandTotalPaid;
+    const balanceDue = Math.max(0, totalEstimatedCost - grandTotalPaid);
 
     const formatDate = (val: any) => {
       if (!val) return '-';
@@ -473,216 +465,172 @@ export default function RepairEntryScreen() {
       return d.toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' });
     };
 
-    const repairDateFormatted = formatDate(header.RepairDate || new Date());
-    const deliveryDateFormatted = formatDate(header.DeliveryDate || header.DateOfDelivery);
-    const issueDateFormatted = formatDate(header.IssueDate);
+    const repairDateFormatted = formatDate(header?.RepairDate || new Date());
+    const deliveryDateFormatted = formatDate(header?.DeliveryDate || header?.DateOfDelivery);
+    const issueDateFormatted = formatDate(header?.IssueDate);
 
-    // Build Items Rows
-    let detailRowsHtml = '';
-    if (details && details.length > 0) {
-      details.forEach((item: any, idx: number) => {
-        const itemNo = item.LineNo || item.OrderInventoryCode || idx + 1;
-        const desc = item.Description || item.RepairDescription || '-';
-        const weight = parseFloat(item.WeightEstimated || item.Weight || 0).toFixed(3);
-        const cost = parseFloat(item.EstimatedCost || item.Cost || item.TotalCost || 0).toFixed(2);
-        detailRowsHtml += `
-          <tr>
-            <td style="text-align: center;">${itemNo}</td>
-            <td style="text-align: left; font-weight: 600;">${desc}</td>
-            <td style="text-align: right;">${weight}</td>
-            <td style="text-align: right; font-weight: 700;">$${cost}</td>
-          </tr>
-        `;
-      });
-    } else {
-      detailRowsHtml = `
-        <tr>
-          <td style="text-align: center;">1</td>
-          <td style="text-align: left; font-weight: 600;">REPAIR / SERVICE CHARGES</td>
-          <td style="text-align: right;">0.000</td>
-          <td style="text-align: right; font-weight: 700;">$${totalEstimatedCost.toFixed(2)}</td>
-        </tr>
-      `;
-    }
-
-    // Payment History breakdown (if any payments exist)
-    let paymentHistoryHtml = '';
-    if (payments && payments.length > 0) {
-      let pRows = '';
-      payments.forEach((p: any, pIdx: number) => {
-        const pNo = p.RepairPaymentNo || `P-${pIdx + 1}`;
-        const pDate = formatDate(p.CreateDate);
-        const pAmt = parseFloat(p.AmountPaid || 0).toFixed(2);
-        const pRem = p.Remarks || 'REPAIR PAYMENT';
-        pRows += `
-          <tr>
-            <td style="text-align: center;">${pNo}</td>
-            <td style="text-align: center;">${pDate}</td>
-            <td style="text-align: left;">${pRem}</td>
-            <td style="text-align: right; font-weight: 600;">$${pAmt}</td>
-          </tr>
-        `;
-      });
-      paymentHistoryHtml = `
-        <div style="margin-top: 10px;">
-          <div style="font-size: 11px; font-weight: 700; color: #5c4a28; text-transform: uppercase; margin-bottom: 3px; letter-spacing: 0.5px;">
-            Settlement / Payment Transactions:
-          </div>
-          <table class="report-table" style="font-size: 10.5px;">
-            <thead>
-              <tr>
-                <th style="width: 25%; text-align: center;">Receipt / Payment No</th>
-                <th style="width: 20%; text-align: center;">Date</th>
-                <th style="width: 35%; text-align: left;">Remarks</th>
-                <th style="width: 20%; text-align: right;">Amount Paid</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${pRows}
-            </tbody>
-          </table>
-        </div>
-      `;
-    }
+    const sReportTitle = isReprint ? 'REPAIR ENTRY VOUCHER (DUPLICATE COPY)' : 'REPAIR ENTRY VOUCHER';
 
     const generatePageMarkup = (copyLabel: string) => `
       <div class="page-sheet">
-        <!-- TOP HEADER SECTION -->
-        <div class="header-row">
-          <div class="header-left">
-            <img src="${UNIPRO_LOGO_DATA_URI}" alt="UNIPRO" class="unipro-logo-img" />
+        <div class="report-main-content">
+          ${renderStandardReportHeader({
+            company: {
+              name: sCompanyName,
+              address: [sCompAddress2, sCompAddress3].filter(Boolean).join(' ')
+            },
+            reportTitle: `${sReportTitle} (${copyLabel})`,
+            printedDateTime: `${repairDateFormatted} ${sgTimeStr}`
+          })}
+
+          <!-- TWO-COLUMN INFO: CUSTOMER vs REPAIR DOCKET -->
+          <div class="info-grid">
+            <div class="info-card">
+              <div class="card-title">CUSTOMER INFORMATION</div>
+              <table class="info-table">
+                <tr>
+                  <td class="lbl">Customer</td>
+                  <td class="colon">:</td>
+                  <td class="val font-bold">${sCustomerName || 'CASH CUSTOMER'}</td>
+                </tr>
+                <tr>
+                  <td class="lbl">Cust Code</td>
+                  <td class="colon">:</td>
+                  <td class="val">${sCustomerCode || '-'}</td>
+                </tr>
+                <tr>
+                  <td class="lbl">Address</td>
+                  <td class="colon">:</td>
+                  <td class="val">${sCustomerAddress || '-'}</td>
+                </tr>
+                ${sCustomerPhone ? `
+                <tr>
+                  <td class="lbl">Contact</td>
+                  <td class="colon">:</td>
+                  <td class="val">${sCustomerPhone}</td>
+                </tr>` : ''}
+              </table>
+            </div>
+
+            <div class="info-card">
+              <div class="card-title">REPAIR DOCKET DETAILS</div>
+              <table class="info-table">
+                <tr>
+                  <td class="lbl">Repair Docket No</td>
+                  <td class="colon">:</td>
+                  <td class="val font-bold">${sInvoiceNo}</td>
+                </tr>
+                <tr>
+                  <td class="lbl">Repair Date</td>
+                  <td class="colon">:</td>
+                  <td class="val">${repairDateFormatted}</td>
+                </tr>
+                <tr>
+                  <td class="lbl">Target Delivery</td>
+                  <td class="colon">:</td>
+                  <td class="val">${deliveryDateFormatted}</td>
+                </tr>
+                ${issueDateFormatted && issueDateFormatted !== '-' ? `
+                <tr>
+                  <td class="lbl">Issue Date</td>
+                  <td class="colon">:</td>
+                  <td class="val">${issueDateFormatted}</td>
+                </tr>` : ''}
+                <tr>
+                  <td class="lbl">Docket Status</td>
+                  <td class="colon">:</td>
+                  <td class="val font-bold">${(header?.Status || 'IN PROGRESS').trim()}</td>
+                </tr>
+                <tr>
+                  <td class="lbl">Remarks</td>
+                  <td class="colon">:</td>
+                  <td class="val">${header?.Remarks || remarks || '-'}</td>
+                </tr>
+              </table>
+            </div>
           </div>
 
-          <div class="header-center">
-            <div class="company-title">${sCompanyname}</div>
-            ${sAddress ? `<div class="company-address">${sAddress}</div>` : ''}
-            ${sPhone ? `<div class="company-address" style="margin-top: 2px;">TEL: ${sPhone}${sFax ? ` &nbsp; FAX: ${sFax}` : ''}</div>` : ''}
+          <!-- CURRENT SUMMARY HIGHLIGHT CARD -->
+          <div class="current-payment-card">
+            <div class="payment-title">TOTAL ESTIMATED REPAIR COST</div>
+            <div class="payment-amount">$ ${totalEstimatedCost.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
           </div>
 
-          <div class="header-right">
-            <div class="page-num-text">PAGE : 1</div>
-            <div class="copy-tag">${copyLabel}</div>
-          </div>
-        </div>
-
-        <!-- REPORT TITLE BAR -->
-        <div class="title-bar">
-          <span class="report-title-text">${sReportTitle}</span>
-        </div>
-
-        <!-- PRINT TIMESTAMP -->
-        <div class="timestamp-row">
-          <span>Printed: ${sgDateStr}, ${sgTimeStr}</span>
-        </div>
-
-        <!-- DOCKET METADATA SECTION -->
-        <div class="meta-section">
-          <table class="meta-table">
-            <tr>
-              <td class="meta-lbl" style="width: 15%;">Repair No</td>
-              <td class="meta-val" style="width: 35%; font-weight: 700; color: #996515;">: &nbsp; ${sInvoiceNo}</td>
-              <td class="meta-lbl" style="width: 16%;">Repair Date</td>
-              <td class="meta-val" style="width: 34%;">: &nbsp; ${repairDateFormatted}</td>
-            </tr>
-            <tr>
-              <td class="meta-lbl">Cust Code</td>
-              <td class="meta-val">: &nbsp; ${sCustomerCode || '-'}</td>
-              <td class="meta-lbl">Target Delivery</td>
-              <td class="meta-val">: &nbsp; ${deliveryDateFormatted}</td>
-            </tr>
-            <tr>
-              <td class="meta-lbl">Customer Name</td>
-              <td class="meta-val" style="font-weight: 700;">: &nbsp; ${sCustomerName || '-'}</td>
-              <td class="meta-lbl">Issue Date</td>
-              <td class="meta-val">: &nbsp; ${issueDateFormatted}</td>
-            </tr>
-            <tr>
-              <td class="meta-lbl">Customer Address</td>
-              <td class="meta-val" colspan="3">: &nbsp; ${[sCustomerAddress1, sCustomerAddress2, sCustomerAddress3].filter(Boolean).join(', ') || '-'}</td>
-            </tr>
-            ${header.Remarks ? `
-            <tr>
-              <td class="meta-lbl">Remarks</td>
-              <td class="meta-val" colspan="3">: &nbsp; ${header.Remarks}</td>
-            </tr>
-            ` : ''}
-          </table>
-        </div>
-
-        <!-- REPAIR ITEMS TABLE -->
-        <div class="table-container">
-          <table class="report-table">
+          <!-- REPAIR SERVICES & SCOPE OF WORK -->
+          <div class="table-section-title">REPAIR SERVICES & SCOPE OF WORK</div>
+          <table class="detail-table">
             <thead>
               <tr>
-                <th style="width: 10%; text-align: center;">Item #</th>
-                <th style="width: 55%; text-align: left;">Item Description / Service Work</th>
-                <th style="width: 15%; text-align: right;">Weight (g)</th>
-                <th style="width: 20%; text-align: right;">Estimated Cost</th>
+                <th style="width: 8%; text-align: center;">#</th>
+                <th style="width: 52%; text-align: left;">SERVICE WORK / ITEM DESCRIPTION</th>
+                <th style="width: 20%; text-align: right;">WEIGHT (G)</th>
+                <th style="width: 20%; text-align: right;">ESTIMATED COST ($)</th>
               </tr>
             </thead>
             <tbody>
-              ${detailRowsHtml}
+              ${(details && details.length > 0)
+                ? details.map((item: any, idx: number) => `
+                  <tr>
+                    <td style="text-align: center; font-weight: 700;">${item.LineNo || item.OrderInventoryCode || idx + 1}</td>
+                    <td style="text-align: left; font-weight: 700;">${(item.Description || item.RepairDescription || 'Repair Work').trim()}</td>
+                    <td style="text-align: right; font-weight: 700;">${parseFloat(item.WeightEstimated || item.Weight || 0).toFixed(3)}</td>
+                    <td style="text-align: right; font-weight: 800; color: #8C5D08;">$ ${parseFloat(item.EstimatedCost || item.Cost || item.TotalCost || 0).toFixed(2)}</td>
+                  </tr>
+                `).join('')
+                : `
+                  <tr>
+                    <td style="text-align: center; font-weight: 700;">1</td>
+                    <td style="text-align: left; font-weight: 700;">REPAIR / SERVICE CHARGES</td>
+                    <td style="text-align: right; font-weight: 700;">0.000</td>
+                    <td style="text-align: right; font-weight: 800; color: #8C5D08;">$ ${totalEstimatedCost.toFixed(2)}</td>
+                  </tr>
+                `
+              }
             </tbody>
           </table>
-        </div>
 
-        <!-- SETTLEMENT SUMMARY & FINANCIALS -->
-        <div style="display: flex; gap: 16px; margin-top: 10px; align-items: flex-start;">
-          <div style="flex: 1.2;">
-            ${paymentHistoryHtml}
-          </div>
-
-          <div style="flex: 1; border: 1px solid #c9b084; background: #fffdf8; padding: 8px 12px; border-radius: 4px;">
-            <div style="font-size: 11px; font-weight: 700; color: #5c4a28; text-transform: uppercase; margin-bottom: 6px; letter-spacing: 0.5px; border-bottom: 1px solid #e0d0b0; padding-bottom: 3px;">
-              Financial Settlement Summary
-            </div>
-            <table style="width: 100%; font-size: 11px; font-family: Cambria, Georgia, serif;">
-              <tr>
-                <td style="padding: 2px 0; color: #4a3b22;">Total Estimated Cost:</td>
-                <td style="padding: 2px 0; text-align: right; font-weight: 700;">$${totalEstimatedCost.toFixed(2)}</td>
-              </tr>
-              <tr>
-                <td style="padding: 2px 0; color: #4a3b22;">Advance Paid:</td>
-                <td style="padding: 2px 0; text-align: right; color: #2e7d32; font-weight: 600;">$${advancePaidAmt.toFixed(2)}</td>
-              </tr>
+          <!-- SUMMARY FINANCIAL BALANCES -->
+          <div class="totals-section">
+            <div class="totals-box">
+              <div class="total-row">
+                <span>Total Estimated Cost:</span>
+                <span>$ ${totalEstimatedCost.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+              </div>
+              <div class="total-row">
+                <span>Initial Advance Paid:</span>
+                <span>$ ${advancePaidAmt.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+              </div>
               ${totalInstallmentsPaid > 0 ? `
-              <tr>
-                <td style="padding: 2px 0; color: #4a3b22;">Subsequent Payments:</td>
-                <td style="padding: 2px 0; text-align: right; color: #2e7d32; font-weight: 600;">$${totalInstallmentsPaid.toFixed(2)}</td>
-              </tr>
-              ` : ''}
-              <tr style="border-top: 1px dashed #c9b084;">
-                <td style="padding: 4px 0 2px; font-weight: 700; color: #3b2d17;">Total Amount Paid:</td>
-                <td style="padding: 4px 0 2px; text-align: right; font-weight: 700; color: #2e7d32;">$${grandTotalPaid.toFixed(2)}</td>
-              </tr>
-              <tr style="border-top: 1px solid #996515;">
-                <td style="padding: 4px 0 2px; font-weight: 700; color: #996515; font-size: 12px;">Balance Due:</td>
-                <td style="padding: 4px 0 2px; text-align: right; font-weight: 700; color: ${balanceDue > 0 ? '#b71c1c' : '#2e7d32'}; font-size: 12px;">$${(balanceDue > 0 ? balanceDue : 0).toFixed(2)}</td>
-              </tr>
-            </table>
+              <div class="total-row">
+                <span>Subsequent Payments:</span>
+                <span>$ ${totalInstallmentsPaid.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+              </div>
+              <div class="total-row">
+                <span>Total Received To Date:</span>
+                <span style="font-weight: 800; color: #8C5D08;">$ ${grandTotalPaid.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+              </div>` : ''}
+              <div class="total-row total-row-grand">
+                <span>REMAINING BALANCE DUE:</span>
+                <span>$ ${balanceDue > 0 ? balanceDue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '0.00 (SETTLED)'}</span>
+              </div>
+            </div>
           </div>
         </div>
 
-        <!-- SIGNATURE BOXES (Customer & Authorized Store Officer) -->
-        <div class="sig-section">
-          <div class="sig-box">
-            <div class="sig-line"></div>
-            <div class="sig-label">Customer Signature</div>
-          </div>
-
-          <div class="sig-box">
-            <div class="sig-line"></div>
-            <div class="sig-label">Authorized Signature / Store Officer</div>
-          </div>
-        </div>
-
-        <!-- PINNED FOOTER -->
-        <div class="footer-pinned">
-          <div class="footer-rule"></div>
-          <div class="footer-gen-text">*** System Generated Report ***</div>
-          <div class="footer-brand-text">Powered by Unipro SG</div>
-        </div>
+        ${renderStandardReportFooter({
+          staff: {
+            staffLabel: 'PREPARED BY (STAFF)',
+            staffName: (header?.CreateUser || salesManCode || 'Staff').trim(),
+            receiverLabel: 'SUPPLIER / AUTHORIZED RECEIVER',
+            receiverName: (sCustomerName || '-').trim()
+          }
+        })}
       </div>
+    `;
+
+    const printPagesHtml = `
+      ${generatePageMarkup('CUSTOMER COPY')}
+      ${generatePageMarkup('OFFICE COPY')}
     `;
 
     return `
@@ -696,304 +644,329 @@ export default function RepairEntryScreen() {
               size: A4 portrait;
               margin: 0 !important;
             }
-            html, body {
-              margin: 0;
-              padding: 0;
-              background-color: #f7f5f0;
-              font-family: Cambria, Georgia, "Times New Roman", serif !important;
-              color: #3b2d17;
-              -webkit-print-color-adjust: exact !important;
-              print-color-adjust: exact !important;
-            }
-            .page-sheet {
-              width: 210mm;
-              min-height: 297mm;
-              margin: 15px auto;
-              background: #ffffff;
-              padding: 10mm 12mm;
-              box-sizing: border-box;
-              display: flex;
-              flex-direction: column;
-              font-family: Cambria, Georgia, "Times New Roman", serif !important;
-              box-shadow: 0 4px 14px rgba(0,0,0,0.08);
-              page-break-after: always;
-            }
-            .page-sheet:last-child {
-              page-break-after: auto;
-            }
+            ${getStandardReportCss()}
 
-            /* HEADER SECTION */
-            .header-row {
-              display: flex;
-              justify-content: space-between;
-              align-items: center;
-              margin-bottom: 6px;
-              position: relative;
-            }
-            .header-left {
-              width: 140px;
-              display: flex;
-              align-items: center;
-            }
-            .header-left img.unipro-logo-img {
-              max-height: 48px;
-              max-width: 135px;
-              object-fit: contain;
-              display: block;
-            }
-            .header-center {
-              flex: 1;
-              text-align: center;
-              padding: 0 10px;
-            }
-            .company-title {
-              font-family: Cambria, Georgia, "Times New Roman", serif !important;
-              font-size: 24px;
-              font-weight: 700;
-              color: #996515;
-              letter-spacing: 2px;
-              text-transform: uppercase;
-              margin-bottom: 3px;
-              line-height: 1.15;
-            }
-            .company-address {
-              font-family: Cambria, Georgia, "Times New Roman", serif !important;
-              font-size: 11px;
-              color: #4a3b22;
-              font-weight: 700;
-              letter-spacing: 0.5px;
-              text-transform: uppercase;
-              line-height: 1.3;
-            }
-            .header-right {
-              width: 140px;
-              text-align: right;
-              display: flex;
-              flex-direction: column;
-              justify-content: center;
-              align-items: flex-end;
-            }
-            .page-num-text {
-              font-size: 12px;
-              font-weight: 700;
-              color: #3b2d17;
-              letter-spacing: 0.5px;
-            }
-            .copy-tag {
-              display: inline-block;
-              margin-top: 4px;
-              padding: 2px 8px;
-              background-color: #f6ecdc;
-              border: 1px solid #d4af37;
-              border-radius: 3px;
-              font-size: 10px;
-              font-weight: 700;
-              color: #7d5e19;
-              letter-spacing: 0.8px;
-              text-transform: uppercase;
-            }
-
-            /* TITLE BAR */
-            .title-bar {
-              text-align: center;
-              margin: 6px 0 2px;
-              padding: 3px 0;
-            }
-            .report-title-text {
-              font-family: Cambria, Georgia, "Times New Roman", serif !important;
-              font-size: 14px;
-              font-weight: 700;
-              color: #5c4a28;
-              letter-spacing: 1.5px;
-              text-decoration: underline;
-              text-underline-offset: 3px;
-              text-transform: uppercase;
-            }
-
-            /* PRINT TIMESTAMP */
-            .timestamp-row {
-              text-align: right;
-              font-size: 10px;
-              color: #6d5b3d;
-              font-style: italic;
-              margin-bottom: 6px;
-            }
-
-            /* METADATA CARD */
-            .meta-section {
-              border: 1px solid #bfa573;
-              border-radius: 4px;
-              background-color: #fffefb;
-              padding: 6px 10px;
-              margin-bottom: 10px;
-            }
-            .meta-table {
-              width: 100%;
-              border-collapse: collapse;
-            }
-            .meta-table td {
-              padding: 2px 4px;
-              font-size: 11.5px;
-              vertical-align: top;
-              line-height: 1.3;
-            }
-            .meta-lbl {
-              font-weight: 700;
-              color: #4a3b22;
-            }
-            .meta-val {
-              color: #2b1f0e;
-            }
-
-            /* TABLE CONTAINER */
-            .table-container {
-              margin-bottom: 6px;
-            }
-            table.report-table {
-              width: 100%;
-              border-collapse: collapse;
-              border: 1px solid #bfa573;
-            }
-            table.report-table th {
-              background-color: #f6ecdc;
-              color: #4a3b22;
-              font-weight: 700;
-              font-size: 11px;
-              padding: 5px 6px;
-              border: 1px solid #bfa573;
-              text-transform: uppercase;
-              letter-spacing: 0.5px;
-            }
-            table.report-table td {
-              padding: 5px 6px;
-              font-size: 11px;
-              border: 1px solid #e8dcb8;
-              color: #2b1f0e;
-              vertical-align: middle;
-            }
-            table.report-table tbody tr:nth-child(even) {
-              background-color: #fffdf9;
-            }
-
-            /* SIGNATURE SECTION */
-            .sig-section {
-              margin-top: 30px;
-              display: flex;
-              justify-content: space-between;
-              padding: 0 20px;
-            }
-            .sig-box {
-              width: 220px;
-              text-align: center;
-            }
-            .sig-line {
-              border-bottom: 1px dotted #5c4a28;
-              height: 36px;
-              margin-bottom: 4px;
-            }
-            .sig-label {
-              font-size: 11px;
-              font-weight: 700;
-              color: #4a3b22;
-              text-transform: uppercase;
-              letter-spacing: 0.5px;
-            }
-
-            /* PINNED FOOTER */
-            .footer-pinned {
-              margin-top: auto;
-              padding-top: 10px;
-              text-align: center;
-            }
-            .footer-rule {
-              border-top: 1px solid #c9b084;
-              margin-bottom: 4px;
-            }
-            .footer-gen-text {
-              font-size: 10px;
-              color: #7d6847;
-              letter-spacing: 1px;
-              font-style: italic;
-            }
-            .footer-brand-text {
-              font-size: 9px;
-              color: #9e8d72;
-              letter-spacing: 0.5px;
-              margin-top: 1px;
-            }
-
-            /* PRINT OPTIMIZATION */
             @media print {
-              body {
-                background: none !important;
+              @page {
+                margin: 0 !important;
               }
-              .page-sheet {
-                width: 100% !important;
-                min-height: 297mm !important;
+              html, body {
+                width: 210mm !important;
                 height: 100% !important;
                 margin: 0 !important;
-                padding: 10mm 12mm 10mm 12mm !important;
+                padding: 0 !important;
+                background: #FFFFFF !important;
+                -webkit-print-color-adjust: exact !important;
+                print-color-adjust: exact !important;
+              }
+              .page-sheet {
+                width: 210mm !important;
+                min-height: 297mm !important;
+                height: 297mm !important;
+                margin: 0 !important;
+                padding: 12mm 14mm !important;
                 box-shadow: none !important;
-                box-sizing: border-box !important;
                 display: flex !important;
                 flex-direction: column !important;
+                justify-content: space-between !important;
+                box-sizing: border-box !important;
                 page-break-after: always !important;
+                break-after: page !important;
               }
               .page-sheet:last-child {
                 page-break-after: auto !important;
+                break-after: auto !important;
               }
+            }
+
+            html, body {
+              height: 100%;
+              margin: 0;
+              padding: 0;
+            }
+
+            .page-sheet {
+              width: 210mm;
+              min-height: 297mm;
+              padding: 12mm 14mm;
+              display: flex;
+              flex-direction: column;
+              justify-content: space-between;
+              box-sizing: border-box;
+            }
+
+            .report-main-content {
+              flex-grow: 1;
+            }
+
+            .std-footer-container {
+              margin-top: auto !important;
+              padding-top: 14px !important;
+              page-break-inside: avoid !important;
+              break-inside: avoid !important;
+            }
+
+            *, *:before, *:after, body, div, table, tr, th, td, span, p, h1, h2, h3, h4, h5, h6 {
+              font-family: 'Cambria', Georgia, 'Times New Roman', serif !important;
+            }
+
+            /* GOLD RATES BANNER */
+            .gold-rate-strip {
+              display: flex;
+              justify-content: space-around;
+              background: #FAF8F5;
+              border: 1px solid #C49A45;
+              border-radius: 4px;
+              padding: 6px 12px;
+              margin-top: 6px;
+              margin-bottom: 12px;
+              font-size: 11px;
+              font-weight: 700;
+              color: #222222;
+            }
+            .rate-cell span.rate-lbl {
+              color: #222222;
+              font-weight: 700;
+            }
+            .rate-cell span.rate-val {
+              color: #8C5D08;
+              font-weight: 800;
+              margin-left: 4px;
+            }
+
+            /* TWO-COLUMN INFO */
+            .info-grid {
+              display: grid;
+              grid-template-columns: 1fr 1fr;
+              gap: 16px;
+              margin-bottom: 12px;
+            }
+            .info-card {
+              border: 1px solid #C49A45;
+              background: #FAF8F5;
+              border-radius: 4px;
+              padding: 10px 14px;
+            }
+            .card-title {
+              font-size: 11.5px;
+              font-weight: 800;
+              color: #8C5D08;
+              border-bottom: 1px dotted #DDC89A;
+              padding-bottom: 5px;
+              margin-bottom: 8px;
+              text-transform: uppercase;
+              letter-spacing: 0.5px;
+            }
+            .info-table {
+              width: 100%;
+              border-collapse: collapse;
+              font-size: 11px;
+            }
+            .info-table td {
+              padding: 2px 0;
+              vertical-align: top;
+              line-height: 1.35;
+            }
+            .info-table .lbl {
+              width: 130px;
+              font-weight: 700;
+              color: #222222;
+            }
+            .info-table .colon {
+              width: 15px;
+              font-weight: 700;
+              color: #222222;
+              text-align: center;
+            }
+            .info-table .val {
+              color: #222222;
+              font-weight: 700;
+              word-break: break-word;
+            }
+            .font-bold {
+              font-weight: 800;
+            }
+
+            /* CURRENT HIGHLIGHT CARD */
+            .current-payment-card {
+              background: #FAF8F5;
+              border: 1px solid #C49A45;
+              border-radius: 4px;
+              padding: 10px 16px;
+              text-align: center;
+              margin-bottom: 12px;
+            }
+            .payment-title {
+              font-size: 11px;
+              font-weight: 800;
+              color: #8C5D08;
+              letter-spacing: 0.8px;
+              text-transform: uppercase;
+              margin-bottom: 2px;
+            }
+            .payment-amount {
+              font-size: 24px;
+              font-weight: 800;
+              color: #8C5D08;
+              letter-spacing: 1px;
+            }
+
+            /* TABLE */
+            .table-section-title {
+              font-size: 11px;
+              font-weight: 800;
+              color: #8C5D08;
+              text-transform: uppercase;
+              letter-spacing: 0.5px;
+              margin-bottom: 6px;
+            }
+            .detail-table {
+              width: 100%;
+              border-collapse: collapse;
+              margin-bottom: 12px;
+              font-size: 10.5px;
+            }
+            .detail-table th {
+              background: #8C5D08;
+              color: #FFFFFF;
+              text-align: left;
+              padding: 6px 8px;
+              font-weight: 800;
+              border: 1px solid #734C06;
+              text-transform: uppercase;
+              font-size: 10px;
+              letter-spacing: 0.5px;
+            }
+            .detail-table td {
+              padding: 6px 8px;
+              border: 1px solid #D9C8A5;
+              background: #FFFFFF;
+              color: #222222;
+            }
+            .detail-table tr:nth-child(even) td {
+              background: #FAF8F5;
+            }
+
+            /* TOTALS SECTION */
+            .totals-section {
+              display: flex;
+              justify-content: flex-end;
+              margin-bottom: 14px;
+            }
+            .totals-box {
+              width: 330px;
+              border: 1px solid #C49A45;
+              background: #FAF8F5;
+              border-radius: 4px;
+              padding: 8px 12px;
+            }
+            .total-row {
+              display: flex;
+              justify-content: space-between;
+              font-size: 11.5px;
+              padding: 2.5px 0;
+              color: #222222;
+              font-weight: 700;
+            }
+            .total-row-grand {
+              border-top: 2px solid #8C5D08;
+              margin-top: 4px;
+              padding-top: 4px;
+              font-weight: 800;
+              font-size: 13.5px;
+              color: #8C5D08;
             }
           </style>
         </head>
         <body>
-          ${generatePageMarkup('CUSTOMER COPY')}
-          ${generatePageMarkup('OFFICE COPY')}
-          <script>
-            window.onload = function() {
-              setTimeout(function() {
-                window.print();
-              }, 300);
-            };
-          </script>
+          ${printPagesHtml}
         </body>
       </html>
     `;
   };
 
-  // 1. SAVE PRINT: subPrintBill(txtInvoiceNo.Text.Trim) -> rptRepairEntry.rpt
-  const subPrintBill = async (sInvoiceNo: string) => {
-    const targetNo = (sInvoiceNo || '').trim();
-    if (!targetNo) return;
+  // subPrintBill using hidden iframe
+  const subPrintBill = async (targetInvoiceNo: string, isReprintMode: boolean = false) => {
+    const sInvoiceNo = (targetInvoiceNo || '').trim();
+    if (!sInvoiceNo) {
+      showToast('Please enter Repair No.', 'error');
+      return;
+    }
 
     try {
       setLoading(true);
-      const res = await fetch(`${API_URL}/print-data?repairNo=${encodeURIComponent(targetNo)}`);
+      const res = await fetch(`${API_URL}/print-data?repairNo=${encodeURIComponent(sInvoiceNo)}`);
       const json = await res.json();
 
       if (!json.success || !json.data) {
-        showToast(json.message || `Repair record ${targetNo} not found for print.`, 'error');
+        showToast(json.message || `Repair record ${sInvoiceNo} not found for print.`, 'error');
         setLoading(false);
         return;
       }
 
-      const { company, header, details, payments } = json.data;
-      const printHtml = renderRepairReportHtml('BILL', targetNo, company || {}, header || {}, details || [], payments || [], false);
+      const htmlContent = buildRepairEntryHtml(sInvoiceNo, isReprintMode, json.data);
+      const docTitle = isReprintMode ? `Repair Entry (Duplicate) - ${sInvoiceNo}` : `Repair Entry - ${sInvoiceNo}`;
+
+      const printScript = `
+        <script>
+          window.onload = function() {
+            setTimeout(function() {
+              window.print();
+            }, 300);
+          };
+        </script>
+      `;
+      const printHtml = htmlContent.replace('</body>', `${printScript}</body>`);
 
       if (Platform.OS === 'web' && typeof window !== 'undefined') {
-        const printWindow = window.open('', '_blank', 'width=900,height=750');
-        if (printWindow) {
-          printWindow.document.open();
-          printWindow.document.write(printHtml);
-          printWindow.document.close();
-          showToast('Repair Entry report preview opened', 'success');
+        const frameId = '__repair_entry_print_frame__';
+        let iframe = document.getElementById(frameId) as HTMLIFrameElement;
+        if (!iframe) {
+          iframe = document.createElement('iframe');
+          iframe.id = frameId;
+          iframe.style.position = 'fixed';
+          iframe.style.right = '0';
+          iframe.style.bottom = '0';
+          iframe.style.width = '0';
+          iframe.style.height = '0';
+          iframe.style.border = '0';
+          iframe.style.visibility = 'hidden';
+          document.body.appendChild(iframe);
+        }
+
+        const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
+        if (iframeDoc && iframe.contentWindow) {
+          iframeDoc.open();
+          iframeDoc.write(htmlContent);
+          iframeDoc.title = docTitle;
+          iframeDoc.close();
+
+          setTimeout(() => {
+            try {
+              iframe.contentWindow?.focus();
+              iframe.contentWindow?.print();
+              showToast(`Repair entry ${sInvoiceNo} print dialog opened`, 'success');
+            } catch (printErr) {
+              console.error('Iframe print error:', printErr);
+              const printWindow = window.open('', '_blank', 'width=900,height=750');
+              if (printWindow) {
+                printWindow.document.open();
+                printWindow.document.write(printHtml);
+                printWindow.document.title = docTitle;
+                printWindow.document.close();
+              }
+            }
+          }, 350);
         } else {
-          const blob = new Blob([printHtml], { type: 'text/html;charset=utf-8;' });
-          const url = URL.createObjectURL(blob);
-          const win = window.open(url, '_blank');
-          if (!win) {
-            showToast('Popup blocker prevented opening print preview. Please allow popups.', 'error');
+          const printWindow = window.open('', '_blank', 'width=900,height=750');
+          if (printWindow) {
+            printWindow.document.open();
+            printWindow.document.write(printHtml);
+            printWindow.document.title = docTitle;
+            printWindow.document.close();
+            showToast('Repair entry report preview opened', 'success');
           } else {
-            showToast('Repair Entry report preview opened', 'success');
+            showToast('Popup blocker prevented opening print preview. Please allow popups.', 'error');
           }
         }
       } else {
@@ -1007,48 +980,106 @@ export default function RepairEntryScreen() {
     }
   };
 
-  // 2. REPRINT: subPrintRepair(Trim(txtRePrintBillNo.Text)) -> rptRepairInvoice_AJ.rpt
-  const subPrintRepair = async (sInvoiceNo: string) => {
-    const targetNo = (sInvoiceNo || '').trim();
-    if (!targetNo) return;
+  // Dedicated PDF Download Functionality
+  const handleDownloadPdf = async (sInvoiceNo?: string, isReprint: boolean = false) => {
+    const rawNo = (sInvoiceNo || '').trim();
+    if (!rawNo) {
+      showToast('Validation Error: Repair No is required to download PDF', 'error');
+      return;
+    }
 
     try {
       setLoading(true);
-      const res = await fetch(`${API_URL}/print-data?repairNo=${encodeURIComponent(targetNo)}`);
+      const res = await fetch(`${API_URL}/print-data?repairNo=${encodeURIComponent(rawNo)}`);
       const json = await res.json();
 
       if (!json.success || !json.data) {
-        showToast(json.message || `Repair docket ${targetNo} not found for reprinting.`, 'error');
-        setLoading(false);
+        showToast(json.message || `Repair record "${rawNo}" not found`, 'error');
         return;
       }
 
-      const { company, header, details, payments } = json.data;
-      const printHtml = renderRepairReportHtml('REPAIR', targetNo, company || {}, header || {}, details || [], payments || [], true);
+      const htmlContent = buildRepairEntryHtml(rawNo, isReprint, json.data);
+      const downloadFilename = `Repair_Entry_${rawNo.replace(/[^a-zA-Z0-9_-]/g, '_')}.pdf`;
+
+      const pdfRes = await fetch(`${API_URL}/export-pdf`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          html: htmlContent,
+          filename: downloadFilename
+        })
+      });
+
+      if (!pdfRes.ok) {
+        throw new Error('Server returned error while generating PDF');
+      }
+
+      const pdfBlob = await pdfRes.blob();
 
       if (Platform.OS === 'web' && typeof window !== 'undefined') {
-        const printWindow = window.open('', '_blank', 'width=900,height=750');
-        if (printWindow) {
-          printWindow.document.open();
-          printWindow.document.write(printHtml);
-          printWindow.document.close();
-          showToast('Repair Invoice report preview opened', 'success');
-        } else {
-          const blob = new Blob([printHtml], { type: 'text/html;charset=utf-8;' });
-          const url = URL.createObjectURL(blob);
-          const win = window.open(url, '_blank');
-          if (!win) {
-            showToast('Popup blocker prevented opening print preview. Please allow popups.', 'error');
-          } else {
-            showToast('Repair Invoice report preview opened', 'success');
-          }
-        }
+        const url = URL.createObjectURL(pdfBlob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = downloadFilename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+        showToast(`PDF downloaded successfully: ${downloadFilename}`, 'success');
       } else {
-        showToast('Print preview generated.', 'success');
+        showToast('PDF file generated successfully.', 'success');
       }
     } catch (err: any) {
-      console.error('RePrint Repair Error:', err);
-      showToast('Error generating repair invoice reprint: ' + (err.message || 'Error'), 'error');
+      console.error('PDF Export Error:', err);
+      showToast('Failed to download PDF: ' + (err.message || 'Error'), 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Dedicated Excel Download Functionality
+  const handleDownloadExcel = async (sInvoiceNo?: string, isReprint: boolean = false) => {
+    const rawNo = (sInvoiceNo || '').trim();
+    if (!rawNo) {
+      showToast('Validation Error: Repair No is required to download Excel', 'error');
+      return;
+    }
+
+    try {
+      setLoading(true);
+      const excelRes = await fetch(`${API_URL}/export-excel`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          repairNo: rawNo,
+          isReprint: isReprint
+        })
+      });
+
+      if (!excelRes.ok) {
+        const errJson = await excelRes.json().catch(() => ({}));
+        throw new Error(errJson.message || 'Server error generating Excel file');
+      }
+
+      const excelBlob = await excelRes.blob();
+      const downloadFilename = `Repair_Entry_${rawNo.replace(/[^a-zA-Z0-9_-]/g, '_')}.xlsx`;
+
+      if (Platform.OS === 'web' && typeof window !== 'undefined') {
+        const url = URL.createObjectURL(excelBlob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = downloadFilename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+        showToast(`Repair Entry Excel downloaded: ${downloadFilename}`, 'success');
+      } else {
+        showToast('Excel file generated successfully.', 'success');
+      }
+    } catch (err: any) {
+      console.error('Excel Export Error:', err);
+      showToast('Failed to download Excel: ' + (err.message || 'Error'), 'error');
     } finally {
       setLoading(false);
     }
@@ -1070,20 +1101,16 @@ export default function RepairEntryScreen() {
     }
   };
 
-  // btnReprintOK_Click:
-  // If Trim(txtRePrintBillNo.Text) <> "" Then
-  //     bReprint = True
-  //     Call subPrintRepair(Trim(txtRePrintBillNo.Text))
-  //     bReprint = False
-  //     PnlReprint.Visible = False
-  // End If
+  // btnReprintOK_Click
   const handleReprintSubmit = async () => {
     try {
       const cleanNo = (reprintBillNo || '').trim();
       if (cleanNo !== '') {
         setIsReprintModalVisible(false);
         setReprintBillNo('');
-        await subPrintRepair(cleanNo);
+        setActivePrintRepairNo(cleanNo);
+        setActivePrintIsReprint(true);
+        setIsPrintModalVisible(true);
       }
     } catch (ex: any) {
       Alert.alert('Error', ex.message || 'Error executing RePrint');
@@ -1281,11 +1308,30 @@ export default function RepairEntryScreen() {
 
           <TouchableOpacity
             style={[styles.actionBtn, styles.reprintBtn]}
-            onPress={handleOpenReprintModal}
+            onPress={() => {
+              const cleanNo = (invoiceNo || '').trim();
+              if (!cleanNo) {
+                handleOpenReprintModal();
+                return;
+              }
+              setActivePrintRepairNo(cleanNo);
+              setActivePrintIsReprint(true);
+              setIsPrintModalVisible(true);
+            }}
             activeOpacity={0.8}
             disabled={saving || loading}
           >
             <Ionicons name="print-outline" size={14} color="#5C4A28" />
+            <ThemedText style={styles.clearBtnText}>Print</ThemedText>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.actionBtn, styles.reprintBtn]}
+            onPress={handleOpenReprintModal}
+            activeOpacity={0.8}
+            disabled={saving || loading}
+          >
+            <Ionicons name="documents-outline" size={14} color="#5C4A28" />
             <ThemedText style={styles.clearBtnText}>RePrint</ThemedText>
           </TouchableOpacity>
 
@@ -2076,6 +2122,45 @@ export default function RepairEntryScreen() {
           </View>
         </View>
       </Modal>
+
+      {/* STANDARDIZED PRINT REPORT CONFIRMATION MODAL */}
+      <PrintReportModal
+        visible={isPrintModalVisible}
+        title="Print Report"
+        message="Do you want to print ?"
+        loading={loading}
+        onCancel={() => {
+          setIsPrintModalVisible(false);
+          setActivePrintRepairNo('');
+        }}
+        onPdf={() => {
+          const invNo = activePrintRepairNo;
+          const reprint = activePrintIsReprint;
+          setIsPrintModalVisible(false);
+          setActivePrintRepairNo('');
+          if (invNo) {
+            handleDownloadPdf(invNo, reprint);
+          }
+        }}
+        onExcel={() => {
+          const invNo = activePrintRepairNo;
+          const reprint = activePrintIsReprint;
+          setIsPrintModalVisible(false);
+          setActivePrintRepairNo('');
+          if (invNo) {
+            handleDownloadExcel(invNo, reprint);
+          }
+        }}
+        onPrint={() => {
+          const invNo = activePrintRepairNo;
+          const reprint = activePrintIsReprint;
+          setIsPrintModalVisible(false);
+          setActivePrintRepairNo('');
+          if (invNo) {
+            subPrintBill(invNo, reprint);
+          }
+        }}
+      />
     </SafeAreaView>
   );
 }

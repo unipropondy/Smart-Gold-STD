@@ -1,24 +1,31 @@
+import { formatColumnHeader } from '@/utils/formatColumnHeader';
 import { API_BASE_URL } from '@/constants/api';
-import { openPrintWindow } from '@/utils/reportExportClient';
+import { downloadExcelReport, downloadPdfReport, printHtmlReport } from '@/utils/reportExportClient';
+import { ReportDatePicker } from '@/components/ReportDatePicker';
+import { validateReportDateRange, getTodayDisp } from '@/utils/dateValidation';
 import { Ionicons } from '@expo/vector-icons';
 import { Stack, useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
-import { Platform, ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
+import {
+  ActivityIndicator,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { ThemedText } from '../components/themed-text';
-import { useThemeColors } from '../hooks/useThemeColors';
-
 import DateTimePicker from '@react-native-community/datetimepicker';
 
-// Royal Gold Design Palette
+// Royal Gold Design Palette (matching Master Reports)
 const GOLD_ACCENT = '#B48218';
 const GOLD_DARK = '#9E6D08';
-const GOLD_LIGHT_BG = '#F5E7CA';
 const GOLD_BORDER = '#E8DCB8';
 const CARD_BG = '#FFFFFF';
 const APP_BG = '#FBF9F5';
 const TEXT_DARK = '#3B2D17';
-const TEXT_MUTED = '#7D5E19';
 
 // Web HTML Select Inline Style
 const webSelectStyle: React.CSSProperties = {
@@ -34,36 +41,30 @@ const webSelectStyle: React.CSSProperties = {
   fontWeight: '500',
 };
 
-// Web HTML Date Input Inline Style
-const webDateInputStyle: React.CSSProperties = {
-  flex: 1,
-  border: 'none',
-  backgroundColor: 'transparent',
-  outline: 'none',
-  color: TEXT_DARK,
-  paddingLeft: 8,
-  fontSize: 12,
-};
+type ActionOption = 'Preview' | 'Print' | 'PDF' | 'Excel';
 
-const RadioButton = ({ label, selected, onPress }: { label: string; selected: boolean; onPress: () => void }) => {
-  return (
-    <TouchableOpacity
-      style={[
-        styles.radioBtn,
-        selected && styles.radioBtnSelected,
-      ]}
-      onPress={onPress}
-      activeOpacity={0.7}
-    >
-      <View style={[styles.radioCircle, selected && styles.radioCircleSelected]}>
-        {selected && <View style={styles.radioDot} />}
-      </View>
-      <ThemedText style={[styles.radioLabel, selected && styles.radioLabelSelected]}>
-        {label}
-      </ThemedText>
-    </TouchableOpacity>
-  );
-};
+const RadioButton = ({
+  label,
+  selected,
+  onPress,
+}: {
+  label: string;
+  selected: boolean;
+  onPress: () => void;
+}) => (
+  <TouchableOpacity
+    style={[styles.radioBtn, selected && styles.radioBtnSelected]}
+    onPress={onPress}
+    activeOpacity={0.7}
+  >
+    <View style={[styles.radioCircle, selected && styles.radioCircleSelected]}>
+      {selected && <View style={styles.radioDot} />}
+    </View>
+    <Text style={[styles.radioLabel, selected && styles.radioLabelSelected]}>
+      {label}
+    </Text>
+  </TouchableOpacity>
+);
 
 const CustomDropdown = ({
   value,
@@ -86,9 +87,9 @@ const CustomDropdown = ({
         onPress={() => setOpen(!open)}
         activeOpacity={0.8}
       >
-        <ThemedText style={value ? styles.dropdownText : styles.dropdownPlaceholder}>
+        <Text style={value ? styles.dropdownText : styles.dropdownPlaceholder}>
           {value || placeholder}
-        </ThemedText>
+        </Text>
         <View style={styles.dropdownIconBox}>
           <Ionicons name={open ? 'chevron-up' : 'chevron-down'} size={14} color={TEXT_DARK} />
         </View>
@@ -105,7 +106,7 @@ const CustomDropdown = ({
                   setOpen(false);
                 }}
               >
-                <ThemedText style={styles.dropdownItemText}>{opt}</ThemedText>
+                <Text style={styles.dropdownItemText}>{opt}</Text>
               </TouchableOpacity>
             ))}
           </ScrollView>
@@ -120,18 +121,29 @@ const LOCATION_API = `${API_BASE_URL}/location`;
 
 const formatDateLocal = (d: any) => {
   if (!d || !(d instanceof Date) || isNaN(d.getTime())) return '';
-  const year = d.getFullYear();
-  const month = String(d.getMonth() + 1).padStart(2, '0');
   const day = String(d.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const year = d.getFullYear();
+  return `${day}/${month}/${year}`;
 };
 
 const parseLocalDate = (dateStr: string) => {
   if (!dateStr) return new Date();
-  const parts = dateStr.split('-');
-  if (parts.length !== 3) return new Date();
-  const [y, m, d] = parts;
-  return new Date(parseInt(y, 10), parseInt(m, 10) - 1, parseInt(d, 10));
+  if (dateStr.includes('/')) {
+    const [d, m, y] = dateStr.split('/');
+    return new Date(parseInt(y, 10), parseInt(m, 10) - 1, parseInt(d, 10));
+  }
+  if (dateStr.includes('-')) {
+    const parts = dateStr.split('-');
+    if (parts.length === 3) {
+      if (parts[0].length === 4) {
+        return new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
+      } else {
+        return new Date(parseInt(parts[2], 10), parseInt(parts[1], 10) - 1, parseInt(parts[0], 10));
+      }
+    }
+  }
+  return new Date();
 };
 
 export default function TransferReportsScreen() {
@@ -140,6 +152,9 @@ export default function TransferReportsScreen() {
   const [locations, setLocations] = useState<any[]>([]);
   const [toastMessage, setToastMessage] = useState('');
   const [toastType, setToastType] = useState<'success' | 'error'>('success');
+  const [isLoading, setIsLoading] = useState(false);
+
+  const [actionOption, setActionOption] = useState<ActionOption>('Preview');
 
   const [showDatePicker, setShowDatePicker] = useState<{ show: boolean; mode: 'from' | 'to' }>({
     show: false,
@@ -150,8 +165,8 @@ export default function TransferReportsScreen() {
     SelectOption: 'Transfer Out',
     FromLocation: 'ALL',
     ToLocation: 'ALL',
-    DateFrom: formatDateLocal(new Date()),
-    DateTo: formatDateLocal(new Date()),
+    DateFrom: getTodayDisp('/'),
+    DateTo: getTodayDisp('/'),
     ReportType: 'Summary',
     TransferStatus: 'ALL',
   });
@@ -201,42 +216,101 @@ export default function TransferReportsScreen() {
     }
   };
 
-  const validateForm = () => {
-    if (!formData.DateFrom) {
-      showError('Date From is required');
-      return false;
-    }
-    if (!formData.DateTo) {
-      showError('Date To is required');
-      return false;
-    }
-    return true;
-  };
-
   const handleGetReport = async () => {
-    if (!validateForm()) return;
+    const valRes = validateReportDateRange(formData.DateFrom, formData.DateTo);
+    if (!valRes.isValid) {
+      showError(valRes.errorMessage || 'Invalid date range.');
+      return;
+    }
+
+    setIsLoading(true);
 
     try {
       const payload = {
         ...formData,
       };
 
-      const response = await fetch(`${API_URL}/report`, {
+      const response = await fetch(`${API_URL}/generate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
-      const html = await response.text();
 
-      if (Platform.OS === 'web') {
-        openPrintWindow(html, true);
-        showSuccess('Print dialog opened.');
-      } else {
-        showSuccess('Report generated! (Use web to view/print)');
+      const resJson = await response.json();
+
+      if (!resJson.success || !resJson.data || resJson.data.length === 0) {
+        showError(resJson.message || 'No records found for the selected criteria.');
+        setIsLoading(false);
+        return;
       }
-    } catch (err) {
-      showError('Failed to generate report');
-      console.error(err);
+
+      const reportTitle = resJson.title || `${formData.SelectOption} ${formData.ReportType}`;
+      const rawCols = resJson.columns || Object.keys(resJson.data[0]).map((k) => ({ key: k, label: k }));
+      const columns = rawCols.map((c: any) => ({ ...c, label: formatColumnHeader(c.label || c.key) }));
+      const reportData = resJson.data;
+      const reportTotals = resJson.totals || {};
+      const subtitle = resJson.subtitle || '';
+
+      if (actionOption === 'Preview') {
+        await printHtmlReport(
+          {
+            endpoint: 'transferreports',
+            title: reportTitle,
+            subtitle,
+            columns,
+            data: reportData,
+            totals: reportTotals,
+            fromDate: formData.DateFrom,
+            toDate: formData.DateTo,
+          },
+          false
+        );
+        showSuccess('Report preview opened.');
+      } else if (actionOption === 'Print') {
+        await printHtmlReport(
+          {
+            endpoint: 'transferreports',
+            title: reportTitle,
+            subtitle,
+            columns,
+            data: reportData,
+            totals: reportTotals,
+            fromDate: formData.DateFrom,
+            toDate: formData.DateTo,
+          },
+          true
+        );
+        showSuccess('Print dialog opened.');
+      } else if (actionOption === 'PDF') {
+        const ok = await downloadPdfReport({
+          endpoint: 'transferreports',
+          title: reportTitle,
+          subtitle,
+          columns,
+          data: reportData,
+          totals: reportTotals,
+          fromDate: formData.DateFrom,
+          toDate: formData.DateTo,
+        });
+        if (ok) showSuccess('PDF downloaded successfully!');
+      } else if (actionOption === 'Excel') {
+        const ok = await downloadExcelReport({
+          endpoint: 'transferreports',
+          title: reportTitle,
+          subtitle,
+          columns,
+          data: reportData,
+          totals: reportTotals,
+          fromDate: formData.DateFrom,
+          toDate: formData.DateTo,
+        });
+        if (ok) showSuccess('Excel downloaded successfully!');
+      }
+    } catch (err: any) {
+      console.error('Transfer Reports Get Error:', err);
+      showError(err.message || 'Failed to generate report');
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -244,7 +318,7 @@ export default function TransferReportsScreen() {
     <SafeAreaView style={styles.container} edges={['top']}>
       <Stack.Screen options={{ headerShown: false }} />
 
-      {/* LUXURY ROYAL GOLD HEADER BAR */}
+      {/* LUXURY ROYAL GOLD HEADER BAR (matching Master Reports) */}
       <View style={styles.header}>
         <View style={styles.headerLeft}>
           <TouchableOpacity onPress={() => router.back()} style={styles.backButton} activeOpacity={0.7}>
@@ -254,24 +328,45 @@ export default function TransferReportsScreen() {
             <ThemedText style={styles.title}>Transfer Reports</ThemedText>
           </View>
         </View>
+
         <TouchableOpacity
-          style={styles.actionButton}
-          onPressOut={handleGetReport}
+          style={[styles.btnGetReport, isLoading && styles.btnDisabled]}
+          onPress={handleGetReport}
+          disabled={isLoading}
           activeOpacity={0.8}
         >
-          <Ionicons name="document-text-outline" size={15} color={GOLD_DARK} style={{ marginRight: 5 }} />
-          <ThemedText style={styles.actionButtonText}>Get Report</ThemedText>
+          {isLoading ? (
+            <ActivityIndicator size="small" color="#FFFFFF" />
+          ) : (
+            <>
+              <Ionicons name="document-text-outline" size={15} color="#FFFFFF" style={{ marginRight: 6 }} />
+              <Text style={styles.btnGetReportText}>Get Report</Text>
+            </>
+          )}
         </TouchableOpacity>
       </View>
 
-      <ScrollView contentContainerStyle={styles.scrollContent}>
+      {/* TOAST NOTIFICATION */}
+      {toastMessage ? (
+        <View style={[styles.toast, toastType === 'success' ? styles.toastSuccess : styles.toastError]}>
+          <Ionicons
+            name={toastType === 'success' ? 'checkmark-circle' : 'alert-circle'}
+            size={16}
+            color="#FFFFFF"
+            style={{ marginRight: 6 }}
+          />
+          <Text style={styles.toastText}>{toastMessage}</Text>
+        </View>
+      ) : null}
+
+      <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
         <View style={styles.cardWrapper}>
           <View style={styles.goldCard}>
             <View style={styles.cardBody}>
               {/* Row 1: Select Option (Radio Buttons) */}
               <View style={styles.gridRow}>
                 <View style={[styles.inputGroup, { flex: 1 }]}>
-                  <ThemedText style={styles.label}>Select Option</ThemedText>
+                  <Text style={styles.label}>Select Option</Text>
                   <View style={styles.radioRow}>
                     <RadioButton
                       label="Transfer Out"
@@ -295,7 +390,7 @@ export default function TransferReportsScreen() {
               {/* Row 2: From Loc & To Loc */}
               <View style={styles.gridRow}>
                 <View style={[styles.inputGroup, { flex: 1, minWidth: 220 }]}>
-                  <ThemedText style={styles.label}>From Loc.</ThemedText>
+                  <Text style={styles.label}>From Loc.</Text>
                   {Platform.OS === 'web' ? (
                     <View style={styles.selectWrapper}>
                       <select
@@ -325,7 +420,7 @@ export default function TransferReportsScreen() {
                 </View>
 
                 <View style={[styles.inputGroup, { flex: 1, minWidth: 220 }]}>
-                  <ThemedText style={[styles.label, { paddingLeft: 8 }]}>To Location</ThemedText>
+                  <Text style={[styles.label, { paddingLeft: 8 }]}>To Location</Text>
                   {Platform.OS === 'web' ? (
                     <View style={styles.selectWrapper}>
                       <select
@@ -355,65 +450,37 @@ export default function TransferReportsScreen() {
                 </View>
               </View>
 
-              {/* Row 3: Date From & Date To */}
+              {/* Row 3: Date From & Date To using ReportDatePicker (matching Master Reports calendar date picker) */}
               <View style={styles.gridRow}>
                 <View style={[styles.inputGroup, { flex: 1, minWidth: 220 }]}>
-                  <ThemedText style={styles.label}>Date From</ThemedText>
-                  {Platform.OS === 'web' ? (
-                    <View style={styles.dateWrapper}>
-                      <input
-                        type="date"
-                        value={formData.DateFrom || ''}
-                        onChange={(e) => handleChange('DateFrom', e.target.value)}
-                        style={webDateInputStyle}
-                      />
-                    </View>
-                  ) : (
-                    <TouchableOpacity
-                      style={styles.mobileDateBtn}
-                      onPress={() => setShowDatePicker({ show: true, mode: 'from' })}
-                    >
-                      <ThemedText style={styles.mobileDateText}>
-                        {formData.DateFrom ? parseLocalDate(formData.DateFrom).toLocaleDateString('en-GB') : ''}
-                      </ThemedText>
-                      <View style={styles.dateIconBox}>
-                        <Ionicons name="calendar-outline" size={14} color={GOLD_DARK} />
-                      </View>
-                    </TouchableOpacity>
-                  )}
+                  <Text style={styles.label}>Date From</Text>
+                  <View style={{ flex: 1, maxWidth: 250 }}>
+                    <ReportDatePicker
+                      label=""
+                      value={formData.DateFrom}
+                      onChange={(val) => handleChange('DateFrom', val)}
+                      onOpenNative={() => setShowDatePicker({ show: true, mode: 'from' })}
+                    />
+                  </View>
                 </View>
 
                 <View style={[styles.inputGroup, { flex: 1, minWidth: 220 }]}>
-                  <ThemedText style={[styles.label, { paddingLeft: 8 }]}>Date To</ThemedText>
-                  {Platform.OS === 'web' ? (
-                    <View style={styles.dateWrapper}>
-                      <input
-                        type="date"
-                        value={formData.DateTo || ''}
-                        onChange={(e) => handleChange('DateTo', e.target.value)}
-                        style={webDateInputStyle}
-                      />
-                    </View>
-                  ) : (
-                    <TouchableOpacity
-                      style={styles.mobileDateBtn}
-                      onPress={() => setShowDatePicker({ show: true, mode: 'to' })}
-                    >
-                      <ThemedText style={styles.mobileDateText}>
-                        {formData.DateTo ? parseLocalDate(formData.DateTo).toLocaleDateString('en-GB') : ''}
-                      </ThemedText>
-                      <View style={styles.dateIconBox}>
-                        <Ionicons name="calendar-outline" size={14} color={GOLD_DARK} />
-                      </View>
-                    </TouchableOpacity>
-                  )}
+                  <Text style={[styles.label, { paddingLeft: 8 }]}>Date To</Text>
+                  <View style={{ flex: 1, maxWidth: 250 }}>
+                    <ReportDatePicker
+                      label=""
+                      value={formData.DateTo}
+                      onChange={(val) => handleChange('DateTo', val)}
+                      onOpenNative={() => setShowDatePicker({ show: true, mode: 'to' })}
+                    />
+                  </View>
                 </View>
               </View>
 
               {/* Row 4: Report Type & Status */}
               <View style={styles.gridRow}>
                 <View style={[styles.inputGroup, { flex: 1, minWidth: 220 }]}>
-                  <ThemedText style={styles.label}>Report Type</ThemedText>
+                  <Text style={styles.label}>Report Type</Text>
                   <View style={styles.radioRow}>
                     <RadioButton
                       label="Summary"
@@ -429,7 +496,7 @@ export default function TransferReportsScreen() {
                 </View>
 
                 <View style={[styles.inputGroup, { flex: 1, minWidth: 220 }]}>
-                  <ThemedText style={[styles.label, { paddingLeft: 8 }]}>Status</ThemedText>
+                  <Text style={[styles.label, { paddingLeft: 8 }]}>Status</Text>
                   {Platform.OS === 'web' ? (
                     <View style={styles.selectWrapper}>
                       <select
@@ -456,6 +523,36 @@ export default function TransferReportsScreen() {
                   )}
                 </View>
               </View>
+
+              {/* Row 5: Action Options matching Master Reports (Preview, Print, PDF, Excel) */}
+              <View style={[styles.gridRow, { marginTop: 8, paddingTop: 10, borderTopWidth: 1, borderTopColor: '#F0E6CC' }]}>
+                <View style={[styles.inputGroup, { flex: 1 }]}>
+                  <Text style={styles.label}>Action</Text>
+                  <View style={styles.radioRow}>
+                    <RadioButton
+                      label="Preview"
+                      selected={actionOption === 'Preview'}
+                      onPress={() => setActionOption('Preview')}
+                    />
+                    <RadioButton
+                      label="Print"
+                      selected={actionOption === 'Print'}
+                      onPress={() => setActionOption('Print')}
+                    />
+                    <RadioButton
+                      label="PDF"
+                      selected={actionOption === 'PDF'}
+                      onPress={() => setActionOption('PDF')}
+                    />
+                    <RadioButton
+                      label="Excel"
+                      selected={actionOption === 'Excel'}
+                      onPress={() => setActionOption('Excel')}
+                    />
+                  </View>
+                </View>
+              </View>
+
             </View>
           </View>
         </View>
@@ -469,19 +566,6 @@ export default function TransferReportsScreen() {
           />
         )}
       </ScrollView>
-
-      {/* Toast Notification */}
-      {toastMessage ? (
-        <View style={[styles.toast, toastType === 'success' ? styles.toastSuccess : styles.toastError]}>
-          <Ionicons
-            name={toastType === 'success' ? 'checkmark-circle' : 'alert-circle'}
-            size={16}
-            color="#FFFFFF"
-            style={{ marginRight: 6 }}
-          />
-          <ThemedText style={styles.toastText}>{toastMessage}</ThemedText>
-        </View>
-      ) : null}
     </SafeAreaView>
   );
 }
@@ -519,89 +603,56 @@ const styles = StyleSheet.create({
     borderColor: GOLD_BORDER,
   },
   title: {
-    fontSize: 15,
+    fontSize: 16,
     fontWeight: 'bold',
-    color: TEXT_DARK,
-    letterSpacing: 0.3,
+    color: '#3B2D17',
+    fontFamily: 'Cambria',
   },
-  subtitle: {
-    fontSize: 10,
-    color: GOLD_DARK,
-    fontWeight: '500',
-    marginTop: -1,
-  },
-  actionButton: {
+  btnGetReport: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 5,
+    backgroundColor: '#A37416',
+    paddingVertical: 7,
+    paddingHorizontal: 16,
     borderRadius: 6,
     borderWidth: 1,
-    borderColor: GOLD_ACCENT,
-    backgroundColor: '#F9F2E2',
-    height: 28,
+    borderColor: '#7A5408',
+    elevation: 2,
+    shadowColor: '#7A5408',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
   },
-  actionButtonText: {
-    color: GOLD_DARK,
-    fontWeight: 'bold',
+  btnDisabled: {
+    opacity: 0.6,
+  },
+  btnGetReportText: {
     fontSize: 12,
+    fontWeight: 'bold',
+    color: '#FFFFFF',
+    letterSpacing: 0.3,
   },
   scrollContent: {
-    paddingHorizontal: 12,
-    paddingTop: 10,
-    paddingBottom: 40,
-    alignItems: 'center',
+    padding: 16,
   },
   cardWrapper: {
     width: '100%',
-    maxWidth: 820,
+    alignSelf: 'center',
   },
   goldCard: {
     backgroundColor: CARD_BG,
     borderRadius: 8,
     borderWidth: 1,
     borderColor: GOLD_BORDER,
-    overflow: 'hidden',
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
+    shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.04,
-    shadowRadius: 3,
+    shadowRadius: 8,
     elevation: 2,
   },
-  cardHeaderBanner: {
-    backgroundColor: GOLD_LIGHT_BG,
-    paddingHorizontal: 12,
-    paddingVertical: 7,
-    borderBottomWidth: 1,
-    borderBottomColor: GOLD_BORDER,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  headerTitleContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  headerIconBadgeSmall: {
-    width: 22,
-    height: 22,
-    borderRadius: 4,
-    backgroundColor: '#FFFFFF',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 6,
-    borderWidth: 1,
-    borderColor: GOLD_BORDER,
-  },
-  cardHeaderTitleSmall: {
-    fontSize: 12,
-    fontWeight: 'bold',
-    color: TEXT_DARK,
-    letterSpacing: 0.3,
-  },
   cardBody: {
-    padding: 12,
-    gap: 8,
+    padding: 16,
+    gap: 12,
   },
   gridRow: {
     flexDirection: 'row',
@@ -632,9 +683,9 @@ const styles = StyleSheet.create({
   radioBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 4,
-    paddingHorizontal: 8,
-    borderRadius: 4,
+    paddingVertical: 5,
+    paddingHorizontal: 10,
+    borderRadius: 5,
     borderWidth: 1,
     borderColor: '#E2D3B3',
     backgroundColor: '#FAF7F0',
@@ -679,7 +730,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#D4C3A3',
     borderRadius: 4,
-    height: 28,
+    height: 32,
     backgroundColor: '#FFFFFF',
     flexDirection: 'row',
     alignItems: 'center',
@@ -698,7 +749,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#D4C3A3',
     borderRadius: 4,
-    height: 28,
+    height: 32,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
@@ -727,7 +778,7 @@ const styles = StyleSheet.create({
   },
   dropdownMenu: {
     position: 'absolute',
-    top: 32,
+    top: 36,
     left: 0,
     right: 0,
     backgroundColor: '#FFFFFF',
@@ -752,48 +803,6 @@ const styles = StyleSheet.create({
   dropdownItemText: {
     color: TEXT_DARK,
     fontSize: 12,
-  },
-
-  // Date Inputs
-  dateWrapper: {
-    flex: 1,
-    maxWidth: 200,
-    borderWidth: 1,
-    borderColor: '#D4C3A3',
-    borderRadius: 4,
-    height: 38,
-    backgroundColor: '#FFFFFF',
-    flexDirection: 'row',
-    alignItems: 'center',
-    position: 'relative',
-    overflow: 'hidden',
-  },
-  dateIconBox: {
-    width: 34,
-    height: '100%',
-    borderLeftWidth: 1,
-    borderLeftColor: '#E8DCB8',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#FAF5EA',
-  },
-  mobileDateBtn: {
-    flex: 1,
-    maxWidth: 200,
-    borderWidth: 1,
-    borderColor: '#D4C3A3',
-    borderRadius: 4,
-    height: 38,
-    backgroundColor: '#FFFFFF',
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  mobileDateText: {
-    color: TEXT_DARK,
-    fontSize: 12,
-    paddingLeft: 8,
-    flex: 1,
   },
 
   // Toast

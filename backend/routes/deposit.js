@@ -594,4 +594,246 @@ router.get("/print-data", async (req, res) => {
   }
 });
 
+// ================= EXPORT PDF ENDPOINT =================
+// POST /api/deposit/export-pdf
+router.post("/export-pdf", async (req, res) => {
+  try {
+    const { html, filename } = req.body;
+    if (!html) {
+      return res.status(400).json({ success: false, message: "HTML content is required for PDF export." });
+    }
+
+    const { convertHtmlToPdf } = require("../utils/htmlToPdf");
+    const pdfBuffer = await convertHtmlToPdf(html);
+    const downloadName = (filename || "Deposit_Receipt.pdf").replace(/[^a-zA-Z0-9_\-\.]/g, "_");
+
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `attachment; filename="${downloadName}"`);
+    res.setHeader("Content-Length", pdfBuffer.length);
+    return res.send(pdfBuffer);
+  } catch (err) {
+    console.error("Deposit Export PDF Error:", err);
+    return res.status(500).json({ success: false, message: "Failed to generate PDF: " + err.message });
+  }
+});
+
+// ================= EXPORT EXCEL ENDPOINT =================
+// POST /api/deposit/export-excel
+router.post("/export-excel", async (req, res) => {
+  try {
+    const { depositNo, isReprint } = req.body;
+    const rawDepositNo = (depositNo || "").trim();
+    if (!rawDepositNo) {
+      return res.status(400).json({ success: false, message: "Deposit No is required." });
+    }
+
+    const pool = await getPool(req);
+
+    // 1. Fetch Company Information
+    const compResult = await pool.request().query(`
+      SELECT TOP 1 Name, Address1, Address2, City, State, Country, Phone, Fax
+      FROM tblCompany
+    `);
+    const compRow = compResult.recordset[0] || {};
+    const companyName = (compRow.Name || "SMART").trim();
+    const companyAddress = [compRow.Address1, compRow.Address2, compRow.City, compRow.Country].filter(Boolean).map(s => String(s).trim()).join(" ");
+
+    // 2. Fetch Deposit Record
+    const depReq = pool.request();
+    depReq.input("DepositNo", sql.VarChar(50), rawDepositNo);
+    const depResult = await depReq.query(`
+      SELECT 
+        d.DepositNo, d.DepositDate, d.CustomerCode, d.CustomerName as DepCustomerName,
+        d.SalesmanCode, d.TotalAmount, d.DepositAmount, d.AmountPaid, d.Remarks,
+        d.DepositUsed, d.CreateUser, d.CreateDate,
+        c.CustomerName as CustMasterName, c.Address1 as CustAddress1, c.Address2 as CustAddress2,
+        c.Address3 as CustAddress3, c.Phone1, c.Mobile, c.CustomerType
+      FROM tblDepositSave d
+      LEFT JOIN tblCustomer c ON RTRIM(LTRIM(c.CustomerCode)) = RTRIM(LTRIM(d.CustomerCode))
+      WHERE RTRIM(LTRIM(d.DepositNo)) = @DepositNo
+    `);
+
+    if (!depResult.recordset.length) {
+      return res.status(404).json({ success: false, message: `Deposit record "${rawDepositNo}" not found.` });
+    }
+
+    const row = depResult.recordset[0];
+
+    // 3. Fetch Linked Deposit Payment Details (tblDepositDetailSave)
+    const detailReq = pool.request();
+    detailReq.input("DepositNo", sql.VarChar(50), rawDepositNo);
+    const detailResult = await detailReq.query(`
+      SELECT DepositNo, DepositPaymentNO, AmtPaid, Remarks, CreateUser, CreateDate, DepositPaymentDate
+      FROM tblDepositDetailSave
+      WHERE RTRIM(LTRIM(DepositNo)) = @DepositNo
+      ORDER BY CreateDate ASC
+    `);
+    const history = detailResult.recordset || [];
+
+    // 4. Fetch PayMode Details
+    const pmReq = pool.request();
+    pmReq.input("DepositNo", sql.VarChar(50), rawDepositNo);
+    const pmResult = await pmReq.query(`
+      SELECT PayMode, Amount, SlipNo, InvoiceNo
+      FROM tblPayModeDetail
+      WHERE RTRIM(LTRIM(InvoiceNo)) = @DepositNo
+         OR RTRIM(LTRIM(InvoiceNo)) IN (
+              SELECT RTRIM(LTRIM(DepositPaymentNO)) FROM tblDepositDetailSave WHERE RTRIM(LTRIM(DepositNo)) = @DepositNo
+         )
+      ORDER BY CreateDate ASC
+    `);
+
+    const payModes = (pmResult.recordset || []).map((p) => ({
+      payMode: (p.PayMode || "").trim(),
+      amount: parseFloat(p.Amount) || 0,
+    }));
+
+    let payModeStr = "";
+    if (payModes.length > 0) {
+      payModeStr = payModes.map(pm => `${pm.payMode} $${pm.amount.toFixed(2)}`).join(" | ");
+    } else {
+      payModeStr = `CASH $${(parseFloat(row.DepositAmount) || 0).toFixed(2)}`;
+    }
+
+    // 5. Fetch Gold Rates
+    const ratesResult = await pool.request().query(`
+      SELECT ClassCode, Rate FROM tblClass WHERE ClassCode IN ('24K', '22K', '835', '999', '916', '18K', 'SIL')
+    `);
+    const ratesMap = {};
+    ratesResult.recordset.forEach((r) => {
+      ratesMap[(r.ClassCode || "").trim().toUpperCase()] = r.Rate;
+    });
+
+    const rate999 = ratesMap["24K"] !== undefined ? ratesMap["24K"] : (ratesMap["999"] || 190);
+    const rate916 = ratesMap["22K"] !== undefined ? ratesMap["22K"] : (ratesMap["916"] || 176);
+    const rate835 = ratesMap["835"] !== undefined ? ratesMap["835"] : (ratesMap["18K"] || "-");
+
+    // Format Dates
+    const rawDate = row.DepositDate || row.CreateDate;
+    let depDateStr = "-";
+    if (rawDate) {
+      const d = new Date(rawDate);
+      if (!isNaN(d.getTime())) {
+        depDateStr = `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`;
+      }
+    }
+    const printTimeStr = new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
+
+    const custName = (row.CustMasterName || row.DepCustomerName || "-").trim();
+    const custCode = (row.CustomerCode || "-").trim();
+    const custAddress1 = (row.CustAddress1 || "-").trim();
+    const salesman = (row.SalesmanCode || "sys").trim();
+    const depositUsed = (row.DepositUsed || "N").trim() === "Y" ? "YES (SETTLED)" : "NO (ACTIVE)";
+    const remarks = (row.Remarks || "-").trim();
+
+    const totalVal = parseFloat(row.TotalAmount) || 0;
+    const initialDepositVal = parseFloat(row.DepositAmount) || 0;
+    const amountPaidVal = parseFloat(row.AmountPaid) || 0;
+    const totalPaidToDate = initialDepositVal + amountPaidVal;
+    const balanceDue = totalVal - totalPaidToDate;
+
+    const reportTitle = "DEPOSIT";
+
+    // Build Excel Workbook
+    const XLSX = require("xlsx");
+    const wb = XLSX.utils.book_new();
+
+    const rows = [];
+    rows.push([companyName]);
+    rows.push([companyAddress]);
+    rows.push([]);
+    rows.push([reportTitle]);
+    rows.push([`Printed: ${depDateStr} ${printTimeStr}`]);
+    rows.push([]);
+
+    // Customer & Deposit Specification
+    rows.push(["CUSTOMER DETAILS", "", "", "DEPOSIT SPECIFICATION"]);
+    rows.push(["Customer Name:", custName, "", "Deposit No:", rawDepositNo]);
+    rows.push(["Customer Code:", custCode, "", "Salesman:", salesman]);
+    rows.push(["Address 1:", custAddress1, "", "Deposit Used:", depositUsed]);
+    rows.push(["", "", "", "Remarks:", remarks]);
+    rows.push([]);
+
+    // Initial Deposit Received
+    rows.push(["INITIAL DEPOSIT RECEIVED:", Number(initialDepositVal.toFixed(2))]);
+    rows.push(["PAYMENT MODE / BREAKDOWN:", payModeStr]);
+    rows.push([]);
+
+    // Payment History Table
+    rows.push([
+      "#",
+      "Payment Voucher",
+      "Date",
+      "Remarks",
+      "Amount Paid ($)"
+    ]);
+
+    if (history.length > 0) {
+      history.forEach((h, idx) => {
+        let hDate = "-";
+        const rawHDate = h.DepositPaymentDate || h.CreateDate;
+        if (rawHDate) {
+          const hd = new Date(rawHDate);
+          if (!isNaN(hd.getTime())) {
+            hDate = `${String(hd.getDate()).padStart(2, '0')}/${String(hd.getMonth() + 1).padStart(2, '0')}/${hd.getFullYear()}`;
+          }
+        }
+        const amt = parseFloat(h.AmtPaid) || 0;
+        rows.push([
+          idx + 1,
+          (h.DepositPaymentNO || "").trim(),
+          hDate,
+          (h.Remarks || "-").trim(),
+          Number(amt.toFixed(2))
+        ]);
+      });
+    } else {
+      rows.push([1, rawDepositNo, depDateStr, "Initial Deposit", Number(initialDepositVal.toFixed(2))]);
+    }
+
+    rows.push([]);
+
+    // Financial Summary
+    rows.push(["", "", "", "Total Agreement Value:", Number(totalVal.toFixed(2))]);
+    rows.push(["", "", "", "Initial Deposit Paid:", Number(initialDepositVal.toFixed(2))]);
+    rows.push(["", "", "", "Additional Payments Received:", Number(amountPaidVal.toFixed(2))]);
+    rows.push(["", "", "", "Total Received To Date:", Number(totalPaidToDate.toFixed(2))]);
+    rows.push(["", "", "", "REMAINING BALANCE DUE:", Number(balanceDue.toFixed(2))]);
+    rows.push([]);
+
+    // Signatures
+    rows.push(["PREPARED BY (STAFF)", "", "", "SUPPLIER / AUTHORIZED RECEIVER", ""]);
+    rows.push(["Staff Name:", (row.CreateUser || "pos").trim(), "", "Receiver Name:", custName]);
+    rows.push(["Signature:", "______________________", "", "Signature:", "______________________"]);
+    rows.push(["Date:", "______________________", "", "Date:", "______________________"]);
+    rows.push([]);
+    rows.push(["*** System Generated Report ***"]);
+    rows.push(["Powered by Unipro SG"]);
+
+    const ws = XLSX.utils.aoa_to_sheet(rows);
+
+    // Column widths
+    ws["!cols"] = [
+      { wch: 6 },
+      { wch: 28 },
+      { wch: 16 },
+      { wch: 30 },
+      { wch: 20 }
+    ];
+
+    XLSX.utils.book_append_sheet(wb, ws, "Deposit Receipt");
+
+    const excelBuffer = XLSX.write(wb, { type: "buffer", bookType: "xlsx" });
+    const downloadName = `Deposit_Receipt_${rawDepositNo.replace(/[^a-zA-Z0-9_\-]/g, "_")}.xlsx`;
+
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    res.setHeader("Content-Disposition", `attachment; filename="${downloadName}"`);
+    res.setHeader("Content-Length", excelBuffer.length);
+    return res.send(excelBuffer);
+  } catch (err) {
+    console.error("Deposit Export Excel Error:", err);
+    return res.status(500).json({ success: false, message: "Failed to generate Excel: " + err.message });
+  }
+});
+
 module.exports = router;

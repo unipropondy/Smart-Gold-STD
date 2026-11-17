@@ -984,13 +984,27 @@ router.get("/print-data", async (req, res) => {
       } catch (eFallback) {}
     }
 
+    // 5. Query Gold benchmark rates for report strip
+    let rates = { rate999: '-', rate916: '-', rate835: '-' };
+    try {
+      const ratesResult = await pool.request().query("SELECT ClassCode, Rate FROM tblClass WHERE ClassCode IN ('24K', '22K', '835', '999', '916', '18K', 'SIL')");
+      const ratesMap = {};
+      ratesResult.recordset.forEach((r) => {
+        ratesMap[(r.ClassCode || "").trim().toUpperCase()] = r.Rate;
+      });
+      rates.rate999 = ratesMap["24K"] !== undefined ? parseFloat(ratesMap["24K"]).toFixed(2) : (ratesMap["999"] ? parseFloat(ratesMap["999"]).toFixed(2) : "-");
+      rates.rate916 = ratesMap["22K"] !== undefined ? parseFloat(ratesMap["22K"]).toFixed(2) : (ratesMap["916"] ? parseFloat(ratesMap["916"]).toFixed(2) : "-");
+      rates.rate835 = ratesMap["835"] !== undefined ? parseFloat(ratesMap["835"]).toFixed(2) : (ratesMap["18K"] ? parseFloat(ratesMap["18K"]).toFixed(2) : "-");
+    } catch (eRates) {}
+
     res.json({
       success: true,
       data: {
         company,
         header,
         details,
-        payments
+        payments,
+        rates
       }
     });
   } catch (err) {
@@ -1036,6 +1050,177 @@ router.get("/reprint/:repairNo", async (req, res) => {
   } catch (err) {
     console.error("RePrint Repair Error:", err);
     res.status(500).json({ success: false, message: "Failed to load repair docket", error: err.message });
+  }
+});
+
+// ================= EXPORT PDF ENDPOINT =================
+// POST /api/repairentry/export-pdf
+router.post("/export-pdf", async (req, res) => {
+  try {
+    const { html, filename } = req.body;
+    if (!html) {
+      return res.status(400).json({ success: false, message: "HTML content is required for PDF export." });
+    }
+
+    const { convertHtmlToPdf } = require("../utils/htmlToPdf");
+    const pdfBuffer = await convertHtmlToPdf(html);
+    const downloadName = (filename || "Repair_Entry_Voucher.pdf").replace(/[^a-zA-Z0-9_\-\.]/g, "_");
+
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `attachment; filename="${downloadName}"`);
+    res.setHeader("Content-Length", pdfBuffer.length);
+    return res.send(pdfBuffer);
+  } catch (err) {
+    console.error("Repair Entry Export PDF Error:", err);
+    return res.status(500).json({ success: false, message: "Failed to generate PDF: " + err.message });
+  }
+});
+
+// ================= EXPORT EXCEL ENDPOINT =================
+// POST /api/repairentry/export-excel
+router.post("/export-excel", async (req, res) => {
+  try {
+    const { repairNo, isReprint } = req.body;
+    const rawNo = (repairNo || "").trim();
+    if (!rawNo) {
+      return res.status(400).json({ success: false, message: "Repair Number is required." });
+    }
+
+    const pool = await getPool(req);
+
+    // 1. Company
+    const compResult = await pool.request().query("SELECT TOP 1 * FROM tblCompany");
+    const compRow = compResult.recordset[0] || {};
+    const companyName = (compRow.Name || "SMART").trim();
+    const companyAddress = [compRow.Address1, compRow.Address2, compRow.City, compRow.Country].filter(Boolean).map(s => String(s).trim()).join(" ");
+
+    // 2. Repair Header & Customer
+    const headerRes = await pool.request()
+      .input("RepairNo", sql.VarChar(50), rawNo)
+      .query(`
+        SELECT 
+          h.*,
+          RTRIM(LTRIM(ISNULL(c.CustomerName, ''))) AS CustomerName,
+          RTRIM(LTRIM(ISNULL(c.Address1, ''))) AS CustomerAddress1,
+          RTRIM(LTRIM(ISNULL(c.Address2, ''))) AS CustomerAddress2,
+          RTRIM(LTRIM(ISNULL(c.Address3, ''))) AS CustomerAddress3,
+          RTRIM(LTRIM(ISNULL(c.Phone1, ISNULL(c.Mobile, '')))) AS CustomerPhone,
+          RTRIM(LTRIM(ISNULL(c.CustomerType, ''))) AS CustomerType
+        FROM tblInventoryRepairHeader h
+        LEFT JOIN tblCustomer c ON RTRIM(LTRIM(c.CustomerCode)) = RTRIM(LTRIM(h.CustomerCode))
+        WHERE RTRIM(LTRIM(h.RepairNo)) = @RepairNo
+      `);
+
+    if (headerRes.recordset.length === 0) {
+      return res.status(404).json({ success: false, message: `Repair record "${rawNo}" not found.` });
+    }
+
+    const header = headerRes.recordset[0];
+
+    // 3. Repair Details
+    const detailRes = await pool.request()
+      .input("RepairNo", sql.VarChar(50), rawNo)
+      .query("SELECT * FROM tblInventoryRepairDetail WHERE RTRIM(LTRIM(RepairNo)) = @RepairNo ORDER BY LineNo ASC");
+    const details = detailRes.recordset || [];
+
+    // 4. Gold Rates
+    const ratesResult = await pool.request().query("SELECT ClassCode, Rate FROM tblClass WHERE ClassCode IN ('24K', '22K', '835', '999', '916', '18K', 'SIL')");
+    const ratesMap = {};
+    ratesResult.recordset.forEach((r) => {
+      ratesMap[(r.ClassCode || "").trim().toUpperCase()] = r.Rate;
+    });
+    const s999 = ratesMap["24K"] !== undefined ? parseFloat(ratesMap["24K"]).toFixed(2) : (ratesMap["999"] ? parseFloat(ratesMap["999"]).toFixed(2) : "-");
+    const s916 = ratesMap["22K"] !== undefined ? parseFloat(ratesMap["22K"]).toFixed(2) : (ratesMap["916"] ? parseFloat(ratesMap["916"]).toFixed(2) : "-");
+    const s835 = ratesMap["835"] !== undefined ? parseFloat(ratesMap["835"]).toFixed(2) : (ratesMap["18K"] ? parseFloat(ratesMap["18K"]).toFixed(2) : "-");
+
+    // Dates
+    const rawDate = header.RepairDate || header.CreateDate;
+    let repairDateStr = "-";
+    if (rawDate) {
+      const d = new Date(rawDate);
+      if (!isNaN(d.getTime())) {
+        repairDateStr = `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`;
+      }
+    }
+    const printTimeStr = new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
+
+    const reportTitle = isReprint ? "REPAIR ENTRY VOUCHER (DUPLICATE COPY)" : "REPAIR ENTRY VOUCHER";
+
+    const XLSX = require("xlsx");
+    const wb = XLSX.utils.book_new();
+    const rows = [];
+
+    rows.push([companyName]);
+    rows.push([companyAddress]);
+    rows.push([]);
+    rows.push([reportTitle]);
+    rows.push([`Printed: ${repairDateStr} ${printTimeStr}`]);
+    rows.push([]);
+
+    // Two panels
+    const custName = (header.CustomerName || "").trim();
+    const custAddress = [header.CustomerAddress1, header.CustomerAddress2, header.CustomerAddress3].filter(Boolean).map(s => String(s).trim()).join(" ");
+
+    rows.push(["CUSTOMER INFORMATION", "", "", "REPAIR DOCKET DETAILS"]);
+    rows.push(["Customer Code:", (header.CustomerCode || "-").trim(), "", "Repair Docket No:", rawNo]);
+    rows.push(["Customer Name:", custName || "CASH CUSTOMER", "", "Repair Date:", repairDateStr]);
+    rows.push(["Address:", custAddress || "-", "", "Salesman:", (header.CreateUser || "Staff").trim()]);
+    rows.push(["Contact:", (header.CustomerPhone || "-").trim(), "", "Status:", (header.Status || "IN PROGRESS").trim()]);
+    rows.push([]);
+
+    const totalEstCost = parseFloat(header.TotalCostEstimated) || 0;
+    const initialAdvance = parseFloat(header.AdvancePaid) || 0;
+    const balanceDue = Math.max(0, totalEstCost - initialAdvance);
+
+    rows.push(["TOTAL ESTIMATED REPAIR COST:", `$${totalEstCost.toFixed(2)}`, "", `INITIAL ADVANCE: $${initialAdvance.toFixed(2)}`]);
+    rows.push([]);
+
+    // Line items table
+    rows.push(["#", "ITEM CODE / LINE", "ITEM DESCRIPTION / SERVICE WORK", "WEIGHT (G)", "ESTIMATED COST ($)"]);
+    if (details.length > 0) {
+      details.forEach((item, idx) => {
+        rows.push([
+          idx + 1,
+          item.LineNo || item.OrderInventoryCode || idx + 1,
+          (item.Description || item.RepairDescription || "Repair Service").trim(),
+          parseFloat(item.WeightEstimated || item.Weight || 0).toFixed(3),
+          parseFloat(item.EstimatedCost || item.Cost || item.TotalCost || 0)
+        ]);
+      });
+    } else {
+      rows.push([1, "1", "REPAIR / SERVICE CHARGES", "0.000", totalEstCost]);
+    }
+    rows.push([]);
+
+    // Financial totals
+    rows.push(["", "", "", "Total Estimated Cost:", totalEstCost]);
+    rows.push(["", "", "", "Initial Advance Paid:", initialAdvance]);
+    rows.push(["", "", "", "REMAINING BALANCE DUE:", balanceDue]);
+    rows.push([]);
+
+    // Signatures
+    rows.push(["PREPARED BY (STAFF)", "", "", "SUPPLIER / AUTHORIZED RECEIVER"]);
+    rows.push(["Staff Name:", (header.CreateUser || "Staff").trim(), "", "Receiver Name:", custName || "CASH CUSTOMER"]);
+    rows.push(["Signature:", "______________________", "", "Signature:", "______________________"]);
+    rows.push(["Date:", "______________________", "", "Date:", "______________________"]);
+    rows.push([]);
+    rows.push(["*** System Generated Report ***"]);
+    rows.push(["Powered by Unipro SG"]);
+
+    const ws = XLSX.utils.aoa_to_sheet(rows);
+    ws["!cols"] = [{ wch: 6 }, { wch: 18 }, { wch: 36 }, { wch: 14 }, { wch: 18 }];
+    XLSX.utils.book_append_sheet(wb, ws, "Repair Entry");
+
+    const excelBuffer = XLSX.write(wb, { type: "buffer", bookType: "xlsx" });
+    const downloadName = `Repair_Entry_${rawNo.replace(/[^a-zA-Z0-9_\-]/g, "_")}.xlsx`;
+
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    res.setHeader("Content-Disposition", `attachment; filename="${downloadName}"`);
+    res.setHeader("Content-Length", excelBuffer.length);
+    return res.send(excelBuffer);
+  } catch (err) {
+    console.error("Repair Entry Export Excel Error:", err);
+    return res.status(500).json({ success: false, message: "Failed to generate Excel: " + err.message });
   }
 });
 

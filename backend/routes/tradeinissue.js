@@ -455,6 +455,19 @@ router.get("/print-data", async (req, res) => {
       return res.status(404).json({ success: false, message: `Trade In Issue record not found for: ${cleanNo}` });
     }
 
+    // 5. Query Gold benchmark rates for report strip
+    let rates = { rate999: '-', rate916: '-', rate835: '-' };
+    try {
+      const ratesResult = await pool.request().query("SELECT ClassCode, Rate FROM tblClass WHERE ClassCode IN ('24K', '22K', '835', '999', '916', '18K', 'SIL')");
+      const ratesMap = {};
+      ratesResult.recordset.forEach((r) => {
+        ratesMap[(r.ClassCode || "").trim().toUpperCase()] = r.Rate;
+      });
+      rates.rate999 = ratesMap["24K"] !== undefined ? parseFloat(ratesMap["24K"]).toFixed(2) : (ratesMap["999"] ? parseFloat(ratesMap["999"]).toFixed(2) : "-");
+      rates.rate916 = ratesMap["22K"] !== undefined ? parseFloat(ratesMap["22K"]).toFixed(2) : (ratesMap["916"] ? parseFloat(ratesMap["916"]).toFixed(2) : "-");
+      rates.rate835 = ratesMap["835"] !== undefined ? parseFloat(ratesMap["835"]).toFixed(2) : (ratesMap["18K"] ? parseFloat(ratesMap["18K"]).toFixed(2) : "-");
+    } catch (eRates) {}
+
     res.json({
       success: true,
       data: {
@@ -463,12 +476,258 @@ router.get("/print-data", async (req, res) => {
         header: header || { TradeIssueNo: cleanNo },
         history: historyRows,
         tradeBills: tradeBills,
+        rates,
       }
     });
 
   } catch (error) {
     console.error("Trade In Issue Print Data Error:", error);
     res.status(500).json({ success: false, message: "Error fetching trade issue print data: " + error.message });
+  }
+});
+
+// ================= EXPORT PDF ENDPOINT =================
+// POST /api/tradeinissue/export-pdf
+router.post("/export-pdf", async (req, res) => {
+  try {
+    const { html, filename } = req.body;
+    if (!html) {
+      return res.status(400).json({ success: false, message: "HTML content is required for PDF export." });
+    }
+
+    const { convertHtmlToPdf } = require("../utils/htmlToPdf");
+    const pdfBuffer = await convertHtmlToPdf(html);
+    const downloadName = (filename || "Trade_In_Issue_Voucher.pdf").replace(/[^a-zA-Z0-9_\-\.]/g, "_");
+
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `attachment; filename="${downloadName}"`);
+    res.setHeader("Content-Length", pdfBuffer.length);
+    return res.send(pdfBuffer);
+  } catch (err) {
+    console.error("Trade In Issue Export PDF Error:", err);
+    return res.status(500).json({ success: false, message: "Failed to generate PDF: " + err.message });
+  }
+});
+
+// ================= EXPORT EXCEL ENDPOINT =================
+// POST /api/tradeinissue/export-excel
+router.post("/export-excel", async (req, res) => {
+  try {
+    const { tradeIssueNo, issueNo, isReprint } = req.body;
+    const cleanNo = (tradeIssueNo || issueNo || "").trim();
+    if (!cleanNo) {
+      return res.status(400).json({ success: false, message: "Trade Issue Number is required." });
+    }
+
+    const pool = await getPool(req);
+
+    // 1. Company
+    const compResult = await pool.request().query("SELECT TOP 1 * FROM tblCompany");
+    const compRow = compResult.recordset[0] || {};
+    const companyName = String(compRow.Name || compRow.CompanyName || "SMART").trim();
+    const companyAddress = [compRow.Address1, compRow.Address2, compRow.City, compRow.Country].filter(Boolean).map(s => String(s).trim()).join(" ");
+
+    // 2. Query Header
+    let header = null;
+    try {
+      const qHdr = `
+        SELECT TOP 1 
+          h.*,
+          RTRIM(LTRIM(ISNULL(s.SupplierName, ''))) AS SupplierName,
+          RTRIM(LTRIM(ISNULL(s.Address1, ''))) AS SupplierAddress1,
+          RTRIM(LTRIM(ISNULL(s.Address2, ''))) AS SupplierAddress2
+        FROM tblTradeIssueHistoryHeader h
+        LEFT JOIN tblSupplier s ON RTRIM(LTRIM(h.SupplierCode)) = RTRIM(LTRIM(s.SupplierCode))
+        WHERE RTRIM(LTRIM(h.TradeIssueNo)) = @TradeIssueNo
+      `;
+      const resHdr = await pool.request().input("TradeIssueNo", sql.VarChar(50), cleanNo).query(qHdr);
+      if (resHdr.recordset.length > 0) {
+        header = resHdr.recordset[0];
+      }
+    } catch (eHdr) {}
+
+    // 3. Query History & TradeBills
+    let historyRows = [];
+    try {
+      const qHist = `
+        SELECT 
+          th.*,
+          RTRIM(LTRIM(ISNULL(s.SupplierName, ''))) AS SupplierName,
+          RTRIM(LTRIM(ISNULL(s.Address1, ''))) AS SupplierAddress1,
+          RTRIM(LTRIM(ISNULL(s.Address2, ''))) AS SupplierAddress2
+        FROM tblTradeIssueHistory th
+        LEFT JOIN tblSupplier s ON RTRIM(LTRIM(th.SupplierCode)) = RTRIM(LTRIM(s.SupplierCode))
+        WHERE RTRIM(LTRIM(th.TradeIssueNo)) = @TradeIssueNo
+        ORDER BY th.CreateDate ASC
+      `;
+      const resHist = await pool.request().input("TradeIssueNo", sql.VarChar(50), cleanNo).query(qHist);
+      historyRows = resHist.recordset;
+    } catch (eHist) {}
+
+    let tradeBills = [];
+    try {
+      const qBills = `
+        SELECT 
+          InvoiceNo,
+          InventoryCode,
+          CustomerCode,
+          CustomerName,
+          CostPerGram,
+          TotalWeight,
+          IssuedWeight,
+          BalanceWeight,
+          TotalCost,
+          Amount,
+          Remarks,
+          CreateDate
+        FROM tblTradeInHeader
+        WHERE RTRIM(LTRIM(TradeIssueNo)) = @TradeIssueNo
+        ORDER BY InvoiceNo ASC
+      `;
+      const resBills = await pool.request().input("TradeIssueNo", sql.VarChar(50), cleanNo).query(qBills);
+      tradeBills = resBills.recordset;
+    } catch (eBills) {}
+
+    if (!header && historyRows.length > 0) {
+      const first = historyRows[0];
+      let sumWeight = 0;
+      let sumPrice = 0;
+      historyRows.forEach(r => {
+        sumWeight += parseFloat(r.TotalWeight || r.IssuedWeight || 0);
+        sumPrice += parseFloat(r.TotalCost || r.Amount || 0);
+      });
+
+      header = {
+        TradeIssueNo: cleanNo,
+        TradeIssueDate: first.CreateDate,
+        SupplierCode: first.SupplierCode,
+        SupplierName: first.SupplierName,
+        SupplierAddress1: first.SupplierAddress1,
+        SupplierAddress2: first.SupplierAddress2,
+        TotalNoOfBills: historyRows.length,
+        TotalWeight: sumWeight,
+        CostPerGram: parseFloat(first.CostPerGram || 0),
+        TotalPrice: sumPrice,
+        Remarks: first.Remarks || '',
+      };
+    }
+
+    if (!header && historyRows.length === 0 && tradeBills.length === 0) {
+      return res.status(404).json({ success: false, message: `Trade In Issue record "${cleanNo}" not found.` });
+    }
+
+    header = header || { TradeIssueNo: cleanNo };
+
+    // 4. Gold Rates
+    const ratesResult = await pool.request().query("SELECT ClassCode, Rate FROM tblClass WHERE ClassCode IN ('24K', '22K', '835', '999', '916', '18K', 'SIL')");
+    const ratesMap = {};
+    ratesResult.recordset.forEach((r) => {
+      ratesMap[(r.ClassCode || "").trim().toUpperCase()] = r.Rate;
+    });
+    const s999 = ratesMap["24K"] !== undefined ? parseFloat(ratesMap["24K"]).toFixed(2) : (ratesMap["999"] ? parseFloat(ratesMap["999"]).toFixed(2) : "-");
+    const s916 = ratesMap["22K"] !== undefined ? parseFloat(ratesMap["22K"]).toFixed(2) : (ratesMap["916"] ? parseFloat(ratesMap["916"]).toFixed(2) : "-");
+    const s835 = ratesMap["835"] !== undefined ? parseFloat(ratesMap["835"]).toFixed(2) : (ratesMap["18K"] ? parseFloat(ratesMap["18K"]).toFixed(2) : "-");
+
+    // Dates
+    const rawDate = header.TradeIssueDate || (historyRows[0] && historyRows[0].CreateDate);
+    let issueDateStr = "-";
+    if (rawDate) {
+      const d = new Date(rawDate);
+      if (!isNaN(d.getTime())) {
+        issueDateStr = `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`;
+      }
+    }
+    const printTimeStr = new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
+
+    const reportTitle = isReprint ? "TRADE-IN ISSUE VOUCHER (DUPLICATE COPY)" : "TRADE-IN ISSUE VOUCHER";
+
+    const XLSX = require("xlsx");
+    const wb = XLSX.utils.book_new();
+    const rows = [];
+
+    rows.push([companyName]);
+    rows.push([companyAddress]);
+    rows.push([]);
+    rows.push([reportTitle]);
+    rows.push([`Printed: ${issueDateStr} ${printTimeStr}`]);
+    rows.push([]);
+
+    // Two panels
+    const suppName = (header.SupplierName || "REFINERY / WHOLESALE").trim();
+    const suppAddress = [header.SupplierAddress1, header.SupplierAddress2].filter(Boolean).map(s => String(s).trim()).join(" ");
+
+    rows.push(["SUPPLIER / REFINERY DETAILS", "", "", "TRADE-IN ISSUE DOCKET"]);
+    rows.push(["Supplier Code:", (header.SupplierCode || "-").trim(), "", "Trade Issue No:", cleanNo]);
+    rows.push(["Supplier Name:", suppName, "", "Issue Date:", issueDateStr]);
+    rows.push(["Address:", suppAddress || "-", "", "Total Bills:", String(header.TotalNoOfBills || (historyRows.length || tradeBills.length || 0))]);
+    rows.push(["Remarks:", (header.Remarks || "-").trim(), "", "Status:", "COMPLETED"]);
+    rows.push([]);
+
+    // Items table
+    const itemsToRender = historyRows.length > 0 ? historyRows : tradeBills;
+    rows.push(["#", "BILL / INVOICE NO", "PARTICULARS", "ISSUED WT (G)", "RATE / G ($)", "AMOUNT ($)", "REMARKS"]);
+    let sumWt = 0;
+    let sumAmount = 0;
+
+    if (itemsToRender.length > 0) {
+      itemsToRender.forEach((item, idx) => {
+        const invNo = String(item.InvoiceNo || item.InventoryCode || `ITEM-${idx + 1}`).trim();
+        const cust = String(item.CustomerName || "").trim();
+        const rem = String(item.Remarks || "").trim();
+        const wt = parseFloat(item.TotalWeight || item.IssuedWeight || 0);
+        const rate = parseFloat(item.CostPerGram || header.CostPerGram || 0);
+        const amt = parseFloat(item.TotalCost || item.Amount || (wt * rate) || 0);
+        sumWt += wt;
+        sumAmount += amt;
+
+        rows.push([
+          idx + 1,
+          invNo,
+          cust || "REFINERY / WHOLESALE",
+          wt.toFixed(3),
+          rate > 0 ? rate : "-",
+          amt,
+          rem || "-"
+        ]);
+      });
+    } else {
+      const hWt = parseFloat(header.TotalWeight || 0);
+      const hAmt = parseFloat(header.TotalPrice || 0);
+      sumWt = hWt;
+      sumAmount = hAmt;
+      rows.push([1, cleanNo, suppName, hWt.toFixed(3), parseFloat(header.CostPerGram || 0), hAmt, (header.Remarks || "-").trim()]);
+    }
+    rows.push([]);
+
+    // Summary totals
+    rows.push(["", "", "", "Total No of Bills:", itemsToRender.length]);
+    rows.push(["", "", "", "Total Issued Weight:", `${sumWt.toFixed(3)} g`]);
+    rows.push(["", "", "", "TOTAL VALUE ISSUED:", sumAmount]);
+    rows.push([]);
+
+    // Signatures
+    rows.push(["PREPARED BY (STAFF)", "", "", "SUPPLIER / AUTHORIZED RECEIVER"]);
+    rows.push(["Staff Name:", "Staff", "", "Receiver Name:", suppName]);
+    rows.push(["Signature:", "______________________", "", "Signature:", "______________________"]);
+    rows.push(["Date:", "______________________", "", "Date:", "______________________"]);
+    rows.push([]);
+    rows.push(["*** System Generated Report ***"]);
+    rows.push(["Powered by Unipro SG"]);
+
+    const ws = XLSX.utils.aoa_to_sheet(rows);
+    ws["!cols"] = [{ wch: 6 }, { wch: 22 }, { wch: 26 }, { wch: 14 }, { wch: 14 }, { wch: 18 }, { wch: 20 }];
+    XLSX.utils.book_append_sheet(wb, ws, "Trade In Issue");
+
+    const excelBuffer = XLSX.write(wb, { type: "buffer", bookType: "xlsx" });
+    const downloadName = `Trade_In_Issue_${cleanNo.replace(/[^a-zA-Z0-9_\-]/g, "_")}.xlsx`;
+
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    res.setHeader("Content-Disposition", `attachment; filename="${downloadName}"`);
+    res.setHeader("Content-Length", excelBuffer.length);
+    return res.send(excelBuffer);
+  } catch (err) {
+    console.error("Trade In Issue Export Excel Error:", err);
+    return res.status(500).json({ success: false, message: "Failed to generate Excel: " + err.message });
   }
 });
 

@@ -496,4 +496,212 @@ router.get("/print-data/:returnNo", async (req, res) => {
   }
 });
 
+// ================= EXPORT PDF ENDPOINT =================
+// POST /api/purchasereturn/export-pdf
+router.post("/export-pdf", async (req, res) => {
+  try {
+    const { html, filename } = req.body;
+    if (!html) {
+      return res.status(400).json({ success: false, message: "HTML content is required for PDF export." });
+    }
+
+    const { convertHtmlToPdf } = require("../utils/htmlToPdf");
+    const pdfBuffer = await convertHtmlToPdf(html);
+    const downloadName = (filename || "Purchase_Return.pdf").replace(/[^a-zA-Z0-9_\-\.]/g, "_");
+
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `attachment; filename="${downloadName}"`);
+    res.setHeader("Content-Length", pdfBuffer.length);
+    return res.send(pdfBuffer);
+  } catch (err) {
+    console.error("Purchase Return Export PDF Error:", err);
+    return res.status(500).json({ success: false, message: "Failed to generate PDF: " + err.message });
+  }
+});
+
+// ================= EXPORT EXCEL ENDPOINT =================
+// POST /api/purchasereturn/export-excel
+router.post("/export-excel", async (req, res) => {
+  try {
+    const { returnNo } = req.body;
+    const cleanNo = (returnNo || "").trim();
+    if (!cleanNo) {
+      return res.status(400).json({ success: false, message: "Return Reference Number is required." });
+    }
+
+    const pool = req.pool || (await poolPromise);
+
+    // Fetch company info
+    const compRes = await pool.request().query("SELECT TOP 1 * FROM tblCompany");
+    const rawCompany = compRes.recordset[0] || {};
+    const companyName = String(rawCompany.Name || rawCompany.CompanyName || "SMART").trim();
+    const address = [
+      String(rawCompany.Address1 || "").trim(),
+      String(rawCompany.Address2 || "").trim(),
+      String(rawCompany.City || "").trim()
+    ].filter(Boolean).join(" ");
+
+    // Fetch header
+    const headerRes = await pool.request()
+      .input("ReturnNo", sql.VarChar, cleanNo)
+      .query(`
+        SELECT h.*, s.SupplierName, s.Address1 as SupplierAddress1, s.Address2 as SupplierAddress2
+        FROM tblPurchaseReturnHeader h
+        LEFT JOIN tblSupplier s ON RTRIM(LTRIM(h.SupplierCode)) = RTRIM(LTRIM(s.SupplierCode))
+        WHERE RTRIM(LTRIM(h.ReturnNo)) = @ReturnNo
+      `);
+
+    if (headerRes.recordset.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: `No Purchase Return records found for Return No: ${cleanNo}`
+      });
+    }
+
+    const header = headerRes.recordset[0];
+
+    // Fetch details
+    const detailRes = await pool.request()
+      .input("ReturnNo", sql.VarChar, cleanNo)
+      .query(`
+        SELECT *
+        FROM tblPurchaseReturnDetail
+        WHERE RTRIM(LTRIM(ReturnNo)) = @ReturnNo
+        ORDER BY InventoryCode ASC
+      `);
+
+    const details = detailRes.recordset || [];
+
+    // Format dates
+    const rawRetDate = header.ReturnDate || header.CreateDate;
+    let returnDateFormatted = "";
+    if (rawRetDate) {
+      const d = new Date(rawRetDate);
+      if (!isNaN(d.getTime())) {
+        returnDateFormatted = `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}/${d.getFullYear()}`;
+      } else {
+        returnDateFormatted = String(rawRetDate);
+      }
+    }
+
+    const now = new Date();
+    const printTimeStr = `${String(now.getDate()).padStart(2, "0")}/${String(now.getMonth() + 1).padStart(2, "0")}/${now.getFullYear()} ${now.toLocaleTimeString()}`;
+
+    const supplierAddress = [header.SupplierAddress1, header.SupplierAddress2].filter(Boolean).map(s => String(s).trim()).join(", ") || "-";
+
+    const totalWt = parseFloat(header.TotalWeight) || details.reduce((acc, it) => acc + (parseFloat(it.Weight) || 0), 0);
+    const totalPcsCount = parseFloat(header.TotalPCS) || details.reduce((acc, it) => acc + (parseFloat(it.PCS) || 0), 0);
+    const totalVal = parseFloat(header.TotalValue) || details.reduce((acc, it) => acc + (parseFloat(it.TotalValue) || 0), 0);
+    const totalGstVal = parseFloat(header.TotalGst) || 0;
+    const netAmountVal = parseFloat(header.NetAmount) || (totalVal + totalGstVal);
+
+    const XLSX = require("xlsx");
+    const wb = XLSX.utils.book_new();
+
+    const rows = [
+      // Company Information
+      ["COMPANY NAME", companyName],
+      ["COMPANY ADDRESS", address],
+      [],
+      // Purchase Return Information
+      ["REPORT NAME", "PURCHASE RETURN"],
+      ["PRINTED DATE & TIME", printTimeStr],
+      ["RETURN REFERENCE NUMBER", cleanNo],
+      ["RETURN DATE", returnDateFormatted],
+      ["LOCATION CODE", (header.LocationCode || "").trim()],
+      ["CREATED BY", (header.CreateUser || "UPS").trim()],
+      [],
+      // Supplier Information
+      ["SUPPLIER CODE", (header.SupplierCode || "").trim()],
+      ["SUPPLIER NAME", (header.SupplierName || "-").trim()],
+      ["SUPPLIER ADDRESS", supplierAddress],
+      ["REMARKS", (header.Remarks || "-").trim()],
+      [],
+      // Inventory Details Header (Aligned exactly across 8 columns A-H)
+      ["#", "INVENTORY CODE", "DESCRIPTION", "WEIGHT (G)", "GOLD LOSS", "MC", "PCS", "VALUE ($)"]
+    ];
+
+    const itemStartRow = rows.length + 1; // 1-based index of first detail row
+
+    details.forEach((item, idx) => {
+      const wt = parseFloat(item.Weight) || 0;
+      const gloss = parseFloat(item.GoldLoss) || 0;
+      const costPerGm = parseFloat(item.CostPerGram) || parseFloat(item.MC) || 0;
+      const pces = parseInt(item.PCS) || 0;
+      const val = parseFloat(item.TotalValue) || 0;
+
+      rows.push([
+        idx + 1,
+        (item.InventoryCode || "").trim(),
+        (item.Description || "-").trim(),
+        Number(wt.toFixed(3)),
+        Number(gloss.toFixed(3)),
+        Number(costPerGm.toFixed(2)),
+        pces,
+        Number(val.toFixed(2))
+      ]);
+    });
+
+    const itemEndRow = rows.length; // 1-based index of last detail row
+
+    // Totals Section (Directly below inventory table, aligned to Columns F, G, H)
+    rows.push(
+      [],
+      ["", "", "", "", "", "Total Weight:", Number(totalWt.toFixed(3)), "G"],
+      ["", "", "", "", "", "Total PCS:", totalPcsCount, ""],
+      ["", "", "", "", "", "Total Cost:", Number(totalVal.toFixed(2)), "$"]
+    );
+
+    if (totalGstVal > 0) {
+      rows.push(["", "", "", "", "", "GST Amount:", Number(totalGstVal.toFixed(2)), "$"]);
+    }
+
+    rows.push(
+      ["", "", "", "", "", "NET TOTAL:", Number(netAmountVal.toFixed(2)), "$"],
+      [],
+      // Staff / Receiver Information
+      ["PREPARED BY (STAFF)", (header.CreateUser || "UPS").trim()],
+      ["SUPPLIER / AUTHORIZED RECEIVER", (header.SupplierName || "-").trim()]
+    );
+
+    const ws = XLSX.utils.aoa_to_sheet(rows);
+
+    // Set precise column widths matching content
+    ws["!cols"] = [
+      { wch: 8 },   // Col A: # / Section Labels
+      { wch: 25 },  // Col B: Inventory Code / Values
+      { wch: 35 },  // Col C: Description
+      { wch: 16 },  // Col D: Weight (G)
+      { wch: 14 },  // Col E: Gold Loss
+      { wch: 16 },  // Col F: MC / Total Labels
+      { wch: 14 },  // Col G: PCS / Total Values
+      { wch: 16 }   // Col H: Value ($) / Unit signs
+    ];
+
+    // Format numeric cells in item rows
+    if (details.length > 0) {
+      for (let r = itemStartRow; r <= itemEndRow; r++) {
+        if (ws[`D${r}`]) ws[`D${r}`].z = "#,##0.000";
+        if (ws[`E${r}`]) ws[`E${r}`].z = "#,##0.000";
+        if (ws[`F${r}`]) ws[`F${r}`].z = "$#,##0.00";
+        if (ws[`G${r}`]) ws[`G${r}`].z = "#,##0";
+        if (ws[`H${r}`]) ws[`H${r}`].z = "$#,##0.00";
+      }
+    }
+
+    XLSX.utils.book_append_sheet(wb, ws, "Purchase Return");
+
+    const excelBuffer = XLSX.write(wb, { type: "buffer", bookType: "xlsx" });
+    const downloadName = `Purchase_Return_${cleanNo}.xlsx`;
+
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    res.setHeader("Content-Disposition", `attachment; filename="${downloadName}"`);
+    res.setHeader("Content-Length", excelBuffer.length);
+    return res.send(excelBuffer);
+  } catch (err) {
+    console.error("Purchase Return Export Excel Error:", err);
+    return res.status(500).json({ success: false, message: "Failed to generate Excel: " + err.message });
+  }
+});
+
 module.exports = router;

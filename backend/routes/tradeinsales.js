@@ -683,4 +683,300 @@ router.post("/check-admin", async (req, res) => {
   }
 });
 
+// ================= EXPORT PDF ENDPOINT =================
+// POST /api/tradeinsales/export-pdf
+router.post("/export-pdf", async (req, res) => {
+  try {
+    const { html, filename } = req.body;
+    if (!html) {
+      return res.status(400).json({ success: false, message: "HTML content is required for PDF export." });
+    }
+
+    const { convertHtmlToPdf } = require("../utils/htmlToPdf");
+    const pdfBuffer = await convertHtmlToPdf(html);
+    const downloadName = (filename || "Trade_In_Gold_Invoice.pdf").replace(/[^a-zA-Z0-9_\-\.]/g, "_");
+
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `attachment; filename="${downloadName}"`);
+    res.setHeader("Content-Length", pdfBuffer.length);
+    return res.send(pdfBuffer);
+  } catch (err) {
+    console.error("Trade-In Sales Export PDF Error:", err);
+    return res.status(500).json({ success: false, message: "Failed to generate PDF: " + err.message });
+  }
+});
+
+// ================= EXPORT EXCEL ENDPOINT =================
+// POST /api/tradeinsales/export-excel
+router.post("/export-excel", async (req, res) => {
+  try {
+    const { billNo, isReprint } = req.body;
+    const rawBillNo = (billNo || "").trim();
+    if (!rawBillNo) {
+      return res.status(400).json({ success: false, message: "Bill No is required." });
+    }
+
+    const pool = await getPool(req);
+
+    // 1. Fetch Company Information
+    const compRes = await pool.request().query("SELECT TOP 1 * FROM tblCompany");
+    const compRow = compRes.recordset[0] || {};
+    const companyName = (compRow.Name || "SMART").trim();
+    const companyAddress = [compRow.Address1, compRow.Address2, compRow.City, compRow.Country].filter(Boolean).map(s => String(s).trim()).join(" ");
+
+    // 2. Fetch Rates
+    let rate999 = "-";
+    let rate916 = "-";
+    let rate835 = "-";
+    try {
+      const rateRes = await pool.request().query("SELECT ClassCode, Rate FROM tblClass");
+      if (rateRes.recordset && rateRes.recordset.length > 0) {
+        rateRes.recordset.forEach(r => {
+          const code = (r.ClassCode || "").trim().toUpperCase();
+          const val = parseFloat(r.Rate || 0).toFixed(2);
+          if (code === "24K") rate999 = val;
+          else if (code === "22K") rate916 = val;
+          else if (code === "20KJ" || code === "835") rate835 = val;
+        });
+      }
+    } catch (_) {}
+
+    // 3. Query Header and Items
+    let cleanRef = rawBillNo;
+    let cleanInv = rawBillNo;
+    if (rawBillNo.toUpperCase().startsWith("TI-")) {
+      cleanRef = rawBillNo.substring(3).trim();
+    } else {
+      cleanInv = "TI-" + rawBillNo;
+    }
+
+    let header = null;
+    let items = [];
+
+    // Check tblTradeInSalesHeader
+    const qSalesHdr = await pool.request()
+      .input("Ref1", sql.VarChar, rawBillNo)
+      .input("Ref2", sql.VarChar, cleanRef)
+      .input("Ref3", sql.VarChar, cleanInv)
+      .query(`
+        SELECT TOP 1 *
+        FROM tblTradeInSalesHeader
+        WHERE RTRIM(LTRIM(ReferenceNo)) IN (@Ref1, @Ref2, @Ref3)
+      `);
+
+    if (qSalesHdr.recordset && qSalesHdr.recordset.length > 0) {
+      const hdr = qSalesHdr.recordset[0];
+      const actualRef = (hdr.ReferenceNo || rawBillNo).trim();
+      const qSalesDtl = await pool.request()
+        .input("Ref", sql.VarChar, actualRef)
+        .query(`
+          SELECT *
+          FROM tblTradeinSalesDetail
+          WHERE RTRIM(LTRIM(ReferenceNo)) = @Ref
+          ORDER BY InventoryCode ASC
+        `);
+      header = {
+        InvoiceNo: actualRef,
+        ReferenceNo: actualRef,
+        CustomerCode: (hdr.VendorCode || "").trim(),
+        CustomerName: (hdr.VendorName || "").trim(),
+        Address1: (hdr.Address1 || "").trim(),
+        Address2: (hdr.Address2 || "").trim(),
+        Address3: (hdr.Address3 || "").trim(),
+        TotalWeight: hdr.TotalWeight || 0,
+        TotalStoneWeight: hdr.TotalStoneWeight || 0,
+        TotalGoldLoss: hdr.TotalGoldLoss || 0,
+        TotalCost: hdr.TotalCost || 0,
+        TotalAmount: hdr.Amount || 0,
+        Remarks: (hdr.Remarks || "").trim(),
+        SalesmanCode: (hdr.SalesmanCode || "").trim(),
+        Date: hdr.SalesDate || hdr.CreateDate,
+        CreateUser: (hdr.CreateUser || "").trim()
+      };
+      items = (qSalesDtl.recordset || []).map(it => ({
+        Description: it.Description,
+        DiamondDescription: it.DiamondDescription,
+        ClassCode: it.ClassCode,
+        Weight: it.Weight,
+        GoldLoss: it.GoldLoss,
+        CostPerGram: it.CostPerGram,
+        TotalCost: it.TotalCost
+      }));
+    } else {
+      // Check tblTradeInHeader
+      const qTradeHdr = await pool.request()
+        .input("Ref1", sql.VarChar, rawBillNo)
+        .input("Ref2", sql.VarChar, cleanRef)
+        .input("Ref3", sql.VarChar, cleanInv)
+        .query(`
+          SELECT TOP 1 *
+          FROM tblTradeInHeader
+          WHERE RTRIM(LTRIM(InvoiceNo)) IN (@Ref1, @Ref2, @Ref3)
+             OR RTRIM(LTRIM(InventoryCode)) IN (@Ref1, @Ref2, @Ref3)
+        `);
+
+      if (qTradeHdr.recordset && qTradeHdr.recordset.length > 0) {
+        const hdr = qTradeHdr.recordset[0];
+        const actualInvNo = (hdr.InvoiceNo || rawBillNo).trim();
+        const qTradeDtl = await pool.request()
+          .input("InvNo", sql.VarChar, actualInvNo)
+          .query(`
+            SELECT *
+            FROM tblTradeInDetail
+            WHERE RTRIM(LTRIM(InvoiceNo)) = @InvNo
+            ORDER BY ItemNo ASC
+          `);
+        header = {
+          InvoiceNo: actualInvNo,
+          ReferenceNo: (hdr.InventoryCode || actualInvNo).trim(),
+          CustomerCode: (hdr.CustomerCode || "").trim(),
+          CustomerName: (hdr.CustomerName || "").trim(),
+          Address1: (hdr.Address1 || "").trim(),
+          Address2: (hdr.Address2 || "").trim(),
+          Address3: (hdr.Address3 || "").trim(),
+          TotalWeight: hdr.Weight || 0,
+          TotalStoneWeight: hdr.StoneWeight || 0,
+          TotalGoldLoss: hdr.GoldLoss || 0,
+          TotalCost: hdr.TotalCost || 0,
+          TotalAmount: hdr.Amount || 0,
+          Remarks: (hdr.Remarks || "").trim(),
+          SalesmanCode: (hdr.SalesManCode || "").trim(),
+          Date: hdr.Date || hdr.Createdate,
+          CreateUser: (hdr.UserId || "").trim()
+        };
+        items = (qTradeDtl.recordset || []).map(d => ({
+          Description: d.Description,
+          DiamondDescription: d.DiamondDescription,
+          ClassCode: d.ClassCode,
+          Weight: d.Weight,
+          GoldLoss: d.GoldLoss,
+          CostPerGram: d.CostPerGram,
+          TotalCost: d.TotalCost
+        }));
+      }
+    }
+
+    if (!header) {
+      return res.status(404).json({ success: false, message: `Trade-In bill "${rawBillNo}" not found.` });
+    }
+
+    // Format Dates
+    const rawDate = header.Date;
+    let invDateStr = "-";
+    if (rawDate) {
+      const d = new Date(rawDate);
+      if (!isNaN(d.getTime())) {
+        invDateStr = `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`;
+      }
+    }
+    const printTimeStr = new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
+
+    const custAddress = [header.Address1, header.Address2, header.Address3].filter(Boolean).map(s => String(s).trim()).join(", ") || "-";
+    const reportTitle = "POS";
+
+    // Build Excel Workbook
+    const XLSX = require("xlsx");
+    const wb = XLSX.utils.book_new();
+
+    const rows = [];
+    rows.push([companyName]);
+    rows.push([companyAddress]);
+    rows.push([]);
+    rows.push([reportTitle]);
+    rows.push([`Printed: ${invDateStr} ${printTimeStr}`]);
+    rows.push([]);
+
+    // Reference & Customer Info
+    rows.push(["TRADE-IN REFERENCE DETAILS", "", "", "CUSTOMER DETAILS"]);
+    rows.push(["Invoice / Ref No:", header.InvoiceNo || rawBillNo, "", "Name:", header.CustomerName || "-"]);
+    rows.push(["Date:", invDateStr, "", "Address:", custAddress]);
+    rows.push(["Salesman:", (header.SalesmanCode || header.CreateUser || "SALES").trim(), "", "Customer Code:", header.CustomerCode || "-"]);
+    rows.push(["Remarks:", header.Remarks || "-", "", "", ""]);
+    rows.push([]);
+
+    // Item Table
+    rows.push([
+      "#",
+      "ITEM DESCRIPTION",
+      "WEIGHT (G)",
+      "LOSS (%)",
+      "COST / GM ($)",
+      "TOTAL COST ($)"
+    ]);
+
+    let sumWeight = 0;
+    let sumCost = 0;
+
+    items.forEach((it, idx) => {
+      const desc = (it.Description || "Trade-In Item").trim();
+      const diaDesc = (it.DiamondDescription || "").trim();
+      const classInfo = it.ClassCode ? ` [Class: ${it.ClassCode.trim()}]` : "";
+      const fullDesc = diaDesc ? `${desc} (${diaDesc})${classInfo}` : `${desc}${classInfo}`;
+      const wt = parseFloat(it.Weight) || 0;
+      const loss = parseFloat(it.GoldLoss) || 0;
+      const cpg = parseFloat(it.CostPerGram) || 0;
+      const tc = parseFloat(it.TotalCost) || 0;
+
+      sumWeight += wt;
+      sumCost += tc;
+
+      rows.push([
+        idx + 1,
+        fullDesc,
+        Number(wt.toFixed(3)),
+        Number(loss.toFixed(2)),
+        Number(cpg.toFixed(2)),
+        Number(tc.toFixed(2))
+      ]);
+    });
+
+    rows.push([]);
+
+    // Totals
+    const totalWeightVal = parseFloat(header.TotalWeight) || sumWeight;
+    const tradeInValue = parseFloat(header.TotalCost) || parseFloat(header.TotalAmount) || sumCost;
+
+    rows.push(["", "", "", "", "Total Weight:", Number(totalWeightVal.toFixed(3))]);
+    if (parseFloat(header.TotalStoneWeight) > 0) {
+      rows.push(["", "", "", "", "Stone Weight:", Number(parseFloat(header.TotalStoneWeight).toFixed(3))]);
+    }
+    rows.push(["", "", "", "", "TRADE-IN VALUE:", Number(tradeInValue.toFixed(2))]);
+    rows.push([]);
+
+    // Signatures
+    rows.push(["PREPARED BY (STAFF)", "", "", "", "SUPPLIER / AUTHORIZED RECEIVER", ""]);
+    rows.push(["Staff Name:", (header.SalesmanCode || header.CreateUser || "SALES").trim(), "", "", "Receiver Name:", header.CustomerName || "-"]);
+    rows.push(["Signature:", "______________________", "", "", "Signature:", "______________________"]);
+    rows.push(["Date:", "______________________", "", "", "Date:", "______________________"]);
+    rows.push([]);
+    rows.push(["*** System Generated Report ***"]);
+    rows.push(["Powered by Unipro SG"]);
+
+    const ws = XLSX.utils.aoa_to_sheet(rows);
+
+    // Set Column Widths
+    ws["!cols"] = [
+      { wch: 6 },
+      { wch: 38 },
+      { wch: 14 },
+      { wch: 12 },
+      { wch: 16 },
+      { wch: 18 }
+    ];
+
+    XLSX.utils.book_append_sheet(wb, ws, "Trade-In Gold Invoice");
+
+    const excelBuffer = XLSX.write(wb, { type: "buffer", bookType: "xlsx" });
+    const downloadName = `Trade_In_Gold_Invoice_${rawBillNo.replace(/[^a-zA-Z0-9_\-]/g, "_")}.xlsx`;
+
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    res.setHeader("Content-Disposition", `attachment; filename="${downloadName}"`);
+    res.setHeader("Content-Length", excelBuffer.length);
+    return res.send(excelBuffer);
+  } catch (err) {
+    console.error("Trade-In Sales Export Excel Error:", err);
+    return res.status(500).json({ success: false, message: "Failed to generate Excel: " + err.message });
+  }
+});
+
 module.exports = router;

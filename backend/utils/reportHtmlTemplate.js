@@ -203,6 +203,14 @@ const formatColumnHeader = (colName) => {
     LocationName: "LOC. NAME",
     "Location Name": "LOC. NAME",
     Location: "LOC.",
+    TransferNo: "TRANSFER NO.",
+    FromLocation: "FROM LOC.",
+    ToLocation: "TO LOC.",
+    FromLocStatus: "FROM LOC STATUS",
+    ToLocStatus: "TO LOC STATUS",
+    QtyOnHand: "QTY ON HAND",
+    GrossWeight: "GROSS WT.",
+    NetWeight: "NET WT.",
     Mobile: "MOBILE NO.",
     Phone: "PHONE NO.",
     TotalRewardPoints: "REWARD PTS.",
@@ -547,12 +555,13 @@ async function generateReportHtml({
     .page-sheet {
       width: ${pageSheetWidth};
       min-height: ${pageSheetMinHeight};
-      margin: 15px auto;
+      margin: 20px auto;
       background: #ffffff;
-      padding: 10mm;
+      padding: 10mm 12mm;
       box-sizing: border-box;
-      border: none;
-      box-shadow: none;
+      border: 1px solid #d4a742;
+      border-radius: 4px;
+      box-shadow: 0 4px 18px rgba(153, 101, 21, 0.12);
       position: relative;
       display: flex;
       flex-direction: column;
@@ -712,7 +721,9 @@ async function generateReportHtml({
       line-height: 1.3;
       text-align: center !important;
       box-sizing: border-box;
-      white-space: nowrap;
+      white-space: normal;
+      word-break: break-word;
+      overflow-wrap: break-word;
     }
     /* ZEBRA STRIPING: Subtle light-cream alternating with Crisp White */
     table.report-table tbody tr:nth-child(even) td {

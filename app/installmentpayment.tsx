@@ -1,6 +1,8 @@
 import { ThemedText } from '@/components/themed-text';
+import { PrintReportModal } from '@/components/PrintReportModal';
 import { API_BASE_URL } from '@/constants/api';
 import { useThemeColors } from '@/hooks/useThemeColors';
+import { getStandardReportCss, renderStandardReportFooter, renderStandardReportHeader } from '@/utils/standardPrintReport';
 import { UNIPRO_LOGO_DATA_URI } from '@/utils/uniproLogo';
 import { Ionicons } from '@expo/vector-icons';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
@@ -63,6 +65,11 @@ export default function InstallmentPaymentScreen() {
   const [cancelBillNo, setCancelBillNo] = useState('');
   const [isReprintModalVisible, setIsReprintModalVisible] = useState(false);
   const [reprintBillNo, setReprintBillNo] = useState('');
+
+  // Standardized Print Report Modal state
+  const [isPrintModalVisible, setIsPrintModalVisible] = useState(false);
+  const [activePrintInstallmentNo, setActivePrintInstallmentNo] = useState('');
+  const [activePrintIsReprint, setActivePrintIsReprint] = useState(false);
 
   // LOV State
   const [isAgreementModalVisible, setIsAgreementModalVisible] = useState(false);
@@ -293,147 +300,77 @@ export default function InstallmentPaymentScreen() {
     }
   };
 
-  // Original Print Function matching subPrintInstallment(ByVal sInvoiceNo As String) in frmInstallmentPayment.vb
-  // Company specific report:
-  // If Trim(sCompanyShortCode) = "AJ" Then rptInstallmentPayment_AJ.rpt
-  // ElseIf Trim(sCompanyShortCode) = "MD" Then rptInstallmentPayment_MD.rpt
-  // ElseIf Trim(sCompanyShortCode) = "MJ" Then rptInstallmentPayment_MJ.rpt
-  // Selection: {tblInstallmentDetail.InstallmentNo} = sInvoiceNo
-  // Copies: 2 (Customer Copy and Office Copy)
-  const subPrintInstallment = async (targetInstallmentNo: string, isReprintMode: boolean = false) => {
-    const sInvoiceNo = (targetInstallmentNo || '').trim();
-    if (!sInvoiceNo) {
-      return;
-    }
+  // Build Standardized Cambria HTML matching Purchase Return / Deposit Receipt
+  const buildInstallmentReceiptHtml = (sInvoiceNo: string, isReprintMode: boolean, printData: any) => {
+    const { company, payment, history, rates, payModes } = printData;
 
-    try {
-      setLoading(true);
+    const now = new Date();
+    const sgDateStr = now.toLocaleDateString('en-GB', {
+      timeZone: 'Asia/Singapore',
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+    });
+    const sgTimeStr = now.toLocaleTimeString('en-US', {
+      timeZone: 'Asia/Singapore',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: true,
+    });
 
-      let company: any = { name: '', address1: '', address2: '', city: '', state: '', country: '', phone: '', fax: '', companyShortCode: '' };
-      let payment: any = null;
-      let history: any[] = [];
-      let rates: any = { rate999: '', rate916: '', rate835: '' };
-      let payModes: any[] = [];
+    const sCompanyName = (company?.name || 'SMART').trim();
+    const sCompAddress2 = [company?.address1, company?.address2, company?.country].filter(Boolean).join(' ');
+    const sCompAddress3 = [company?.phone, company?.fax].filter(Boolean).join(' ');
 
-      // 1. Fetch actual data from backend SQL Server
-      const res = await fetch(`${API_URL}/print-data?installmentNo=${encodeURIComponent(sInvoiceNo)}`);
-      const json = await res.json();
+    const sCustomerName = (payment?.CustomerName || customerName || '').trim();
+    const sCustomerCode = (payment?.CustomerCode || customerCode || '').trim();
+    const sCustomerAddress1 = (payment?.CustomerAddress1 || address || '').trim();
+    const sCustomerAddress2 = (payment?.CustomerAddress2 || '').trim();
+    const sCustomerPhone = (payment?.CustomerPhone || '').trim();
 
-      if (json.success && json.data) {
-        company = json.data.company || company;
-        payment = json.data.payment || {};
-        history = json.data.history || [];
-        rates = json.data.rates || rates;
-        payModes = json.data.payModes || [];
-      } else {
-        showToast(json.message || `Installment payment voucher ${sInvoiceNo} not found for print.`, 'error');
-        setLoading(false);
-        return;
-      }
+    const s999 = rates?.rate999 || '-';
+    const s916 = rates?.rate916 || '-';
+    const s835 = rates?.rate835 || '-';
 
-      // Singapore Print Date & Time (Asia/Singapore)
-      const now = new Date();
-      const sgDateStr = now.toLocaleDateString('en-GB', {
-        timeZone: 'Asia/Singapore',
-        day: '2-digit',
-        month: '2-digit',
-        year: 'numeric',
-      });
-      const sgTimeStr = now.toLocaleTimeString('en-US', {
-        timeZone: 'Asia/Singapore',
-        hour: '2-digit',
-        minute: '2-digit',
-        hour12: true,
-      });
+    const sAgreementNo = (payment?.InsAgreementNo || agreementNo || '').trim();
+    const sInstallmentNo = (payment?.InstallmentNo || sInvoiceNo).trim();
+    const currentAmtPaid = parseFloat(payment?.AmtPaid) || 0;
+    const currentInsAmt = parseFloat(payment?.InstallmentAmt) || 0;
+    const totalAgreementCost = parseFloat(payment?.TotalCost) || parseFloat(salesAmount) || 0;
+    const depositAmt = parseFloat(payment?.DepositAmt) || parseFloat(depositAmount) || 0;
 
-      // Original Formula Field Values from frmInstallmentPayment.vb:
-      // CompAddress1: CompName
-      // CompAddress2: Address1 & " " & Address2 & " " & Country
-      // CompAddress3: PhoneNo & " " & FaxNo
-      // Customer1: txtCustomerName.Text
-      // Customer2: txtAddress1.Text
-      // Customer3: txtAddress2.Text
-      // Rate1: s999
-      // Rate2: s916
-      // Rate3: s835
-      const sCompanyName = (company.name || 'SMART').trim();
-      const sCompAddress2 = [company.address1, company.address2, company.country].filter(Boolean).join(' ');
-      const sCompAddress3 = [company.phone, company.fax].filter(Boolean).join(' ');
+    let totalInstallmentsPaid = 0;
+    (history || []).forEach((h: any) => {
+      totalInstallmentsPaid += parseFloat(h.AmtPaid) || 0;
+    });
+    const grandTotalPaid = depositAmt + totalInstallmentsPaid;
+    const balanceDue = Math.max(0, totalAgreementCost - grandTotalPaid);
 
-      const sCustomerName = (payment.CustomerName || customerName || '').trim();
-      const sCustomerCode = (payment.CustomerCode || customerCode || '').trim();
-      const sCustomerAddress1 = (payment.CustomerAddress1 || address || '').trim();
-      const sCustomerAddress2 = (payment.CustomerAddress2 || '').trim();
-      const sCustomerPhone = (payment.CustomerPhone || '').trim();
+    const formatDate = (val: any) => {
+      if (!val) return '-';
+      const d = new Date(val);
+      if (isNaN(d.getTime())) return String(val).split('T')[0] || '-';
+      return d.toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' });
+    };
 
-      const s999 = rates.rate999 || '-';
-      const s916 = rates.rate916 || '-';
-      const s835 = rates.rate835 || '-';
+    const paymentDateFormatted = formatDate(payment?.CreateDate || new Date());
+    const sReportTitle = 'INSTALLMENT PAYMENT';
 
-      const sAgreementNo = (payment.InsAgreementNo || agreementNo || '').trim();
-      const sInstallmentNo = (payment.InstallmentNo || sInvoiceNo).trim();
-      const currentAmtPaid = parseFloat(payment.AmtPaid) || 0;
-      const currentInsAmt = parseFloat(payment.InstallmentAmt) || 0;
-      const totalAgreementCost = parseFloat(payment.TotalCost) || parseFloat(salesAmount) || 0;
-      const depositAmt = parseFloat(payment.DepositAmt) || parseFloat(depositAmount) || 0;
-
-      // Compute total installment payments made to date from history
-      let totalInstallmentsPaid = 0;
-      history.forEach((h: any) => {
-        totalInstallmentsPaid += parseFloat(h.AmtPaid) || 0;
-      });
-      const grandTotalPaid = depositAmt + totalInstallmentsPaid;
-      const balanceDue = totalAgreementCost - grandTotalPaid;
-
-      // Format date helper
-      const formatDate = (val: any) => {
-        if (!val) return '-';
-        const d = new Date(val);
-        if (isNaN(d.getTime())) return String(val).split('T')[0] || '-';
-        return d.toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' });
-      };
-
-      const paymentDateFormatted = formatDate(payment.CreateDate || new Date());
-
-      // Print copy count: 2 copies (Customer Copy and Office Copy)
-      // Crystal Report Title:
-      // AJ: rptInstallmentPayment_AJ.rpt | MD: rptInstallmentPayment_MD.rpt | MJ: rptInstallmentPayment_MJ.rpt
-      const sReportTitle = isReprintMode ? 'INSTALLMENT PAYMENT RECEIPT (DUPLICATE COPY)' : 'INSTALLMENT PAYMENT RECEIPT';
-
-      // Generate HTML for each copy
-      const generatePageMarkup = (copyLabel: string) => {
-        return `
-          <div class="page-sheet">
-            <!-- BRAND / HEADER -->
-            <div class="report-header">
-              <div class="header-brand">
-                <img src="${UNIPRO_LOGO_DATA_URI}" alt="Logo" class="brand-logo" />
-                <div class="brand-details">
-                  <div class="company-name">${sCompanyName}</div>
-                  <div class="company-address">${sCompAddress2}</div>
-                  ${sCompAddress3 ? `<div class="company-address">${sCompAddress3}</div>` : ''}
-                </div>
-              </div>
-              <div class="header-meta">
-                <div class="report-badge">${sReportTitle}</div>
-                <div class="copy-tag">${copyLabel}</div>
-                <div class="doc-no">VOUCHER NO: <span>${sInstallmentNo}</span></div>
-                <div class="meta-date">Date: ${paymentDateFormatted} &nbsp;|&nbsp; ${sgTimeStr}</div>
-              </div>
-            </div>
-
-            <!-- GOLD RATES BANNER (Formula Fields: Rate1, Rate2, Rate3) -->
-            <div class="gold-rate-strip">
-              <div class="rate-cell"><span class="rate-lbl">Gold 999:</span> <span class="rate-val">$${s999}/g</span></div>
-              <div class="rate-divider">|</div>
-              <div class="rate-cell"><span class="rate-lbl">Gold 916 (22K):</span> <span class="rate-val">$${s916}/g</span></div>
-              <div class="rate-divider">|</div>
-              <div class="rate-cell"><span class="rate-lbl">Gold 835 (20K):</span> <span class="rate-val">$${s835}/g</span></div>
-            </div>
+    const generatePageMarkup = (copyLabel: string) => {
+      return `
+        <div class="page-sheet">
+          <div class="report-main-content">
+            ${renderStandardReportHeader({
+              company: {
+                name: sCompanyName,
+                address: [sCompAddress2, sCompAddress3].filter(Boolean).join(' ')
+              },
+              reportTitle: `${sReportTitle} (${copyLabel})`,
+              printedDateTime: `${paymentDateFormatted} ${sgTimeStr}`
+            })}
 
             <!-- TWO-COLUMN INFO: CUSTOMER vs INSTALLMENT AGREEMENT -->
             <div class="info-grid">
-              <!-- Customer Box (Formula Fields: Customer1, Customer2, Customer3) -->
               <div class="info-card">
                 <div class="card-title">CUSTOMER DETAILS</div>
                 <div class="info-row"><span class="info-lbl">Customer:</span> <span class="info-val font-bold">${sCustomerName || 'CASH CUSTOMER'}</span></div>
@@ -443,14 +380,13 @@ export default function InstallmentPaymentScreen() {
                 ${sCustomerPhone ? `<div class="info-row"><span class="info-lbl">Contact:</span> <span class="info-val">${sCustomerPhone}</span></div>` : ''}
               </div>
 
-              <!-- Installment Agreement Box -->
               <div class="info-card">
                 <div class="card-title">AGREEMENT SPECIFICATION</div>
                 <div class="info-row"><span class="info-lbl">Agreement No:</span> <span class="info-val font-bold">${sAgreementNo}</span></div>
-                <div class="info-row"><span class="info-lbl">Installment Paid:</span> <span class="info-val">${payment.InsPaid || 1} installment(s)</span></div>
+                <div class="info-row"><span class="info-lbl">Installment Paid:</span> <span class="info-val">${payment?.InsPaid || 1} installment(s)</span></div>
                 <div class="info-row"><span class="info-lbl">Installment Amt:</span> <span class="info-val font-bold">$ ${currentInsAmt.toFixed(2)}</span></div>
-                <div class="info-row"><span class="info-lbl">Pay Mode:</span> <span class="info-val font-bold">${payModes.length > 0 ? payModes.map((p: any) => p.payMode).join(', ') : 'CASH'}</span></div>
-                <div class="info-row"><span class="info-lbl">Remarks:</span> <span class="info-val">${payment.Remarks || '-'}</span></div>
+                <div class="info-row"><span class="info-lbl">Pay Mode:</span> <span class="info-val font-bold">${payModes && payModes.length > 0 ? payModes.map((p: any) => p.payMode).join(', ') : 'CASH'}</span></div>
+                <div class="info-row"><span class="info-lbl">Remarks:</span> <span class="info-val">${payment?.Remarks || '-'}</span></div>
               </div>
             </div>
 
@@ -461,438 +397,417 @@ export default function InstallmentPaymentScreen() {
             </div>
 
             <!-- PAYMENT HISTORY / ACCUMULATED LEDGER -->
-            <div class="section-heading">INSTALLMENT PAYMENT HISTORY / STATEMENT</div>
-            <table class="receipt-table">
+            <div class="table-section-title">INSTALLMENT PAYMENT HISTORY / STATEMENT</div>
+            <table class="detail-table">
               <thead>
                 <tr>
-                  <th style="width: 8%; text-align: center;">#</th>
-                  <th style="width: 25%; text-align: left;">Installment Voucher</th>
-                  <th style="width: 20%; text-align: center;">Date</th>
-                  <th style="width: 15%; text-align: center;">Ins Paid</th>
-                  <th style="width: 17%; text-align: right;">Installment Amt ($)</th>
-                  <th style="width: 15%; text-align: right;">Amount Paid ($)</th>
+                  <th style="width: 6%; text-align: center;">#</th>
+                  <th style="width: 26%; text-align: left;">INSTALLMENT VOUCHER</th>
+                  <th style="width: 18%; text-align: center;">DATE</th>
+                  <th style="width: 14%; text-align: center;">INS #</th>
+                  <th style="width: 18%; text-align: right;">INSTALLMENT AMT ($)</th>
+                  <th style="width: 18%; text-align: right;">AMOUNT PAID ($)</th>
                 </tr>
               </thead>
               <tbody>
-                ${history.length > 0
-            ? history
-              .map(
-                (h: any, idx: number) => `
-                        <tr class="${h.InstallmentNo === sInstallmentNo ? 'highlight-row' : ''}">
-                          <td style="text-align: center;">${idx + 1}</td>
-                          <td style="text-align: left; font-weight: 600;">${h.InstallmentNo} ${h.InstallmentNo === sInstallmentNo ? '*(This Voucher)*' : ''}</td>
-                          <td style="text-align: center;">${formatDate(h.CreateDate)}</td>
-                          <td style="text-align: center;">${h.InsPaid || 1}</td>
-                          <td style="text-align: right;">$${parseFloat(h.InstallmentAmt || 0).toFixed(2)}</td>
-                          <td style="text-align: right; font-weight: 700;">$${parseFloat(h.AmtPaid || 0).toFixed(2)}</td>
-                        </tr>
-                      `
-              )
-              .join('')
-            : `<tr><td colspan="6" style="text-align: center; color: #888; padding: 10px;">Initial Deposit Voucher: $${depositAmt.toFixed(2)}</td></tr>`
-          }
+                ${(history && history.length > 0)
+                  ? history.map((h: any, idx: number) => `
+                    <tr class="${h.InstallmentNo === sInstallmentNo ? 'highlight-row' : ''}">
+                      <td style="text-align: center; font-weight: 700;">${idx + 1}</td>
+                      <td style="text-align: left; font-weight: 700;">${h.InstallmentNo} ${h.InstallmentNo === sInstallmentNo ? '<span style="color: #8C5D08;">*(This Voucher)*</span>' : ''}</td>
+                      <td style="text-align: center; font-weight: 700;">${formatDate(h.CreateDate)}</td>
+                      <td style="text-align: center; font-weight: 700;">${h.InsPaid || 1}</td>
+                      <td style="text-align: right; font-weight: 700;">$ ${parseFloat(h.InstallmentAmt || 0).toFixed(2)}</td>
+                      <td style="text-align: right; font-weight: 800; color: #8C5D08;">$ ${parseFloat(h.AmtPaid || 0).toFixed(2)}</td>
+                    </tr>
+                  `).join('')
+                  : `
+                    <tr>
+                      <td style="text-align: center; font-weight: 700;">1</td>
+                      <td style="text-align: left; font-weight: 700;">${sInstallmentNo}</td>
+                      <td style="text-align: center; font-weight: 700;">${paymentDateFormatted}</td>
+                      <td style="text-align: center; font-weight: 700;">${payment?.InsPaid || 1}</td>
+                      <td style="text-align: right; font-weight: 700;">$ ${currentInsAmt.toFixed(2)}</td>
+                      <td style="text-align: right; font-weight: 800; color: #8C5D08;">$ ${currentAmtPaid.toFixed(2)}</td>
+                    </tr>
+                  `
+                }
               </tbody>
             </table>
 
             <!-- SUMMARY FINANCIAL BALANCES -->
-            <div class="summary-box">
-              <div class="summary-row">
-                <span class="sum-lbl">Total Agreement Value:</span>
-                <span class="sum-val font-bold">$ ${totalAgreementCost.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+            <div class="totals-section">
+              <div class="totals-box">
+                <div class="total-row">
+                  <span>Total Agreement Value:</span>
+                  <span>$ ${totalAgreementCost.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                </div>
+                <div class="total-row">
+                  <span>Initial Deposit Paid:</span>
+                  <span>$ ${depositAmt.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                </div>
+                <div class="total-row">
+                  <span>Total Installments Paid:</span>
+                  <span>$ ${totalInstallmentsPaid.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                </div>
+                <div class="total-row">
+                  <span>Total Paid To Date:</span>
+                  <span style="font-weight: 800; color: #8C5D08;">$ ${grandTotalPaid.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                </div>
+                <div class="total-row total-row-grand">
+                  <span>REMAINING BALANCE DUE:</span>
+                  <span>$ ${balanceDue > 0 ? balanceDue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '0.00 (SETTLED)'}</span>
+                </div>
               </div>
-              <div class="summary-row">
-                <span class="sum-lbl">Initial Deposit Paid:</span>
-                <span class="sum-val">$ ${depositAmt.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-              </div>
-              <div class="summary-row">
-                <span class="sum-lbl">Total Installments Paid To Date:</span>
-                <span class="sum-val font-bold" style="color: #0F5132;">$ ${totalInstallmentsPaid.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-              </div>
-              <div class="summary-divider"></div>
-              <div class="summary-row grand-total-row">
-                <span class="sum-lbl font-bold" style="font-size: 13px;">REMAINING BALANCE DUE:</span>
-                <span class="sum-val font-bold" style="font-size: 15px; color: ${balanceDue <= 0.01 ? '#0F5132' : '#842029'};">
-                  $ ${balanceDue > 0 ? balanceDue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '0.00 (FULLY SETTLED)'}
-                </span>
-              </div>
-            </div>
-
-            <!-- SIGNATURE SECTION -->
-            <div class="signature-section">
-              <div class="sign-card">
-                <div class="sign-header">CUSTOMER ACKNOWLEDGEMENT</div>
-                <div class="sign-row">Customer Name: ${sCustomerName || '...............................'}</div>
-                <div class="sign-row" style="margin-top: 14px;">Signature: ....................................................</div>
-              </div>
-              <div class="sign-card">
-                <div class="sign-header">AUTHORIZED STORE OFFICER</div>
-                <div class="sign-row">Received By: ${payment.CreateUser || 'Staff'}</div>
-                <div class="sign-row" style="margin-top: 14px;">Signature: ....................................................</div>
-              </div>
-            </div>
-
-            <!-- FOOTER -->
-            <div class="report-footer">
-              <div class="footer-divider"></div>
-              <div class="footer-gen-text">*** System Generated Installment Payment Receipt ***</div>
-              <div class="footer-powered">Powered by Unipro SG</div>
             </div>
           </div>
-        `;
-      };
 
-      // 2 copies (Customer Copy and Office Copy) matching CR.PrintToPrinter(2, True, 0, 0)
-      const printPagesHtml = `
-        ${generatePageMarkup('CUSTOMER COPY')}
-        ${generatePageMarkup('OFFICE COPY')}
+          ${renderStandardReportFooter({
+            staff: {
+              staffLabel: 'PREPARED BY (STAFF)',
+              staffName: (payment?.CreateUser || 'Staff').trim(),
+              receiverLabel: 'SUPPLIER / AUTHORIZED RECEIVER',
+              receiverName: (sCustomerName || '-').trim()
+            }
+          })}
+        </div>
       `;
+    };
 
-      const printHtml = `
-        <!DOCTYPE html>
-        <html>
-          <head>
-            <meta charset="utf-8" />
-            <title>Installment Payment Receipt - ${sInstallmentNo}</title>
-            <style>
+    const printPagesHtml = `
+      ${generatePageMarkup('CUSTOMER COPY')}
+      ${generatePageMarkup('OFFICE COPY')}
+    `;
+
+    return `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <meta charset="utf-8" />
+          <title>${sReportTitle} - ${sInstallmentNo}</title>
+          <style>
+            @page {
+              size: A4 portrait;
+              margin: 0 !important;
+            }
+            ${getStandardReportCss()}
+
+            @media print {
               @page {
-                size: A4 portrait;
-                margin: 0;
+                margin: 0 !important;
               }
-              *, *:before, *:after {
-                box-sizing: border-box;
-              }
-              body {
-                font-family: 'Segoe UI', Tahoma, Arial, sans-serif;
-                margin: 0;
-                padding: 0;
-                background-color: #525659;
-                color: #222;
-                -webkit-print-color-adjust: exact;
-                print-color-adjust: exact;
+              html, body {
+                width: 210mm !important;
+                height: 100% !important;
+                margin: 0 !important;
+                padding: 0 !important;
+                background: #FFFFFF !important;
+                -webkit-print-color-adjust: exact !important;
+                print-color-adjust: exact !important;
               }
               .page-sheet {
-                background: #FFFFFF;
-                width: 210mm;
-                min-height: 297mm;
-                margin: 10mm auto;
-                padding: 12mm 15mm;
-                box-shadow: 0 4px 15px rgba(0, 0, 0, 0.35);
-                display: flex;
-                flex-direction: column;
-                justify-content: space-between;
+                width: 210mm !important;
+                min-height: 297mm !important;
+                height: 297mm !important;
+                margin: 0 !important;
+                padding: 12mm 14mm !important;
+                box-shadow: none !important;
+                display: flex !important;
+                flex-direction: column !important;
+                justify-content: space-between !important;
+                box-sizing: border-box !important;
+                page-break-after: always !important;
+                break-after: page !important;
               }
-              .report-header {
-                display: flex;
-                justify-content: space-between;
-                align-items: flex-start;
-                border-bottom: 2px solid #8D6409;
-                padding-bottom: 8px;
+              .page-sheet:last-child {
+                page-break-after: auto !important;
+                break-after: auto !important;
               }
-              .header-brand {
-                display: flex;
-                align-items: center;
-                gap: 12px;
-                max-width: 58%;
-              }
-              .brand-logo {
-                width: 55px;
-                height: 55px;
-                object-fit: contain;
-              }
-              .company-name {
-                font-size: 18px;
-                font-weight: 800;
-                color: #5C4A28;
-                letter-spacing: 0.5px;
-                text-transform: uppercase;
-              }
-              .company-address {
-                font-size: 10px;
-                color: #555;
-                line-height: 1.35;
-                margin-top: 2px;
-              }
-              .header-meta {
-                text-align: right;
-              }
-              .report-badge {
-                font-size: 13px;
-                font-weight: 800;
-                color: #8D6409;
-                letter-spacing: 0.6px;
-                text-transform: uppercase;
-              }
-              .copy-tag {
-                display: inline-block;
-                background: #FDF4D9;
-                color: #7D5E19;
-                font-size: 9px;
-                font-weight: 700;
-                padding: 2px 8px;
-                border-radius: 4px;
-                margin-top: 3px;
-                border: 1px solid #E6D29F;
-              }
-              .doc-no {
-                font-size: 12px;
-                font-weight: 700;
-                color: #111;
-                margin-top: 4px;
-              }
-              .doc-no span {
-                color: #8D6409;
-                font-family: monospace;
-                font-size: 13px;
-              }
-              .meta-date {
-                font-size: 10px;
-                color: #666;
-                margin-top: 2px;
-              }
+            }
 
-              /* GOLD RATE STRIP */
-              .gold-rate-strip {
-                display: flex;
-                justify-content: center;
-                align-items: center;
-                gap: 16px;
-                background: #FAF6EB;
-                border: 1px solid #E6D7AD;
-                padding: 5px 12px;
-                margin: 8px 0;
-                border-radius: 4px;
-                font-size: 10px;
-              }
-              .rate-lbl {
-                font-weight: 600;
-                color: #6E5316;
-              }
-              .rate-val {
-                font-weight: 800;
-                color: #222;
-                margin-left: 4px;
-              }
-              .rate-divider {
-                color: #D4C3A3;
-              }
+            html, body {
+              height: 100%;
+              margin: 0;
+              padding: 0;
+            }
 
-              /* TWO-COLUMN INFO */
-              .info-grid {
-                display: grid;
-                grid-template-columns: 1fr 1fr;
-                gap: 12px;
-                margin-bottom: 8px;
-              }
-              .info-card {
-                background: #FAF8F4;
-                border: 1px solid #E5DFD4;
-                border-radius: 4px;
-                padding: 8px 10px;
-              }
-              .card-title {
-                font-size: 10px;
-                font-weight: 700;
-                color: #7D5E19;
-                border-bottom: 1px solid #E5DFD4;
-                padding-bottom: 3px;
-                margin-bottom: 4px;
-                text-transform: uppercase;
-              }
-              .info-row {
-                font-size: 10px;
-                line-height: 1.4;
-                display: flex;
-              }
-              .info-lbl {
-                width: 32%;
-                color: #666;
-                font-weight: 500;
-              }
-              .info-val {
-                width: 68%;
-                color: #222;
-              }
-              .font-bold {
-                font-weight: 700;
-              }
+            .page-sheet {
+              width: 210mm;
+              min-height: 297mm;
+              padding: 12mm 14mm;
+              display: flex;
+              flex-direction: column;
+              justify-content: space-between;
+              box-sizing: border-box;
+            }
 
-              /* CURRENT PAYMENT CARD */
-              .current-payment-card {
-                background: #EBF7EE;
-                border: 1.5px solid #A3D9B1;
-                border-radius: 6px;
-                padding: 8px 14px;
-                text-align: center;
-                margin: 6px 0 10px 0;
-              }
-              .payment-title {
-                font-size: 11px;
-                font-weight: 700;
-                color: #0F5132;
-                letter-spacing: 0.5px;
-                text-transform: uppercase;
-              }
-              .payment-amount {
-                font-size: 22px;
-                font-weight: 800;
-                color: #0F5132;
-                margin-top: 2px;
-                font-family: monospace;
-              }
+            .report-main-content {
+              flex-grow: 1;
+            }
 
-              .section-heading {
-                font-size: 11px;
-                font-weight: 700;
-                color: #5C4A28;
-                text-transform: uppercase;
-                margin: 6px 0 4px 0;
-                border-bottom: 1px solid #D4C3A3;
-                padding-bottom: 2px;
-              }
+            .std-footer-container {
+              margin-top: auto !important;
+              padding-top: 14px !important;
+              page-break-inside: avoid !important;
+              break-inside: avoid !important;
+            }
 
-              /* TABLE */
-              .receipt-table {
-                width: 100%;
-                border-collapse: collapse;
-                margin-bottom: 8px;
-                font-size: 10px;
-              }
-              .receipt-table th {
-                background: #F1ECE0;
-                color: #4A3A1E;
-                font-weight: 700;
-                padding: 5px 6px;
-                border: 1px solid #D8CFC0;
-              }
-              .receipt-table td {
-                padding: 5px 6px;
-                border: 1px solid #E5DFD4;
-                color: #222;
-              }
-              .highlight-row {
-                background-color: #FFF9E6;
-              }
+            *, *:before, *:after, body, div, table, tr, th, td, span, p, h1, h2, h3, h4, h5, h6 {
+              font-family: 'Cambria', Georgia, 'Times New Roman', serif !important;
+            }
 
-              /* SUMMARY */
-              .summary-box {
-                margin-left: auto;
-                width: 65%;
-                background: #FAF8F4;
-                border: 1px solid #E5DFD4;
-                border-radius: 4px;
-                padding: 8px 12px;
-                margin-bottom: 10px;
-              }
-              .summary-row {
-                display: flex;
-                justify-content: space-between;
-                font-size: 10px;
-                line-height: 1.5;
-              }
-              .summary-divider {
-                border-top: 1px dashed #C9BC9F;
-                margin: 4px 0;
-              }
-              .grand-total-row {
-                padding-top: 2px;
-              }
+            /* GOLD RATES BANNER */
+            .gold-rate-strip {
+              display: flex;
+              justify-content: space-around;
+              background: #FAF8F5;
+              border: 1px solid #C49A45;
+              border-radius: 4px;
+              padding: 6px 12px;
+              margin-top: 6px;
+              margin-bottom: 12px;
+              font-size: 11px;
+              font-weight: 700;
+              color: #222222;
+            }
+            .rate-cell span.rate-lbl {
+              color: #222222;
+              font-weight: 700;
+            }
+            .rate-cell span.rate-val {
+              color: #8C5D08;
+              font-weight: 800;
+              margin-left: 4px;
+            }
 
-              /* SIGNATURE */
-              .signature-section {
-                display: grid;
-                grid-template-columns: 1fr 1fr;
-                gap: 20px;
-                margin-top: 8px;
-              }
-              .sign-card {
-                border: 1px dashed #B8AB91;
-                border-radius: 4px;
-                padding: 8px 10px;
-                font-size: 10px;
-                background: #FFFEFC;
-              }
-              .sign-header {
-                font-weight: 700;
-                color: #5C4A28;
-                border-bottom: 1px solid #EDE6D8;
-                padding-bottom: 3px;
-                margin-bottom: 6px;
-                font-size: 9px;
-              }
-              .sign-row {
-                color: #333;
-                line-height: 1.3;
-              }
+            /* TWO-COLUMN INFO */
+            .info-grid {
+              display: grid;
+              grid-template-columns: 1fr 1fr;
+              gap: 16px;
+              margin-bottom: 12px;
+            }
+            .info-card {
+              border: 1px solid #C49A45;
+              background: #FAF8F5;
+              border-radius: 4px;
+              padding: 10px 14px;
+            }
+            .card-title {
+              font-size: 11.5px;
+              font-weight: 800;
+              color: #8C5D08;
+              border-bottom: 1px dotted #DDC89A;
+              padding-bottom: 5px;
+              margin-bottom: 8px;
+              text-transform: uppercase;
+              letter-spacing: 0.5px;
+            }
+            .info-row {
+              display: flex;
+              font-size: 11px;
+              margin-bottom: 3.5px;
+              line-height: 1.35;
+            }
+            .info-lbl {
+              width: 120px;
+              font-weight: 700;
+              color: #222222;
+              flex-shrink: 0;
+            }
+            .info-val {
+              color: #222222;
+              font-weight: 700;
+              flex-grow: 1;
+              word-break: break-word;
+            }
+            .font-bold {
+              font-weight: 800;
+            }
 
-              /* FOOTER */
-              .report-footer {
-                margin-top: 8px;
-                text-align: center;
-              }
-              .footer-divider {
-                border-top: 1px solid #E0D7C5;
-                margin-bottom: 4px;
-              }
-              .footer-gen-text {
-                font-size: 9px;
-                color: #777;
-                font-style: italic;
-              }
-              .footer-powered {
-                font-size: 8px;
-                color: #999;
-                margin-top: 1px;
-              }
+            /* CURRENT PAYMENT HIGHLIGHT CARD */
+            .current-payment-card {
+              background: #FAF8F5;
+              border: 1px solid #C49A45;
+              border-radius: 4px;
+              padding: 10px 16px;
+              text-align: center;
+              margin-bottom: 12px;
+            }
+            .payment-title {
+              font-size: 11px;
+              font-weight: 800;
+              color: #8C5D08;
+              letter-spacing: 0.8px;
+              text-transform: uppercase;
+              margin-bottom: 2px;
+            }
+            .payment-amount {
+              font-size: 24px;
+              font-weight: 800;
+              color: #8C5D08;
+              letter-spacing: 1px;
+            }
 
-              @media print {
-                body {
-                  background: none !important;
-                }
-                .page-sheet {
-                  width: 100% !important;
-                  min-height: 297mm !important;
-                  height: 100% !important;
-                  margin: 0 !important;
-                  padding: 10mm 12mm !important;
-                  box-shadow: none !important;
-                  display: flex !important;
-                  flex-direction: column !important;
-                  page-break-after: always !important;
-                }
-                .page-sheet:last-child {
-                  page-break-after: auto !important;
-                }
-              }
-            </style>
-          </head>
-          <body>
-            ${printPagesHtml}
-            <script>
-              window.onload = function() {
-                setTimeout(function() {
-                  window.print();
-                }, 300);
-              };
-            </script>
-          </body>
-        </html>
+            /* TABLE */
+            .table-section-title {
+              font-size: 11px;
+              font-weight: 800;
+              color: #8C5D08;
+              text-transform: uppercase;
+              letter-spacing: 0.5px;
+              margin-bottom: 6px;
+            }
+            .detail-table {
+              width: 100%;
+              border-collapse: collapse;
+              margin-bottom: 12px;
+              font-size: 10.5px;
+            }
+            .detail-table th {
+              background: #8C5D08;
+              color: #FFFFFF;
+              text-align: left;
+              padding: 6px 8px;
+              font-weight: 800;
+              border: 1px solid #734C06;
+              text-transform: uppercase;
+              font-size: 10px;
+              letter-spacing: 0.5px;
+            }
+            .detail-table td {
+              padding: 6px 8px;
+              border: 1px solid #D9C8A5;
+              background: #FFFFFF;
+              color: #222222;
+            }
+            .detail-table tr:nth-child(even) td {
+              background: #FAF8F5;
+            }
+            .highlight-row td {
+              background: #FFF8E7 !important;
+            }
+
+            /* TOTALS SECTION */
+            .totals-section {
+              display: flex;
+              justify-content: flex-end;
+              margin-bottom: 14px;
+            }
+            .totals-box {
+              width: 330px;
+              border: 1px solid #C49A45;
+              background: #FAF8F5;
+              border-radius: 4px;
+              padding: 8px 12px;
+            }
+            .total-row {
+              display: flex;
+              justify-content: space-between;
+              font-size: 11.5px;
+              padding: 2.5px 0;
+              color: #222222;
+              font-weight: 700;
+            }
+            .total-row-grand {
+              border-top: 2px solid #8C5D08;
+              margin-top: 4px;
+              padding-top: 4px;
+              font-weight: 800;
+              font-size: 13.5px;
+              color: #8C5D08;
+            }
+          </style>
+        </head>
+        <body>
+          ${printPagesHtml}
+        </body>
+      </html>
+    `;
+  };
+
+  // Original Print Function matching subPrintInstallment(ByVal sInvoiceNo As String) in frmInstallmentPayment.vb
+  const subPrintInstallment = async (targetInstallmentNo: string, isReprintMode: boolean = false) => {
+    const sInvoiceNo = (targetInstallmentNo || '').trim();
+    if (!sInvoiceNo) {
+      return;
+    }
+
+    try {
+      setLoading(true);
+
+      const res = await fetch(`${API_URL}/print-data?installmentNo=${encodeURIComponent(sInvoiceNo)}`);
+      const json = await res.json();
+
+      if (!json.success || !json.data) {
+        showToast(json.message || `Installment payment voucher ${sInvoiceNo} not found for print.`, 'error');
+        setLoading(false);
+        return;
+      }
+
+      const htmlContent = buildInstallmentReceiptHtml(sInvoiceNo, isReprintMode, json.data);
+      const docTitle = isReprintMode ? `Installment Payment Receipt (Duplicate) - ${sInvoiceNo}` : `Installment Payment Receipt - ${sInvoiceNo}`;
+
+      const printScript = `
+        <script>
+          window.onload = function() {
+            setTimeout(function() {
+              window.print();
+            }, 300);
+          };
+        </script>
       `;
+      const printHtml = htmlContent.replace('</body>', `${printScript}</body>`);
 
       if (Platform.OS === 'web' && typeof window !== 'undefined') {
-        const printWindow = window.open('', '_blank', 'width=900,height=750');
-        if (printWindow) {
-          printWindow.document.open();
-          printWindow.document.write(printHtml);
-          printWindow.document.close();
-          showToast('Installment Payment receipt preview opened', 'success');
+        const frameId = '__installment_payment_print_frame__';
+        let iframe = document.getElementById(frameId) as HTMLIFrameElement;
+        if (!iframe) {
+          iframe = document.createElement('iframe');
+          iframe.id = frameId;
+          iframe.style.position = 'fixed';
+          iframe.style.right = '0';
+          iframe.style.bottom = '0';
+          iframe.style.width = '0';
+          iframe.style.height = '0';
+          iframe.style.border = '0';
+          iframe.style.visibility = 'hidden';
+          document.body.appendChild(iframe);
+        }
+
+        const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
+        if (iframeDoc && iframe.contentWindow) {
+          iframeDoc.open();
+          iframeDoc.write(htmlContent);
+          iframeDoc.title = docTitle;
+          iframeDoc.close();
+
+          setTimeout(() => {
+            try {
+              iframe.contentWindow?.focus();
+              iframe.contentWindow?.print();
+              showToast(`Installment payment ${sInvoiceNo} print dialog opened`, 'success');
+            } catch (printErr) {
+              console.error('Iframe print error:', printErr);
+              const printWindow = window.open('', '_blank', 'width=900,height=750');
+              if (printWindow) {
+                printWindow.document.open();
+                printWindow.document.write(printHtml);
+                printWindow.document.title = docTitle;
+                printWindow.document.close();
+              }
+            }
+          }, 350);
         } else {
-          const blob = new Blob([printHtml], { type: 'text/html;charset=utf-8;' });
-          const url = URL.createObjectURL(blob);
-          const win = window.open(url, '_blank');
-          if (!win) {
-            showToast('Popup blocker prevented opening print preview. Please allow popups.', 'error');
+          const printWindow = window.open('', '_blank', 'width=900,height=750');
+          if (printWindow) {
+            printWindow.document.open();
+            printWindow.document.write(printHtml);
+            printWindow.document.title = docTitle;
+            printWindow.document.close();
+            showToast(`Installment Payment receipt preview opened`, 'success');
           } else {
-            showToast('Installment Payment receipt preview opened', 'success');
+            showToast('Popup blocker prevented opening print preview. Please allow popups.', 'error');
           }
         }
       } else {
@@ -906,13 +821,120 @@ export default function InstallmentPaymentScreen() {
     }
   };
 
+  // Dedicated PDF Download Functionality
+  const handleDownloadPdf = async (sInvoiceNo?: string, isReprint: boolean = false) => {
+    const rawNo = (sInvoiceNo || '').trim();
+    if (!rawNo) {
+      showToast('Validation Error: Installment Voucher No is required to download PDF', 'error');
+      return;
+    }
+
+    try {
+      setLoading(true);
+      const res = await fetch(`${API_URL}/print-data?installmentNo=${encodeURIComponent(rawNo)}`);
+      const json = await res.json();
+
+      if (!json.success || !json.data) {
+        showToast(json.message || `Installment payment record "${rawNo}" not found`, 'error');
+        return;
+      }
+
+      const htmlContent = buildInstallmentReceiptHtml(rawNo, isReprint, json.data);
+      const downloadFilename = `Installment_Payment_${rawNo.replace(/[^a-zA-Z0-9_-]/g, '_')}.pdf`;
+
+      const pdfRes = await fetch(`${API_URL}/export-pdf`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          html: htmlContent,
+          filename: downloadFilename
+        })
+      });
+
+      if (!pdfRes.ok) {
+        throw new Error('Server returned error while generating PDF');
+      }
+
+      const pdfBlob = await pdfRes.blob();
+
+      if (Platform.OS === 'web' && typeof window !== 'undefined') {
+        const url = URL.createObjectURL(pdfBlob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = downloadFilename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+        showToast(`PDF downloaded successfully: ${downloadFilename}`, 'success');
+      } else {
+        showToast('PDF file generated successfully.', 'success');
+      }
+    } catch (err: any) {
+      console.error('PDF Export Error:', err);
+      showToast('Failed to download PDF: ' + (err.message || 'Error'), 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Dedicated Excel Download Functionality
+  const handleDownloadExcel = async (sInvoiceNo?: string, isReprint: boolean = false) => {
+    const rawNo = (sInvoiceNo || '').trim();
+    if (!rawNo) {
+      showToast('Validation Error: Installment Voucher No is required to download Excel', 'error');
+      return;
+    }
+
+    try {
+      setLoading(true);
+      const excelRes = await fetch(`${API_URL}/export-excel`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          installmentNo: rawNo,
+          isReprint: isReprint
+        })
+      });
+
+      if (!excelRes.ok) {
+        const errJson = await excelRes.json().catch(() => ({}));
+        throw new Error(errJson.message || 'Server error generating Excel file');
+      }
+
+      const excelBlob = await excelRes.blob();
+      const downloadFilename = `Installment_Payment_${rawNo.replace(/[^a-zA-Z0-9_-]/g, '_')}.xlsx`;
+
+      if (Platform.OS === 'web' && typeof window !== 'undefined') {
+        const url = URL.createObjectURL(excelBlob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = downloadFilename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+        showToast(`Installment Payment Excel downloaded: ${downloadFilename}`, 'success');
+      } else {
+        showToast('Excel file generated successfully.', 'success');
+      }
+    } catch (err: any) {
+      console.error('Excel Export Error:', err);
+      showToast('Failed to download Excel: ' + (err.message || 'Error'), 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   // Handle return from payingmode after save
   useEffect(() => {
     if (params?.paymentSuccess === 'true') {
       const savedPaymentNo = (params.installmentNo as string) || (params.savedInvoiceNo as string) || (params.paymentNo as string);
       if (savedPaymentNo && savedPaymentNo.trim()) {
         const cleanNo = savedPaymentNo.trim();
-        subPrintInstallment(cleanNo, false);
+        setActivePrintInstallmentNo(cleanNo);
+        setActivePrintIsReprint(false);
+        setIsPrintModalVisible(true);
       }
       if (agreementNo && agreementNo.trim()) {
         fetchAgreement();
@@ -934,14 +956,15 @@ export default function InstallmentPaymentScreen() {
 
   // RePrint OK click handler matching original btnRePrintOK_Click:
   // If txtRePrintBillNo.Text.Trim = "" Then Exit Sub
-  // subPrintInstallment(Trim(txtRePrintBillNo.Text)) with bReprint = True
   const handleReprintSubmit = () => {
     const cleanNo = reprintBillNo.trim();
     if (!cleanNo) {
       return;
     }
     setIsReprintModalVisible(false);
-    subPrintInstallment(cleanNo, true);
+    setActivePrintInstallmentNo(cleanNo);
+    setActivePrintIsReprint(true);
+    setIsPrintModalVisible(true);
   };
 
   const latestState = useRef({ agreementNo, totalAmount, noOfInstallment, installmentAmount, customerCode });
@@ -1746,6 +1769,45 @@ export default function InstallmentPaymentScreen() {
           </View>
         </View>
       </Modal>
+
+      {/* STANDARDIZED PRINT REPORT CONFIRMATION MODAL */}
+      <PrintReportModal
+        visible={isPrintModalVisible}
+        title="Print Report"
+        message="Do you want to print ?"
+        loading={loading}
+        onCancel={() => {
+          setIsPrintModalVisible(false);
+          setActivePrintInstallmentNo('');
+        }}
+        onPdf={() => {
+          const invNo = activePrintInstallmentNo;
+          const reprint = activePrintIsReprint;
+          setIsPrintModalVisible(false);
+          setActivePrintInstallmentNo('');
+          if (invNo) {
+            handleDownloadPdf(invNo, reprint);
+          }
+        }}
+        onExcel={() => {
+          const invNo = activePrintInstallmentNo;
+          const reprint = activePrintIsReprint;
+          setIsPrintModalVisible(false);
+          setActivePrintInstallmentNo('');
+          if (invNo) {
+            handleDownloadExcel(invNo, reprint);
+          }
+        }}
+        onPrint={() => {
+          const invNo = activePrintInstallmentNo;
+          const reprint = activePrintIsReprint;
+          setIsPrintModalVisible(false);
+          setActivePrintInstallmentNo('');
+          if (invNo) {
+            subPrintInstallment(invNo, reprint);
+          }
+        }}
+      />
     </SafeAreaView>
   );
 }

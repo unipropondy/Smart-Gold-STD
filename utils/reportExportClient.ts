@@ -313,14 +313,20 @@ export function sanitizeReportHtmlForPrint(htmlContent: string, autoPrint: boole
   // 1. Remove/empty title tag to prevent title from rendering in print header
   sanitized = sanitized.replace(/<title>[\s\S]*?<\/title>/gi, '<title></title>');
 
+  // Detect if htmlContent specifies landscape (e.g. from backend template or 8+ columns)
+  const isLandscape = /size:\s*A4\s+landscape/i.test(sanitized) || /@page\s*\{[^}]*landscape/i.test(sanitized);
+  const pageSize = isLandscape ? 'A4 landscape' : 'A4 portrait';
+
   // 2. Inject global zero-margin @page rule to suppress about:blank, URL, date, and page numbers
   const suppressBrowserHeaderFooter = `
 <style id="suppress-browser-header-footer">
   @page {
+    size: ${pageSize} !important;
     margin: 0 !important;
   }
   @media print {
     @page {
+      size: ${pageSize} !important;
       margin: 0 !important;
     }
     html, body {

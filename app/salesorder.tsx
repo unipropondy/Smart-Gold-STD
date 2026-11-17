@@ -1,5 +1,6 @@
 import { ThemedText } from '@/components/themed-text';
 import { API_BASE_URL } from '@/constants/api';
+import { getStandardReportCss, renderStandardReportFooter, renderStandardReportHeader } from '@/utils/standardPrintReport';
 import { Ionicons } from '@expo/vector-icons';
 import { Stack, useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
@@ -292,6 +293,419 @@ export default function SalesOrderScreen() {
     }
   }, [items, soNo, locationCode, supplierCode, remarks, dueDate]);
 
+  // Helper to build the exact Transfer Note / Sales Order HTML for Print preview and PDF download
+  const buildSalesOrderHtml = (targetNo: string, printData: any) => {
+    const { company, formulas, header, details } = printData;
+
+    const compAddress1 = formulas?.CompAddress1 || company?.name || 'SMART';
+    const compAddress2 = formulas?.CompAddress2 || [company?.address1, company?.address2, company?.country].filter(Boolean).join(' ');
+    const compAddress3 = formulas?.CompAddress3 || company?.phone || '';
+    const compAddress4 = formulas?.CompAddress4 || company?.fax || '';
+
+    // Format Date strings
+    const rawSODate = header.SalesOrderDate || header.CreateDate;
+    let soDateFormatted = '';
+    if (rawSODate) {
+      const d = new Date(rawSODate);
+      if (!isNaN(d.getTime())) {
+        soDateFormatted = `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`;
+      } else {
+        soDateFormatted = String(rawSODate);
+      }
+    }
+
+    const rawDueDate = header.DueDate;
+    let dueDateFormatted = '';
+    if (rawDueDate) {
+      const d = new Date(rawDueDate);
+      if (!isNaN(d.getTime())) {
+        dueDateFormatted = `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`;
+      } else {
+        dueDateFormatted = String(rawDueDate);
+      }
+    }
+
+    const now = new Date();
+    const printTimeStr = `${String(now.getDate()).padStart(2, '0')}/${String(now.getMonth() + 1).padStart(2, '0')}/${now.getFullYear()} ${now.toLocaleTimeString()}`;
+
+    // Calculate totals
+    let totalQty = 0;
+    let totalWeight = 0;
+    (details || []).forEach((row: any) => {
+      totalQty += parseFloat(row.SalesOrderQty) || 0;
+      totalWeight += parseFloat(row.Weight) || 0;
+    });
+
+    return `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <meta charset="utf-8" />
+          <title>Transfer Note / Sales Order - ${targetNo}</title>
+          <style>
+            @page {
+              size: A4 portrait;
+              margin: 0 !important;
+            }
+            ${getStandardReportCss()}
+
+            @media print {
+              @page {
+                margin: 0 !important;
+              }
+              html, body {
+                width: 210mm !important;
+                height: 100% !important;
+                margin: 0 !important;
+                padding: 0 !important;
+                background: #FFFFFF !important;
+                -webkit-print-color-adjust: exact !important;
+                print-color-adjust: exact !important;
+              }
+              .page-sheet {
+                width: 210mm !important;
+                min-height: 297mm !important;
+                height: 297mm !important;
+                margin: 0 !important;
+                padding: 12mm 14mm !important;
+                box-shadow: none !important;
+                display: flex !important;
+                flex-direction: column !important;
+                justify-content: space-between !important;
+                box-sizing: border-box !important;
+                page-break-after: avoid !important;
+                break-after: avoid !important;
+              }
+            }
+
+            html, body {
+              height: 100%;
+              margin: 0;
+              padding: 0;
+            }
+
+            .page-sheet {
+              width: 210mm;
+              min-height: 297mm;
+              padding: 12mm 14mm;
+              display: flex;
+              flex-direction: column;
+              justify-content: space-between;
+              box-sizing: border-box;
+            }
+
+            .report-main-content {
+              flex-grow: 1;
+            }
+
+            .std-footer-container {
+              margin-top: auto !important;
+              padding-top: 16px !important;
+              page-break-inside: avoid !important;
+              break-inside: avoid !important;
+            }
+
+            /* Cambria Typography across all elements */
+            *, *:before, *:after, body, div, table, tr, th, td, span, p, h1, h2, h3, h4, h5, h6 {
+              font-family: 'Cambria', Georgia, 'Times New Roman', serif !important;
+            }
+
+            body {
+              font-family: 'Cambria', Georgia, 'Times New Roman', serif !important;
+            }
+
+            .std-company-name {
+              font-family: 'Cambria', Georgia, serif !important;
+              font-size: 24px !important;
+              font-weight: 800 !important;
+              letter-spacing: 2px !important;
+              color: #A37416 !important;
+            }
+
+            .std-company-address {
+              font-family: 'Cambria', Georgia, serif !important;
+              font-size: 11px !important;
+              font-weight: 700 !important;
+              color: #1A1A1A !important;
+              letter-spacing: 0.5px !important;
+            }
+
+            .std-report-title {
+              font-family: 'Cambria', Georgia, serif !important;
+              font-size: 22px !important;
+              font-weight: 800 !important;
+              letter-spacing: 1.5px !important;
+              color: #4A3511 !important;
+            }
+
+            .std-printed-time {
+              font-family: 'Cambria', Georgia, serif !important;
+              font-size: 11.5px !important;
+              font-weight: 700 !important;
+              color: #222222 !important;
+            }
+
+            /* INFO GRID */
+            .info-grid {
+              display: grid;
+              grid-template-columns: 1fr 1fr;
+              gap: 16px;
+              margin-bottom: 12px;
+            }
+            .info-card {
+              border: 1px solid #C49A45;
+              background: #FAF8F5;
+              border-radius: 4px;
+              padding: 10px 14px;
+            }
+            .card-title {
+              font-size: 11.5px;
+              font-weight: 800;
+              color: #8C5D08;
+              border-bottom: 1px dotted #DDC89A;
+              padding-bottom: 5px;
+              margin-bottom: 8px;
+              text-transform: uppercase;
+              letter-spacing: 0.5px;
+            }
+            .info-table {
+              width: 100%;
+              border-collapse: collapse;
+              font-size: 11px;
+            }
+            .info-table td {
+              padding: 2.5px 0;
+              vertical-align: top;
+              line-height: 1.35;
+            }
+            .info-table .lbl {
+              width: 130px;
+              font-weight: 700;
+              color: #222222;
+            }
+            .info-table .colon {
+              width: 15px;
+              font-weight: 700;
+              color: #222222;
+              text-align: center;
+            }
+            .info-table .val {
+              color: #222222;
+              font-weight: 700;
+              word-break: break-word;
+            }
+
+            /* DETAIL TABLE (rptSalesOrderDetail) */
+            .detail-table {
+              width: 100%;
+              border-collapse: collapse;
+              margin-top: 4px;
+              margin-bottom: 12px;
+              font-size: 11px;
+            }
+            .detail-table th {
+              background-color: #8C5D08;
+              color: #FFFFFF;
+              text-align: left;
+              padding: 6px 8px;
+              font-weight: 800;
+              border: 1px solid #734C06;
+              text-transform: uppercase;
+              font-size: 10px;
+              letter-spacing: 0.5px;
+            }
+            .detail-table td {
+              padding: 6px 8px;
+              border: 1px solid #D9C8A5;
+              background-color: #FFFFFF;
+              color: #222222;
+            }
+            .detail-table tr:nth-child(even) td {
+              background-color: #FAF8F5;
+            }
+
+            /* TOTALS SECTION */
+            .totals-section {
+              display: flex;
+              justify-content: flex-end;
+              margin-bottom: 14px;
+            }
+            .totals-box {
+              width: 290px;
+              border: 1px solid #C49A45;
+              background-color: #FFFFFF;
+              border-radius: 4px;
+              padding: 8px 12px;
+            }
+            .total-row {
+              display: flex;
+              justify-content: space-between;
+              font-size: 11.5px;
+              padding: 3px 0;
+              color: #222222;
+              font-weight: 700;
+            }
+            .total-row-grand {
+              border-top: 2px solid #8C5D08;
+              margin-top: 4px;
+              padding-top: 4px;
+              font-weight: 800;
+              font-size: 13.5px;
+              color: #8C5D08;
+            }
+          </style>
+        </head>
+        <body>
+          <div class="page-sheet">
+            <div class="report-main-content">
+              ${renderStandardReportHeader({
+                company: {
+                  name: compAddress1,
+                  address: [compAddress2, compAddress3 ? 'Tel: ' + compAddress3 : '', compAddress4 ? 'Fax: ' + compAddress4 : ''].filter(Boolean).join(' ')
+                },
+                reportTitle: 'TRANSFER NOTE / SALES ORDER',
+                printedDateTime: printTimeStr
+              })}
+
+              <!-- INFO GRID -->
+              <div class="info-grid">
+                <!-- ORDER IDENTIFICATION -->
+                <div class="info-card">
+                  <div class="card-title">SALES ORDER INFORMATION</div>
+                  <table class="info-table">
+                    <tr>
+                      <td class="lbl">Sales Order No</td>
+                      <td class="colon">:</td>
+                      <td class="val">${targetNo}</td>
+                    </tr>
+                    <tr>
+                      <td class="lbl">Order Date</td>
+                      <td class="colon">:</td>
+                      <td class="val">${soDateFormatted || '-'}</td>
+                    </tr>
+                    <tr>
+                      <td class="lbl">Due Date</td>
+                      <td class="colon">:</td>
+                      <td class="val">${dueDateFormatted || '-'}</td>
+                    </tr>
+                    <tr>
+                      <td class="lbl">Location Code</td>
+                      <td class="colon">:</td>
+                      <td class="val">${(header.LocationCode || '').trim() || '-'}</td>
+                    </tr>
+                  </table>
+                </div>
+
+                <!-- SUPPLIER & AUDIT -->
+                <div class="info-card">
+                  <div class="card-title">SUPPLIER & PARTICULARS</div>
+                  <table class="info-table">
+                    <tr>
+                      <td class="lbl">Supplier Code</td>
+                      <td class="colon">:</td>
+                      <td class="val">${(header.SupplierCode || '').trim() || '-'}</td>
+                    </tr>
+                    <tr>
+                      <td class="lbl">Supplier Name</td>
+                      <td class="colon">:</td>
+                      <td class="val">${(header.SupplierName || '-').trim()}</td>
+                    </tr>
+                    <tr>
+                      <td class="lbl">Remarks</td>
+                      <td class="colon">:</td>
+                      <td class="val">${(header.Remarks || '-').trim()}</td>
+                    </tr>
+                    <tr>
+                      <td class="lbl">Created By</td>
+                      <td class="colon">:</td>
+                      <td class="val">${(header.CreateUser || 'sys').trim()}</td>
+                    </tr>
+                  </table>
+                </div>
+              </div>
+
+              <!-- DETAIL ITEMS TABLE (rptSalesOrderDetail) -->
+              <table class="detail-table">
+                <thead>
+                  <tr>
+                    <th style="width: 4%; text-align: center;">#</th>
+                    <th style="width: 18%;">CATEGORY</th>
+                    <th style="width: 24%;">CATALOGUE</th>
+                    <th style="width: 12%; text-align: right;">WEIGHT (G)</th>
+                    <th style="width: 12%; text-align: right;">TO WT (G)</th>
+                    <th style="width: 10%; text-align: center;">SIZE</th>
+                    <th style="width: 10%; text-align: right;">REORDER</th>
+                    <th style="width: 10%; text-align: right;">SO QTY</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${(details || []).length > 0 ? (details || []).map((row: any, idx: number) => {
+                    const catCode = (row.CategoryCode || '').trim();
+                    const catgCode = (row.CatalogueCode || '').trim();
+                    const catName = row.CategoryName ? ` (${row.CategoryName.trim()})` : '';
+                    const catgName = row.CatalogueName ? ` (${row.CatalogueName.trim()})` : '';
+                    const wt = parseFloat(row.Weight) || 0;
+                    const toWt = parseFloat(row.ToWeight) || 0;
+                    const sz = row.SizeCode !== null && row.SizeCode !== undefined ? row.SizeCode : '-';
+                    const szType = row.SizeType ? ` ${row.SizeType.trim()}` : '';
+                    const reorder = parseFloat(row.ReOrderLevel) || 0;
+                    const soQty = parseFloat(row.SalesOrderQty) || 0;
+
+                    return `
+                      <tr>
+                        <td style="text-align: center; font-weight: 700;">${idx + 1}</td>
+                        <td style="font-weight: 700;">${catCode}${catName}</td>
+                        <td style="font-weight: 700;">${catgCode}${catgName}</td>
+                        <td style="text-align: right; font-weight: 700;">${wt.toFixed(3)}</td>
+                        <td style="text-align: right; font-weight: 700;">${toWt.toFixed(3)}</td>
+                        <td style="text-align: center; font-weight: 700;">${sz}${szType}</td>
+                        <td style="text-align: right;">${reorder.toFixed(2)}</td>
+                        <td style="text-align: right; font-weight: 800; color: #8C5D08;">${soQty}</td>
+                      </tr>
+                    `;
+                  }).join('') : `
+                    <tr>
+                      <td colspan="8" style="text-align: center; padding: 14px; color: #777;">
+                        No detail records in this Sales Order
+                      </td>
+                    </tr>
+                  `}
+                </tbody>
+              </table>
+
+              <!-- TOTALS SECTION -->
+              <div class="totals-section">
+                <div class="totals-box">
+                  <div class="total-row">
+                    <span>Total Items:</span>
+                    <span style="font-weight: 800;">${(details || []).length}</span>
+                  </div>
+                  <div class="total-row">
+                    <span>Total Weight:</span>
+                    <span style="font-weight: 800;">${totalWeight.toFixed(3)} G</span>
+                  </div>
+                  <div class="total-row total-row-grand">
+                    <span>TOTAL SO QTY:</span>
+                    <span>${totalQty}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            ${renderStandardReportFooter({
+              staff: {
+                staffLabel: 'PREPARED BY (STAFF)',
+                staffName: (header.CreateUser || 'sys').trim(),
+                receiverLabel: 'SUPPLIER / AUTHORIZED RECEIVER',
+                receiverName: (header.SupplierName || header.SupplierCode || '').trim() || '-'
+              }
+            })}
+          </div>
+        </body>
+      </html>
+    `;
+  };
+
   // subPrintSalesOrder migrated from frmSalesOrder.vb
   const subPrintSalesOrder = async (sTransferNo: string) => {
     const targetNo = (sTransferNo || '').trim();
@@ -310,449 +724,67 @@ export default function SalesOrderScreen() {
         return;
       }
 
-      const { company, formulas, header, details } = result.data;
+      const htmlContent = buildSalesOrderHtml(targetNo, result.data);
 
-      // Extract Company and Formula values matching Crystal Report:
-      // CompAddress1: sCompanyname
-      // CompAddress2: Address1 & " " & Address2 & " " & Country
-      // CompAddress3: sPhone
-      // CompAddress4: sFax
-      // ReportTitle: "Transfer Note"
-      // RPTSELECTION: sSelectFld
-      const compAddress1 = formulas?.CompAddress1 || company?.name || 'SMART';
-      const compAddress2 = formulas?.CompAddress2 || [company?.address1, company?.address2, company?.country].filter(Boolean).join(' ');
-      const compAddress3 = formulas?.CompAddress3 || company?.phone || '';
-      const compAddress4 = formulas?.CompAddress4 || company?.fax || '';
-      const reportTitle = formulas?.ReportTitle || 'Transfer Note';
-
-      // Format Date strings
-      const rawSODate = header.SalesOrderDate || header.CreateDate;
-      let soDateFormatted = '';
-      if (rawSODate) {
-        const d = new Date(rawSODate);
-        if (!isNaN(d.getTime())) {
-          soDateFormatted = `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`;
-        } else {
-          soDateFormatted = String(rawSODate);
-        }
-      }
-
-      const rawDueDate = header.DueDate;
-      let dueDateFormatted = '';
-      if (rawDueDate) {
-        const d = new Date(rawDueDate);
-        if (!isNaN(d.getTime())) {
-          dueDateFormatted = `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`;
-        } else {
-          dueDateFormatted = String(rawDueDate);
-        }
-      }
-
-      const now = new Date();
-      const printTimeStr = `${String(now.getDate()).padStart(2, '0')}/${String(now.getMonth() + 1).padStart(2, '0')}/${now.getFullYear()} ${now.toLocaleTimeString()}`;
-
-      // Calculate totals
-      let totalQty = 0;
-      let totalWeight = 0;
-      (details || []).forEach((row: any) => {
-        totalQty += parseFloat(row.SalesOrderQty) || 0;
-        totalWeight += parseFloat(row.Weight) || 0;
-      });
-
-      const printHtml = `
-        <!DOCTYPE html>
-        <html>
-          <head>
-            <meta charset="utf-8" />
-            <title>Sales Order / ${reportTitle} - ${targetNo}</title>
-            <style>
-              @page {
-                size: A4 portrait;
-                margin: 0;
-              }
-              *, *:before, *:after {
-                box-sizing: border-box;
-              }
-              body {
-                font-family: 'Segoe UI', Tahoma, Arial, sans-serif;
-                margin: 0;
-                padding: 0;
-                background-color: #525659;
-                color: #222;
-                -webkit-print-color-adjust: exact;
-                print-color-adjust: exact;
-              }
-              .page-sheet {
-                background: #FFFFFF;
-                width: 210mm;
-                min-height: 297mm;
-                margin: 10mm auto;
-                padding: 12mm 15mm;
-                box-shadow: 0 0 14px rgba(0,0,0,0.4);
-                display: flex;
-                flex-direction: column;
-                justify-content: space-between;
-              }
-              @media print {
-                body {
-                  background: #FFFFFF;
-                }
-                .page-sheet {
-                  margin: 0;
-                  padding: 10mm 12mm;
-                  width: 100%;
-                  min-height: 100%;
-                  box-shadow: none;
-                }
-              }
-
-              /* HEADER SECTION (clsCompany1.getCompanyName formulas) */
-              .comp-header {
-                text-align: center;
-                border-bottom: 2px solid #9E741D;
-                padding-bottom: 8px;
-                margin-bottom: 10px;
-              }
-              .comp-name {
-                font-size: 20px;
-                font-weight: 800;
-                letter-spacing: 1.5px;
-                color: #5A3F0C;
-                text-transform: uppercase;
-                margin-bottom: 3px;
-              }
-              .comp-details {
-                font-size: 11px;
-                color: #444;
-                line-height: 1.4;
-              }
-
-              /* TITLE BADGE */
-              .doc-badge-container {
-                display: flex;
-                justify-content: space-between;
-                align-items: center;
-                background: #FBF6EC;
-                border: 1px solid #E2D3B3;
-                border-radius: 6px;
-                padding: 8px 14px;
-                margin-bottom: 12px;
-              }
-              .doc-title {
-                font-size: 15px;
-                font-weight: 800;
-                color: #8C5D08;
-                letter-spacing: 1px;
-                text-transform: uppercase;
-              }
-              .doc-print-time {
-                font-size: 10px;
-                color: #77664B;
-              }
-
-              /* INFO GRID */
-              .info-grid {
-                display: grid;
-                grid-template-columns: 1fr 1fr;
-                gap: 12px;
-                margin-bottom: 14px;
-              }
-              .info-card {
-                border: 1px solid #E6DAC5;
-                background: #FAF8F5;
-                border-radius: 5px;
-                padding: 8px 12px;
-              }
-              .card-title {
-                font-size: 11px;
-                font-weight: 700;
-                color: #7A5716;
-                border-bottom: 1px solid #ECE1CD;
-                padding-bottom: 3px;
-                margin-bottom: 6px;
-                text-transform: uppercase;
-                letter-spacing: 0.5px;
-              }
-              .info-row {
-                display: flex;
-                font-size: 11px;
-                margin-bottom: 3px;
-                line-height: 1.35;
-              }
-              .info-lbl {
-                width: 110px;
-                font-weight: 600;
-                color: #665235;
-                flex-shrink: 0;
-              }
-              .info-val {
-                color: #1A1A1A;
-                flex-grow: 1;
-                word-break: break-word;
-              }
-
-              /* DETAIL TABLE (rptSalesOrderDetail) */
-              .detail-table {
-                width: 100%;
-                border-collapse: collapse;
-                margin-bottom: 12px;
-                font-size: 11px;
-              }
-              .detail-table th {
-                background: #8C5D08;
-                color: #FFFFFF;
-                text-align: left;
-                padding: 6px 8px;
-                font-weight: 700;
-                border: 1px solid #734C06;
-                text-transform: uppercase;
-                font-size: 10px;
-                letter-spacing: 0.5px;
-              }
-              .detail-table td {
-                padding: 6px 8px;
-                border: 1px solid #E8DECC;
-                background: #FFFFFF;
-              }
-              .detail-table tr:nth-child(even) td {
-                background: #FAF8F5;
-              }
-
-              /* TOTALS SECTION */
-              .totals-section {
-                display: flex;
-                justify-content: flex-end;
-                margin-bottom: 14px;
-              }
-              .totals-box {
-                width: 260px;
-                border: 1px solid #E6DAC5;
-                background: #FAF8F5;
-                border-radius: 5px;
-                padding: 8px 12px;
-              }
-              .total-row {
-                display: flex;
-                justify-content: space-between;
-                font-size: 11px;
-                padding: 3px 0;
-                color: #444;
-              }
-              .total-row-grand {
-                border-top: 2px solid #8C5D08;
-                margin-top: 4px;
-                padding-top: 4px;
-                font-weight: 800;
-                font-size: 13px;
-                color: #8C5D08;
-              }
-
-              /* SIGNATURES */
-              .sign-grid {
-                display: grid;
-                grid-template-columns: 1fr 1fr;
-                gap: 25px;
-                margin-top: 15px;
-              }
-              .sign-card {
-                padding: 6px 10px;
-                border: 1px solid #EFE4D0;
-                background: #FAF8F5;
-                border-radius: 4px;
-              }
-              .sign-title {
-                font-size: 10px;
-                font-weight: 700;
-                color: #7A5716;
-                text-transform: uppercase;
-                margin-bottom: 30px;
-              }
-              .sign-line {
-                border-bottom: 1px solid #444;
-                margin-bottom: 4px;
-              }
-              .sign-sub {
-                font-size: 10px;
-                color: #555;
-                display: flex;
-                justify-content: space-between;
-              }
-
-              /* FOOTER */
-              .footer-bar {
-                margin-top: 14px;
-                text-align: center;
-                border-top: 1px solid #E2D3B3;
-                padding-top: 8px;
-                font-size: 10px;
-                color: #7C694F;
-              }
-            </style>
-          </head>
-          <body>
-            <div class="page-sheet">
-              <div>
-                <!-- COMPANY HEADER (clsCompany1.getCompanyName) -->
-                <div class="comp-header">
-                  <div class="comp-name">${compAddress1}</div>
-                  <div class="comp-details">
-                    ${compAddress2 ? `<div>${compAddress2}</div>` : ''}
-                    ${compAddress3 || compAddress4 ? `<div>${compAddress3 ? 'Tel: ' + compAddress3 : ''} ${compAddress4 ? ' | Fax: ' + compAddress4 : ''}</div>` : ''}
-                  </div>
-                </div>
-
-                <!-- TITLE BADGE -->
-                <div class="doc-badge-container">
-                  <div class="doc-title">${reportTitle} / SALES ORDER</div>
-                  <div class="doc-print-time">Printed: ${printTimeStr} (1 Copy)</div>
-                </div>
-
-                <!-- INFO GRID -->
-                <div class="info-grid">
-                  <!-- ORDER IDENTIFICATION -->
-                  <div class="info-card">
-                    <div class="card-title">SALES ORDER INFORMATION</div>
-                    <div class="info-row"><span class="info-lbl">Sales Order No:</span><span class="info-val font-bold">${targetNo}</span></div>
-                    <div class="info-row"><span class="info-lbl">Order Date:</span><span class="info-val">${soDateFormatted || '-'}</span></div>
-                    <div class="info-row"><span class="info-lbl">Due Date:</span><span class="info-val">${dueDateFormatted || '-'}</span></div>
-                    <div class="info-row"><span class="info-lbl">Location Code:</span><span class="info-val">${(header.LocationCode || '').trim() || '-'}</span></div>
-                  </div>
-
-                  <!-- SUPPLIER & AUDIT -->
-                  <div class="info-card">
-                    <div class="card-title">SUPPLIER & PARTICULARS</div>
-                    <div class="info-row"><span class="info-lbl">Supplier Code:</span><span class="info-val font-bold">${(header.SupplierCode || '').trim() || '-'}</span></div>
-                    ${header.SupplierName ? `<div class="info-row"><span class="info-lbl">Supplier Name:</span><span class="info-val">${(header.SupplierName || '').trim()}</span></div>` : ''}
-                    <div class="info-row"><span class="info-lbl">Remarks:</span><span class="info-val">${header.Remarks || '-'}</span></div>
-                    <div class="info-row"><span class="info-lbl">Created By:</span><span class="info-val">${(header.CreateUser || 'sys').trim()}</span></div>
-                  </div>
-                </div>
-
-                <!-- DETAIL ITEMS TABLE (rptSalesOrderDetail) -->
-                <table class="detail-table">
-                  <thead>
-                    <tr>
-                      <th style="width: 5%; text-align: center;">#</th>
-                      <th style="width: 18%;">Category</th>
-                      <th style="width: 22%;">Catalogue</th>
-                      <th style="width: 12%; text-align: right;">Weight (g)</th>
-                      <th style="width: 12%; text-align: right;">To Wt (g)</th>
-                      <th style="width: 10%; text-align: center;">Size</th>
-                      <th style="width: 10%; text-align: right;">ReOrder</th>
-                      <th style="width: 11%; text-align: right;">SO Qty</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    ${(details || []).length > 0 ? (details || []).map((row: any, idx: number) => {
-                      const catCode = (row.CategoryCode || '').trim();
-                      const catgCode = (row.CatalogueCode || '').trim();
-                      const catName = row.CategoryName ? ` (${row.CategoryName.trim()})` : '';
-                      const catgName = row.CatalogueName ? ` (${row.CatalogueName.trim()})` : '';
-                      const wt = parseFloat(row.Weight) || 0;
-                      const toWt = parseFloat(row.ToWeight) || 0;
-                      const sz = row.SizeCode !== null && row.SizeCode !== undefined ? row.SizeCode : '-';
-                      const szType = row.SizeType ? ` ${row.SizeType.trim()}` : '';
-                      const reorder = parseFloat(row.ReOrderLevel) || 0;
-                      const soQty = parseFloat(row.SalesOrderQty) || 0;
-
-                      return `
-                        <tr>
-                          <td style="text-align: center;">${idx + 1}</td>
-                          <td><strong>${catCode}</strong>${catName}</td>
-                          <td><strong>${catgCode}</strong>${catgName}</td>
-                          <td style="text-align: right;">${wt.toFixed(3)}</td>
-                          <td style="text-align: right;">${toWt.toFixed(3)}</td>
-                          <td style="text-align: center;">${sz}${szType}</td>
-                          <td style="text-align: right;">${reorder}</td>
-                          <td style="text-align: right; font-weight: 700; color: #8C5D08;">${soQty}</td>
-                        </tr>
-                      `;
-                    }).join('') : `
-                      <tr>
-                        <td colspan="8" style="text-align: center; padding: 14px; color: #777;">
-                          No detail records in this Sales Order
-                        </td>
-                      </tr>
-                    `}
-                  </tbody>
-                </table>
-
-                <!-- TOTALS SECTION -->
-                <div class="totals-section">
-                  <div class="totals-box">
-                    <div class="total-row">
-                      <span>Total Items:</span>
-                      <span style="font-weight: 600;">${(details || []).length}</span>
-                    </div>
-                    <div class="total-row">
-                      <span>Total Weight:</span>
-                      <span style="font-weight: 600;">${totalWeight.toFixed(3)} g</span>
-                    </div>
-                    <div class="total-row total-row-grand">
-                      <span>TOTAL SO QTY:</span>
-                      <span>${totalQty}</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <div>
-                <!-- SIGNATURES -->
-                <div class="sign-grid">
-                  <div class="sign-card">
-                    <div class="sign-title">Prepared By (Staff)</div>
-                    <div class="sign-line"></div>
-                    <div class="sign-sub">
-                      <span>Staff: ${(header.CreateUser || 'sys').trim()}</span>
-                      <span>Date: ........................</span>
-                    </div>
-                  </div>
-                  <div class="sign-card">
-                    <div class="sign-title">Authorized Signatory / Supplier</div>
-                    <div class="sign-line"></div>
-                    <div class="sign-sub">
-                      <span>Signature</span>
-                      <span>Date: ........................</span>
-                    </div>
-                  </div>
-                </div>
-
-                <!-- FOOTER -->
-                <div class="footer-bar">
-                  *** Official Sales Order / Transfer Note - System Generated by SmartGold POS ***
-                </div>
-              </div>
-            </div>
-
-            <script>
-              window.onload = function() {
-                setTimeout(function() {
-                  window.print();
-                }, 300);
-              };
-            </script>
-          </body>
-        </html>
+      const printScript = `
+        <script>
+          window.onload = function() {
+            setTimeout(function() {
+              window.print();
+            }, 300);
+          };
+        </script>
       `;
+      const printHtml = htmlContent.replace('</body>', `${printScript}</body>`);
 
       if (Platform.OS === 'web' && typeof window !== 'undefined') {
-        const printWindow = window.open('', '_blank', 'width=900,height=750');
-        if (printWindow) {
-          printWindow.document.open();
-          printWindow.document.write(printHtml);
-          printWindow.document.close();
-          showToast(`Sales Order ${targetNo} print preview opened`);
+        const frameId = '__sales_order_print_frame__';
+        let iframe = document.getElementById(frameId) as HTMLIFrameElement;
+        if (!iframe) {
+          iframe = document.createElement('iframe');
+          iframe.id = frameId;
+          iframe.style.position = 'fixed';
+          iframe.style.right = '0';
+          iframe.style.bottom = '0';
+          iframe.style.width = '0';
+          iframe.style.height = '0';
+          iframe.style.border = '0';
+          iframe.style.visibility = 'hidden';
+          document.body.appendChild(iframe);
+        }
+
+        const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
+        if (iframeDoc && iframe.contentWindow) {
+          iframeDoc.open();
+          iframeDoc.write(htmlContent);
+          iframeDoc.title = `Transfer Note / Sales Order - ${targetNo}`;
+          iframeDoc.close();
+
+          setTimeout(() => {
+            try {
+              iframe.contentWindow?.focus();
+              iframe.contentWindow?.print();
+              showToast(`Sales Order ${targetNo} print dialog opened`);
+            } catch (printErr) {
+              console.error('Iframe print error:', printErr);
+              const printWindow = window.open('', '_blank', 'width=900,height=750');
+              if (printWindow) {
+                printWindow.document.open();
+                printWindow.document.write(printHtml);
+                printWindow.document.title = `Transfer Note / Sales Order - ${targetNo}`;
+                printWindow.document.close();
+              }
+            }
+          }, 350);
         } else {
-          const blob = new Blob([printHtml], { type: 'text/html;charset=utf-8;' });
-          const url = URL.createObjectURL(blob);
-          const a = document.createElement('a');
-          a.href = url;
-          a.target = '_blank';
-          document.body.appendChild(a);
-          a.click();
-          document.body.removeChild(a);
-          URL.revokeObjectURL(url);
-          showToast(`Sales Order ${targetNo} print preview opened`);
+          const printWindow = window.open('', '_blank', 'width=900,height=750');
+          if (printWindow) {
+            printWindow.document.open();
+            printWindow.document.write(printHtml);
+            printWindow.document.title = `Transfer Note / Sales Order - ${targetNo}`;
+            printWindow.document.close();
+            showToast(`Sales Order ${targetNo} print preview opened`);
+          }
         }
       } else {
         showToast(`Sales Order ${targetNo} sent to printer.`, 'success');
@@ -760,6 +792,111 @@ export default function SalesOrderScreen() {
     } catch (err: any) {
       console.error(err);
       showToast('Failed to load Sales Order print data', 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Dedicated PDF Download functionality
+  const handleDownloadPdf = async (sTransferNo?: string) => {
+    const targetNo = (sTransferNo || soNo || '').trim();
+    if (!targetNo) {
+      showToast('SalesOrder Number Should not be Empty', 'error');
+      return;
+    }
+
+    try {
+      setLoading(true);
+      const res = await fetch(`${API_URL}/print-data/${encodeURIComponent(targetNo)}`);
+      const result = await res.json();
+
+      if (!result.success || !result.data) {
+        showToast(result.message || `No Sales Order records found for: ${targetNo}`, 'error');
+        return;
+      }
+
+      const htmlContent = buildSalesOrderHtml(targetNo, result.data);
+      const downloadFilename = `Sales_Order_${targetNo}.pdf`;
+
+      // Request PDF conversion from backend headless browser
+      const pdfRes = await fetch(`${API_URL}/export-pdf`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          html: htmlContent,
+          filename: downloadFilename
+        })
+      });
+
+      if (!pdfRes.ok) {
+        throw new Error('Server returned error while generating PDF');
+      }
+
+      const pdfBlob = await pdfRes.blob();
+
+      if (Platform.OS === 'web' && typeof window !== 'undefined') {
+        const url = URL.createObjectURL(pdfBlob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = downloadFilename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+        showToast(`Sales Order PDF downloaded: ${downloadFilename}`, 'success');
+      } else {
+        showToast('PDF generated successfully.', 'success');
+      }
+    } catch (err: any) {
+      console.error('PDF Export Error:', err);
+      showToast('Failed to download PDF: ' + (err.message || 'Error'), 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Dedicated Excel Download functionality
+  const handleDownloadExcel = async (sTransferNo?: string) => {
+    const targetNo = (sTransferNo || soNo || '').trim();
+    if (!targetNo) {
+      showToast('SalesOrder Number Should not be Empty', 'error');
+      return;
+    }
+
+    try {
+      setLoading(true);
+      const excelRes = await fetch(`${API_URL}/export-excel`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          salesOrderNo: targetNo
+        })
+      });
+
+      if (!excelRes.ok) {
+        const errJson = await excelRes.json().catch(() => ({}));
+        throw new Error(errJson.message || 'Server error generating Excel file');
+      }
+
+      const excelBlob = await excelRes.blob();
+      const downloadFilename = `Sales_Order_${targetNo}.xlsx`;
+
+      if (Platform.OS === 'web' && typeof window !== 'undefined') {
+        const url = URL.createObjectURL(excelBlob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = downloadFilename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+        showToast(`Sales Order Excel downloaded: ${downloadFilename}`, 'success');
+      } else {
+        showToast('Excel file generated successfully.', 'success');
+      }
+    } catch (err: any) {
+      console.error('Excel Export Error:', err);
+      showToast('Failed to download Excel: ' + (err.message || 'Error'), 'error');
     } finally {
       setLoading(false);
     }
@@ -925,6 +1062,24 @@ export default function SalesOrderScreen() {
             onPress={handleRePrint}
           >
             <ThemedText style={styles.headerBtnSecondaryText}>Re Print</ThemedText>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.headerBtnSecondary, !soNo && { opacity: 0.5 }]}
+            onPress={() => handleDownloadPdf(soNo)}
+            disabled={!soNo}
+          >
+            <Ionicons name="download-outline" size={14} color="#B3261E" />
+            <ThemedText style={[styles.headerBtnSecondaryText, { color: '#B3261E' }]}>PDF</ThemedText>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.headerBtnSecondary, !soNo && { opacity: 0.5 }]}
+            onPress={() => handleDownloadExcel(soNo)}
+            disabled={!soNo}
+          >
+            <Ionicons name="grid-outline" size={14} color="#2E7D32" />
+            <ThemedText style={[styles.headerBtnSecondaryText, { color: '#2E7D32' }]}>Excel</ThemedText>
           </TouchableOpacity>
 
           <TouchableOpacity style={styles.headerBtnSecondary} onPress={handleNew}>
@@ -1354,25 +1509,19 @@ export default function SalesOrderScreen() {
       <Modal visible={printConfirmOrderNo !== null} transparent animationType="fade">
         <TouchableOpacity style={styles.modalOverlay} activeOpacity={1}>
           <TouchableWithoutFeedback>
-            <View style={[styles.modalCard, { maxWidth: 360 }]}>
+            <View style={[styles.modalContainer, { maxWidth: 390 }]}>
               <View style={styles.modalHeader}>
-                <ThemedText style={styles.modalTitle}>Print Option</ThemedText>
+                <ThemedText style={styles.modalTitle}>Sales Order Saved</ThemedText>
               </View>
               <View style={{ padding: 18, alignItems: 'center' }}>
-                <Ionicons name="print-outline" size={36} color="#8D6409" style={{ marginBottom: 12 }} />
+                <Ionicons name="document-text-outline" size={36} color="#8D6409" style={{ marginBottom: 12 }} />
                 <ThemedText style={{ fontSize: 13, color: '#3B2D17', textAlign: 'center', marginBottom: 16 }}>
-                  Do you want to print ?
+                  Reference No: <ThemedText style={{ fontWeight: 'bold' }}>{printConfirmOrderNo}</ThemedText>
+                  {'\n'}Choose an option below:
                 </ThemedText>
-                <View style={{ flexDirection: 'row', gap: 12, width: '100%' }}>
+                <View style={{ flexDirection: 'row', gap: 8, width: '100%', marginBottom: 10 }}>
                   <TouchableOpacity
-                    style={[styles.modalActionBtn, styles.modalBtnCancel]}
-                    onPress={() => setPrintConfirmOrderNo(null)}
-                    activeOpacity={0.7}
-                  >
-                    <ThemedText style={styles.modalBtnCancelText}>No</ThemedText>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[styles.modalActionBtn, styles.modalBtnPrimary]}
+                    style={[styles.modalActionBtn, styles.modalBtnPrimary, { flex: 1, paddingVertical: 8 }]}
                     onPress={() => {
                       const orderNo = printConfirmOrderNo;
                       setPrintConfirmOrderNo(null);
@@ -1382,9 +1531,48 @@ export default function SalesOrderScreen() {
                     }}
                     activeOpacity={0.7}
                   >
-                    <ThemedText style={styles.modalBtnPrimaryText}>Yes</ThemedText>
+                    <Ionicons name="print-outline" size={13} color="#FFFFFF" style={{ marginRight: 4 }} />
+                    <ThemedText style={styles.modalBtnPrimaryText}>Print</ThemedText>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={[styles.modalActionBtn, { flex: 1, backgroundColor: '#B3261E', paddingVertical: 8 }]}
+                    onPress={() => {
+                      const orderNo = printConfirmOrderNo;
+                      setPrintConfirmOrderNo(null);
+                      if (orderNo) {
+                        handleDownloadPdf(orderNo);
+                      }
+                    }}
+                    activeOpacity={0.7}
+                  >
+                    <Ionicons name="download-outline" size={13} color="#FFFFFF" style={{ marginRight: 4 }} />
+                    <ThemedText style={[styles.modalBtnPrimaryText, { color: '#FFFFFF' }]}>PDF</ThemedText>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={[styles.modalActionBtn, { flex: 1, backgroundColor: '#2E7D32', paddingVertical: 8 }]}
+                    onPress={() => {
+                      const orderNo = printConfirmOrderNo;
+                      setPrintConfirmOrderNo(null);
+                      if (orderNo) {
+                        handleDownloadExcel(orderNo);
+                      }
+                    }}
+                    activeOpacity={0.7}
+                  >
+                    <Ionicons name="grid-outline" size={13} color="#FFFFFF" style={{ marginRight: 4 }} />
+                    <ThemedText style={[styles.modalBtnPrimaryText, { color: '#FFFFFF' }]}>Excel</ThemedText>
                   </TouchableOpacity>
                 </View>
+
+                <TouchableOpacity
+                  style={[styles.modalActionBtn, styles.modalBtnCancel, { width: '100%', paddingVertical: 8 }]}
+                  onPress={() => setPrintConfirmOrderNo(null)}
+                  activeOpacity={0.7}
+                >
+                  <ThemedText style={styles.modalBtnCancelText}>Close</ThemedText>
+                </TouchableOpacity>
               </View>
             </View>
           </TouchableWithoutFeedback>
@@ -1451,12 +1639,16 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   headerBtnSecondary: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
     backgroundColor: '#FFFFFF',
     borderWidth: 1,
     borderColor: '#DFD5C3',
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    borderRadius: 5,
+    width: 68,
+    height: 34,
+    borderRadius: 6,
+    gap: 4,
   },
   headerBtnSecondaryText: {
     color: '#5C4A28',
@@ -1464,12 +1656,16 @@ const styles = StyleSheet.create({
     fontSize: 12,
   },
   headerBtnPrimary: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
     backgroundColor: '#F9F2E2',
     borderWidth: 1,
     borderColor: '#B8903B',
-    paddingVertical: 6,
-    paddingHorizontal: 16,
-    borderRadius: 5,
+    width: 68,
+    height: 34,
+    borderRadius: 6,
+    gap: 4,
   },
   headerBtnPrimaryText: {
     color: '#9E6D08',
@@ -1477,12 +1673,16 @@ const styles = StyleSheet.create({
     fontSize: 12,
   },
   headerBtnDelete: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
     backgroundColor: '#FFFFFF',
     borderWidth: 1,
     borderColor: '#F2A8A2',
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    borderRadius: 5,
+    width: 68,
+    height: 34,
+    borderRadius: 6,
+    gap: 4,
   },
   headerBtnDeleteText: {
     color: '#D93829',

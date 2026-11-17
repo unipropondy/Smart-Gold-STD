@@ -382,6 +382,192 @@ router.delete("/", async (req, res) => {
   }
 });
 
-module.exports = router;
+// ================= EXPORT PDF ENDPOINT =================
+// POST /api/misc/export-pdf
+router.post("/export-pdf", async (req, res) => {
+  try {
+    const { html, filename } = req.body;
+    if (!html) {
+      return res.status(400).json({ success: false, message: "HTML content is required for PDF export." });
+    }
+
+    const { convertHtmlToPdf } = require("../utils/htmlToPdf");
+    const pdfBuffer = await convertHtmlToPdf(html);
+    const downloadName = (filename || "Miscellaneous_Entry_Voucher.pdf").replace(/[^a-zA-Z0-9_\-\.]/g, "_");
+
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `attachment; filename="${downloadName}"`);
+    res.setHeader("Content-Length", pdfBuffer.length);
+    return res.send(pdfBuffer);
+  } catch (err) {
+    console.error("Misc Export PDF Error:", err);
+    return res.status(500).json({ success: false, message: "Failed to generate PDF: " + err.message });
+  }
+});
+
+// ================= EXPORT EXCEL ENDPOINT =================
+// POST /api/misc/export-excel
+router.post("/export-excel", async (req, res) => {
+  try {
+    const { type, voucherNo, isReprint } = req.body;
+    if (!type || !voucherNo) {
+      return res.status(400).json({ success: false, message: "Type and VoucherNo are required." });
+    }
+
+    const vNoInt = parseInt(voucherNo, 10);
+    if (isNaN(vNoInt)) {
+      return res.status(400).json({ success: false, message: "VoucherNo must be a valid number." });
+    }
+
+    const pool = await getPool(req);
+
+    // 1. Fetch Company Information
+    const compRes = await pool.request().query("SELECT TOP 1 * FROM tblCompany");
+    const compRow = compRes.recordset[0] || {};
+    const companyName = (compRow.Name || "SMART").trim();
+    const companyAddress = [compRow.Address1, compRow.Address2, compRow.City, compRow.Country].filter(Boolean).map(s => String(s).trim()).join(" ");
+
+    // 2. Fetch Voucher Data
+    const result = await pool.request()
+      .input("Type", sql.VarChar(10), type)
+      .input("VoucherNo", sql.Int, vNoInt)
+      .query(`
+        SELECT 
+          RTRIM(LTRIM(Type)) AS Type,
+          VoucherNo,
+          Date,
+          RTRIM(LTRIM(ISNULL(Person, ''))) AS Person,
+          ISNULL(Amount, 0) AS Amount,
+          ISNULL(GSTPerc, 0) AS GSTPerc,
+          ISNULL(GST, 0) AS GST,
+          ISNULL(NetAmount, 0) AS NetAmount,
+          ISNULL(Weight, 0) AS Weight,
+          RTRIM(LTRIM(ISNULL(Remarks, ''))) AS Remarks,
+          DateOfTransaction,
+          RTRIM(LTRIM(ISNULL(CreateUser, 'sys'))) AS CreateUser,
+          CreateDate
+        FROM tblMisc
+        WHERE Type = @Type AND VoucherNo = @VoucherNo
+      `);
+
+    if (!result.recordset || result.recordset.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: `Miscellaneous voucher record not found for Type '${type}' and Voucher No '${vNoInt}'.`
+      });
+    }
+
+    const voucher = result.recordset[0];
+    const typeNames = {
+      PN: "Purchase Note",
+      CN: "Credit Note",
+      MC: "Misc. Note",
+      PC: "Petty Cash",
+      SR: "Services"
+    };
+    const typeLabel = typeNames[type] || type;
+
+    // Format Dates
+    const rawDate = voucher.Date || voucher.DateOfTransaction;
+    let voucherDateStr = "-";
+    if (rawDate) {
+      const d = new Date(rawDate);
+      if (!isNaN(d.getTime())) {
+        voucherDateStr = `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`;
+      }
+    }
+    const printTimeStr = new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
+
+    const vAmount = parseFloat(voucher.Amount) || 0;
+    const vGst = parseFloat(voucher.GST) || 0;
+    const vGstPerc = parseFloat(voucher.GSTPerc) || 0;
+    const vNetAmount = parseFloat(voucher.NetAmount) || (vAmount + vGst);
+    const vWeight = parseFloat(voucher.Weight) || 0;
+    const isZeroRated = vGstPerc === 0 && vGst === 0;
+
+    const reportTitle = "MISCELLANEOUS ENTRY";
+
+    // Build Excel Workbook
+    const XLSX = require("xlsx");
+    const wb = XLSX.utils.book_new();
+
+    const rows = [];
+    rows.push([companyName]);
+    rows.push([companyAddress]);
+    rows.push([]);
+    rows.push([reportTitle]);
+    rows.push([`Printed: ${voucherDateStr} ${printTimeStr}`]);
+    rows.push([]);
+
+    // Two-panel Section: Voucher Details & Financial Summary
+    rows.push(["VOUCHER DETAILS", "", "", "FINANCIAL SUMMARY"]);
+    rows.push(["Type:", `${typeLabel} (${voucher.Type})`, "", "Zero Rated:", isZeroRated ? "Yes" : "No"]);
+    rows.push(["Voucher No:", voucher.VoucherNo, "", "Net Amount:", Number(vNetAmount.toFixed(2))]);
+    rows.push(["Date:", voucherDateStr, "", "GST Rate (%):", `${vGstPerc}%`]);
+    rows.push(["Person:", voucher.Person || "-", "", "Amount (Excl.):", Number(vAmount.toFixed(2))]);
+    rows.push(["Weight (g):", Number(vWeight.toFixed(3)), "", "GST Amount:", Number(vGst.toFixed(2))]);
+    rows.push(["Remarks:", voucher.Remarks || "-", "", "Total Payable:", Number(vNetAmount.toFixed(2))]);
+    rows.push(["User Id:", (voucher.CreateUser || "sys").trim(), "", "", ""]);
+    rows.push([]);
+
+    // Line Particulars Table
+    rows.push([
+      "#",
+      "TYPE",
+      "VOUCHER NO",
+      "PARTICULARS / REMARKS",
+      "AMOUNT (EXCL.) ($)",
+      "GST AMOUNT ($)",
+      "TOTAL PAYABLE ($)"
+    ]);
+
+    rows.push([
+      1,
+      typeLabel,
+      voucher.VoucherNo,
+      voucher.Remarks || voucher.Person || "Miscellaneous entry transaction",
+      Number(vAmount.toFixed(2)),
+      Number(vGst.toFixed(2)),
+      Number(vNetAmount.toFixed(2))
+    ]);
+
+    rows.push([]);
+
+    // Signatures
+    rows.push(["PREPARED BY (STAFF)", "", "", "SUPPLIER / AUTHORIZED RECEIVER", ""]);
+    rows.push(["Staff Name:", (voucher.CreateUser || "sys").trim(), "", "Receiver Name:", voucher.Person || "-"]);
+    rows.push(["Signature:", "______________________", "", "Signature:", "______________________"]);
+    rows.push(["Date:", "______________________", "", "Date:", "______________________"]);
+    rows.push([]);
+    rows.push(["*** System Generated Report ***"]);
+    rows.push(["Powered by Unipro SG"]);
+
+    const ws = XLSX.utils.aoa_to_sheet(rows);
+
+    // Set Column Widths
+    ws["!cols"] = [
+      { wch: 6 },
+      { wch: 20 },
+      { wch: 14 },
+      { wch: 38 },
+      { wch: 18 },
+      { wch: 16 },
+      { wch: 18 }
+    ];
+
+    XLSX.utils.book_append_sheet(wb, ws, "Misc Entry Voucher");
+
+    const excelBuffer = XLSX.write(wb, { type: "buffer", bookType: "xlsx" });
+    const downloadName = `Miscellaneous_Entry_Voucher_${voucher.Type}_${voucher.VoucherNo}.xlsx`;
+
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    res.setHeader("Content-Disposition", `attachment; filename="${downloadName}"`);
+    res.setHeader("Content-Length", excelBuffer.length);
+    return res.send(excelBuffer);
+  } catch (err) {
+    console.error("Misc Export Excel Error:", err);
+    return res.status(500).json({ success: false, message: "Failed to generate Excel: " + err.message });
+  }
+});
 
 module.exports = router;

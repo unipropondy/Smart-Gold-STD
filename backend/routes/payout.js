@@ -235,5 +235,189 @@ router.get("/print-data", async (req, res) => {
   }
 });
 
+// ================= EXPORT PDF ENDPOINT =================
+// POST /api/payout/export-pdf
+router.post("/export-pdf", async (req, res) => {
+  try {
+    const { html, filename } = req.body;
+    if (!html) {
+      return res.status(400).json({ success: false, message: "HTML content is required for PDF export." });
+    }
+
+    const { convertHtmlToPdf } = require("../utils/htmlToPdf");
+    const pdfBuffer = await convertHtmlToPdf(html);
+    const downloadName = (filename || "Payout_Voucher.pdf").replace(/[^a-zA-Z0-9_\-\.]/g, "_");
+
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `attachment; filename="${downloadName}"`);
+    res.setHeader("Content-Length", pdfBuffer.length);
+    return res.send(pdfBuffer);
+  } catch (err) {
+    console.error("Payout Export PDF Error:", err);
+    return res.status(500).json({ success: false, message: "Failed to generate PDF: " + err.message });
+  }
+});
+
+// ================= EXPORT EXCEL ENDPOINT =================
+// POST /api/payout/export-excel
+router.post("/export-excel", async (req, res) => {
+  try {
+    const { payoutNo, isReprint } = req.body;
+    const rawPayoutNo = (payoutNo || "").trim();
+    if (!rawPayoutNo) {
+      return res.status(400).json({ success: false, message: "PayOut Number is required." });
+    }
+
+    const pool = await getPool(req);
+
+    // 1. Fetch Company Information
+    const compRes = await pool.request().query("SELECT TOP 1 * FROM tblCompany");
+    const compRow = compRes.recordset[0] || {};
+    const companyName = (compRow.Name || "SMART").trim();
+    const companyAddress = [compRow.Address1, compRow.Address2, compRow.City, compRow.Country].filter(Boolean).map(s => String(s).trim()).join(" ");
+
+    // 2. Fetch Payout Detail
+    const payoutReq = pool.request();
+    payoutReq.input("PayOutNo", sql.VarChar(50), rawPayoutNo);
+    const payoutResult = await payoutReq.query(`
+      SELECT 
+        PayOutNo, PayOutDate, Code, Description, PayOutDescription,
+        Amount, Remarks, CreateUser, CreateDate, ModifyUser, ModifyDate
+      FROM tblPayOutDetail
+      WHERE RTRIM(LTRIM(PayOutNo)) = @PayOutNo
+    `);
+
+    if (!payoutResult.recordset.length) {
+      return res.status(404).json({
+        success: false,
+        message: `PayOut record "${rawPayoutNo}" not found.`,
+      });
+    }
+
+    const row = payoutResult.recordset[0];
+
+    // 3. Fetch linked Paymode
+    const pmReq = pool.request();
+    pmReq.input("InvoiceNo", sql.VarChar(50), rawPayoutNo);
+    const pmResult = await pmReq.query(`
+      SELECT PayMode, Amount, SlipNo
+      FROM tblPayModeDetail
+      WHERE RTRIM(LTRIM(InvoiceNo)) = @InvoiceNo
+    `);
+    const payModes = pmResult.recordset.map((p) => ({
+      payMode: (p.PayMode || "").trim(),
+      amount: Math.abs(parseFloat(p.Amount) || 0),
+    }));
+    const disbursementText = payModes.length > 0 ? payModes.map(p => p.payMode).join(", ") : "CASH";
+
+    // 4. Fetch Gold Rates
+    const ratesResult = await pool.request().query(`
+      SELECT ClassCode, Rate FROM tblClass WHERE ClassCode IN ('24K', '22K', '835', '999', '916', '18K', 'SIL')
+    `);
+    const ratesMap = {};
+    ratesResult.recordset.forEach((r) => {
+      ratesMap[(r.ClassCode || "").trim().toUpperCase()] = r.Rate;
+    });
+
+    const s999 = ratesMap["24K"] !== undefined ? parseFloat(ratesMap["24K"]).toFixed(2) : (ratesMap["999"] ? parseFloat(ratesMap["999"]).toFixed(2) : "-");
+    const s916 = ratesMap["22K"] !== undefined ? parseFloat(ratesMap["22K"]).toFixed(2) : (ratesMap["916"] ? parseFloat(ratesMap["916"]).toFixed(2) : "-");
+    const s835 = ratesMap["835"] !== undefined ? parseFloat(ratesMap["835"]).toFixed(2) : (ratesMap["18K"] ? parseFloat(ratesMap["18K"]).toFixed(2) : "-");
+
+    // Format Dates
+    const rawDate = row.PayOutDate || row.CreateDate;
+    let payoutDateStr = "-";
+    if (rawDate) {
+      const d = new Date(rawDate);
+      if (!isNaN(d.getTime())) {
+        payoutDateStr = `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`;
+      }
+    }
+    const printTimeStr = new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
+    const payoutAmount = parseFloat(row.Amount) || 0;
+
+    const reportTitle = "PAYOUT";
+
+    // Build Excel Workbook
+    const XLSX = require("xlsx");
+    const wb = XLSX.utils.book_new();
+
+    const rows = [];
+    rows.push([companyName]);
+    rows.push([companyAddress]);
+    rows.push([]);
+    rows.push([reportTitle]);
+    rows.push([`Printed: ${payoutDateStr} ${printTimeStr}`]);
+    rows.push([]);
+
+    // Two Panels: Expense Classification & Voucher Audit Details
+    rows.push(["EXPENSE CLASSIFICATION", "", "", "VOUCHER AUDIT DETAILS"]);
+    rows.push(["Expense Code:", (row.Code || "-").trim(), "", "Voucher No:", (row.PayOutNo || rawPayoutNo).trim()]);
+    rows.push(["Category:", (row.Description || "-").trim(), "", "Issued Date:", payoutDateStr]);
+    rows.push(["Disbursement:", disbursementText, "", "Processed By:", (row.CreateUser || "sys").trim()]);
+    rows.push([]);
+
+    // Prominent Highlight: Total Amount Paid Out
+    rows.push(["TOTAL AMOUNT PAID OUT:", `$${Number(payoutAmount.toFixed(2))}`, "", `SETTLED IN FULL VIA ${disbursementText}`]);
+    rows.push([]);
+
+    // Payout Particulars & Details Table
+    rows.push([
+      "#",
+      "CODE / CATEGORY",
+      "PAYOUT DESCRIPTION / PURPOSE",
+      "AMOUNT ($)"
+    ]);
+
+    const codeCat = `${(row.Code || "").trim()} - ${(row.Description || "").trim()}`.replace(/^ - | - $/g, "");
+    const purpose = (row.PayOutDescription || row.Remarks || row.Description || "Payout disbursement").trim();
+
+    rows.push([
+      1,
+      codeCat || "-",
+      purpose,
+      Number(payoutAmount.toFixed(2))
+    ]);
+
+    rows.push([]);
+
+    // Totals Section
+    rows.push(["", "", "Subtotal Payout:", Number(payoutAmount.toFixed(2))]);
+    rows.push(["", "", "NET CASH DISBURSED:", Number(payoutAmount.toFixed(2))]);
+    rows.push([]);
+
+    // Signatures
+    rows.push(["PREPARED BY (STAFF)", "", "", "SUPPLIER / AUTHORIZED RECEIVER"]);
+    rows.push(["Staff Name:", (row.CreateUser || "sys").trim(), "", "Receiver Name:", ""]);
+    rows.push(["Signature:", "______________________", "", "Signature:", "______________________"]);
+    rows.push(["Date:", "______________________", "", "Date:", "______________________"]);
+    rows.push([]);
+    rows.push(["*** System Generated Report ***"]);
+    rows.push(["Powered by Unipro SG"]);
+
+    const ws = XLSX.utils.aoa_to_sheet(rows);
+
+    // Set Column Widths
+    ws["!cols"] = [
+      { wch: 6 },
+      { wch: 28 },
+      { wch: 38 },
+      { wch: 18 }
+    ];
+
+    XLSX.utils.book_append_sheet(wb, ws, "Payout Voucher");
+
+    const excelBuffer = XLSX.write(wb, { type: "buffer", bookType: "xlsx" });
+    const downloadName = `Payout_Voucher_${rawPayoutNo.replace(/[^a-zA-Z0-9_\-]/g, "_")}.xlsx`;
+
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    res.setHeader("Content-Disposition", `attachment; filename="${downloadName}"`);
+    res.setHeader("Content-Length", excelBuffer.length);
+    return res.send(excelBuffer);
+  } catch (err) {
+    console.error("Payout Export Excel Error:", err);
+    return res.status(500).json({ success: false, message: "Failed to generate Excel: " + err.message });
+  }
+});
+
 module.exports = router;
 

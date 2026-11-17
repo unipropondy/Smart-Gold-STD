@@ -515,6 +515,205 @@ router.get("/print-data", async (req, res) => {
   }
 });
 
+// ================= EXPORT PDF ENDPOINT =================
+// POST /api/installmentpayment/export-pdf
+router.post("/export-pdf", async (req, res) => {
+  try {
+    const { html, filename } = req.body;
+    if (!html) {
+      return res.status(400).json({ success: false, message: "HTML content is required for PDF export." });
+    }
+
+    const { convertHtmlToPdf } = require("../utils/htmlToPdf");
+    const pdfBuffer = await convertHtmlToPdf(html);
+    const downloadName = (filename || "Installment_Payment_Receipt.pdf").replace(/[^a-zA-Z0-9_\-\.]/g, "_");
+
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `attachment; filename="${downloadName}"`);
+    res.setHeader("Content-Length", pdfBuffer.length);
+    return res.send(pdfBuffer);
+  } catch (err) {
+    console.error("Installment Export PDF Error:", err);
+    return res.status(500).json({ success: false, message: "Failed to generate PDF: " + err.message });
+  }
+});
+
+// ================= EXPORT EXCEL ENDPOINT =================
+// POST /api/installmentpayment/export-excel
+router.post("/export-excel", async (req, res) => {
+  try {
+    const { installmentNo, isReprint } = req.body;
+    const rawNo = (installmentNo || "").trim();
+    if (!rawNo) {
+      return res.status(400).json({ success: false, message: "Installment Number is required." });
+    }
+
+    const pool = await getPool(req);
+
+    // 1. Company
+    const compResult = await pool.request().query("SELECT TOP 1 * FROM tblCompany");
+    const compRow = compResult.recordset[0] || {};
+    const companyName = (compRow.Name || "SMART").trim();
+    const companyAddress = [compRow.Address1, compRow.Address2, compRow.City, compRow.Country].filter(Boolean).map(s => String(s).trim()).join(" ");
+
+    // 2. Installment detail & Agreement header
+    const detailReq = pool.request();
+    detailReq.input("InstallmentNo", sql.VarChar(50), rawNo);
+    const detailResult = await detailReq.query(`
+      SELECT 
+        d.InstallmentNo, d.InsAgreementNo, d.InstallmentAmt, d.AmtPaid, d.InsPaid, d.Remarks as DetailRemarks,
+        d.CreateUser, d.CreateDate,
+        h.InvoiceNo, h.InvoiceDate, h.CustomerCode, h.Name as HeaderCustomerName,
+        h.Address1 as HeaderAddress1, h.Address2 as HeaderAddress2, h.Address3 as HeaderAddress3,
+        h.TotalCost, h.DepositAmt, h.AmtPaid as HeaderAmtPaid, h.TotalInstallment, h.InsPaid as HeaderInsPaid,
+        h.Remarks as HeaderRemarks, h.LocationCode, h.SalesMan,
+        c.CustomerName, c.Address1 as CustAddress1, c.Address2 as CustAddress2, c.Address3 as CustAddress3,
+        c.Phone1, c.Mobile, c.CustomerType
+      FROM tblInstallmentDetail d
+      LEFT JOIN tblInstallmentEntryHeader h ON RTRIM(LTRIM(h.InsAgreementNo)) = RTRIM(LTRIM(d.InsAgreementNo))
+      LEFT JOIN tblCustomer c ON RTRIM(LTRIM(c.CustomerCode)) = RTRIM(LTRIM(h.CustomerCode))
+      WHERE RTRIM(LTRIM(d.InstallmentNo)) = @InstallmentNo
+    `);
+
+    if (!detailResult.recordset.length) {
+      return res.status(404).json({ success: false, message: `Installment record "${rawNo}" not found.` });
+    }
+
+    const row = detailResult.recordset[0];
+    const agreementNo = (row.InsAgreementNo || "").trim();
+
+    // 3. History
+    let history = [];
+    if (agreementNo) {
+      const histReq = pool.request();
+      histReq.input("InsAgreementNo", sql.VarChar(50), agreementNo);
+      const histResult = await histReq.query(`
+        SELECT InstallmentNo, CreateDate, InsPaid, InstallmentAmt, AmtPaid, Remarks, CreateUser
+        FROM tblInstallmentDetail
+        WHERE RTRIM(LTRIM(InsAgreementNo)) = @InsAgreementNo
+        ORDER BY CreateDate ASC, InstallmentNo ASC
+      `);
+      history = histResult.recordset;
+    }
+
+    // 4. Rates
+    const ratesResult = await pool.request().query(`
+      SELECT ClassCode, Rate FROM tblClass WHERE ClassCode IN ('24K', '22K', '835', '999', '916', '18K', 'SIL')
+    `);
+    const ratesMap = {};
+    ratesResult.recordset.forEach((r) => {
+      ratesMap[(r.ClassCode || "").trim().toUpperCase()] = r.Rate;
+    });
+    const s999 = ratesMap["24K"] !== undefined ? parseFloat(ratesMap["24K"]).toFixed(2) : (ratesMap["999"] ? parseFloat(ratesMap["999"]).toFixed(2) : "-");
+    const s916 = ratesMap["22K"] !== undefined ? parseFloat(ratesMap["22K"]).toFixed(2) : (ratesMap["916"] ? parseFloat(ratesMap["916"]).toFixed(2) : "-");
+    const s835 = ratesMap["835"] !== undefined ? parseFloat(ratesMap["835"]).toFixed(2) : (ratesMap["18K"] ? parseFloat(ratesMap["18K"]).toFixed(2) : "-");
+
+    // Dates
+    const rawDate = row.CreateDate;
+    let paymentDateStr = "-";
+    if (rawDate) {
+      const d = new Date(rawDate);
+      if (!isNaN(d.getTime())) {
+        paymentDateStr = `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`;
+      }
+    }
+    const printTimeStr = new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
+
+    const reportTitle = "INSTALLMENT PAYMENT";
+
+    const XLSX = require("xlsx");
+    const wb = XLSX.utils.book_new();
+    const rows = [];
+
+    rows.push([companyName]);
+    rows.push([companyAddress]);
+    rows.push([]);
+    rows.push([reportTitle]);
+    rows.push([`Printed: ${paymentDateStr} ${printTimeStr}`]);
+    rows.push([]);
+
+    // Two panels
+    const custName = (row.CustomerName || row.HeaderCustomerName || "").trim();
+    const custCode = (row.CustomerCode || "").trim();
+    const custAddress = [row.CustAddress1 || row.HeaderAddress1, row.CustAddress2 || row.HeaderAddress2, row.CustAddress3 || row.HeaderAddress3].filter(Boolean).map(s => String(s).trim()).join(" ");
+
+    rows.push(["CUSTOMER INFORMATION", "", "", "AGREEMENT & VOUCHER DETAILS"]);
+    rows.push(["Customer Code:", custCode, "", "Voucher No:", (row.InstallmentNo || rawNo).trim()]);
+    rows.push(["Customer Name:", custName, "", "Agreement No:", agreementNo]);
+    rows.push(["Address:", custAddress, "", "Payment Date:", paymentDateStr]);
+    rows.push(["Contact:", (row.Mobile || row.Phone1 || "-").trim(), "", "Salesman:", (row.SalesMan || "Staff").trim()]);
+    rows.push([]);
+
+    const currentPaid = parseFloat(row.AmtPaid) || 0;
+    rows.push(["CURRENT INSTALLMENT PAID:", `$${currentPaid.toFixed(2)}`, "", `INSTALLMENT #${row.InsPaid || 1} OF ${row.TotalInstallment || 0}`]);
+    rows.push([]);
+
+    // History Table
+    rows.push(["#", "PAYMENT VOUCHER NO", "PAYMENT DATE", "INS #", "REMARKS", "AMOUNT PAID ($)"]);
+    if (history.length > 0) {
+      history.forEach((h, idx) => {
+        let hDate = "-";
+        if (h.CreateDate) {
+          const hd = new Date(h.CreateDate);
+          if (!isNaN(hd.getTime())) {
+            hDate = `${String(hd.getDate()).padStart(2, '0')}/${String(hd.getMonth() + 1).padStart(2, '0')}/${hd.getFullYear()}`;
+          }
+        }
+        rows.push([
+          idx + 1,
+          (h.InstallmentNo || "").trim(),
+          hDate,
+          h.InsPaid || 1,
+          (h.Remarks || "-").trim(),
+          parseFloat(h.AmtPaid || 0)
+        ]);
+      });
+    } else {
+      rows.push([1, (row.InstallmentNo || rawNo).trim(), paymentDateStr, row.InsPaid || 1, (row.DetailRemarks || "-").trim(), currentPaid]);
+    }
+    rows.push([]);
+
+    // Financial totals
+    const totalCost = parseFloat(row.TotalCost) || 0;
+    const depositAmt = parseFloat(row.DepositAmt) || 0;
+    const totalPaidSum = history.length > 0 
+      ? history.reduce((acc, cur) => acc + (parseFloat(cur.AmtPaid) || 0), 0) + depositAmt
+      : currentPaid + depositAmt;
+    const balanceDue = Math.max(0, totalCost - totalPaidSum);
+
+    rows.push(["", "", "", "", "Total Agreement Value:", totalCost]);
+    rows.push(["", "", "", "", "Initial Deposit Paid:", depositAmt]);
+    rows.push(["", "", "", "", "Total Installments Paid:", totalPaidSum - depositAmt]);
+    rows.push(["", "", "", "", "Total Paid To Date:", totalPaidSum]);
+    rows.push(["", "", "", "", "REMAINING BALANCE DUE:", balanceDue]);
+    rows.push([]);
+
+    // Signatures
+    rows.push(["PREPARED BY (STAFF)", "", "", "", "SUPPLIER / AUTHORIZED RECEIVER"]);
+    rows.push(["Staff Name:", (row.CreateUser || "Staff").trim(), "", "", "Receiver Name:", custName]);
+    rows.push(["Signature:", "______________________", "", "", "Signature:", "______________________"]);
+    rows.push(["Date:", "______________________", "", "", "Date:", "______________________"]);
+    rows.push([]);
+    rows.push(["*** System Generated Report ***"]);
+    rows.push(["Powered by Unipro SG"]);
+
+    const ws = XLSX.utils.aoa_to_sheet(rows);
+    ws["!cols"] = [{ wch: 6 }, { wch: 24 }, { wch: 16 }, { wch: 10 }, { wch: 30 }, { wch: 18 }];
+    XLSX.utils.book_append_sheet(wb, ws, "Installment Receipt");
+
+    const excelBuffer = XLSX.write(wb, { type: "buffer", bookType: "xlsx" });
+    const downloadName = `Installment_Payment_${rawNo.replace(/[^a-zA-Z0-9_\-]/g, "_")}.xlsx`;
+
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    res.setHeader("Content-Disposition", `attachment; filename="${downloadName}"`);
+    res.setHeader("Content-Length", excelBuffer.length);
+    return res.send(excelBuffer);
+  } catch (err) {
+    console.error("Installment Export Excel Error:", err);
+    return res.status(500).json({ success: false, message: "Failed to generate Excel: " + err.message });
+  }
+});
+
 module.exports = router;
 
 

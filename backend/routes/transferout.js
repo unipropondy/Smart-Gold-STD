@@ -978,4 +978,218 @@ router.get("/print-data", async (req, res) => {
   }
 });
 
+// 10. POST /api/transferout/export-pdf
+router.post("/export-pdf", async (req, res) => {
+  try {
+    const { html, filename } = req.body;
+    if (!html) {
+      return res.status(400).json({ success: false, message: "HTML content is required for PDF export." });
+    }
+
+    const { convertHtmlToPdf } = require("../utils/htmlToPdf");
+    const pdfBuffer = await convertHtmlToPdf(html);
+    const downloadName = (filename || "Transfer_Out_Voucher.pdf").replace(/[^a-zA-Z0-9_\-\.]/g, "_");
+
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `attachment; filename="${downloadName}"`);
+    res.setHeader("Content-Length", pdfBuffer.length);
+    return res.send(pdfBuffer);
+  } catch (err) {
+    console.error("Transfer Out Export PDF Error:", err);
+    return res.status(500).json({ success: false, message: "Failed to generate PDF: " + err.message });
+  }
+});
+
+// 11. POST /api/transferout/export-excel
+router.post("/export-excel", async (req, res) => {
+  try {
+    const { transferNo, isReprint } = req.body;
+    const cleanNo = (transferNo || "").trim();
+    if (!cleanNo) {
+      return res.status(400).json({ success: false, message: "Transfer Number is required for Excel export." });
+    }
+
+    const pool = await getPool(req);
+
+    // 1. Company info
+    const compRes = await pool.request().query("SELECT TOP 1 * FROM tblCompany");
+    const rawCompany = compRes.recordset[0] || {};
+    const companyName = String(findVal(rawCompany, 'Name', 'CompanyName') || 'SMART').trim();
+    const companyAddress = [
+      findVal(rawCompany, 'Address1'),
+      findVal(rawCompany, 'Address2'),
+      findVal(rawCompany, 'City'),
+      findVal(rawCompany, 'Country')
+    ].filter(Boolean).map(s => String(s).trim()).join(", ");
+
+    // 2. Header
+    const headerRes = await pool.request()
+      .input("TransferNo", sql.VarChar(50), cleanNo)
+      .query(`
+        SELECT TOP 1 *
+        FROM tblInventoryTransferHeader
+        WHERE RTRIM(LTRIM(CONVERT(VARCHAR(50), TransferNo))) = @TransferNo
+      `);
+
+    if (headerRes.recordset.length === 0) {
+      return res.status(404).json({ success: false, message: `Transfer Note not found for Transfer No: ${cleanNo}` });
+    }
+
+    const rawHeader = headerRes.recordset[0];
+    const header = {
+      transferNo: String(findVal(rawHeader, 'TransferNo') || cleanNo).trim(),
+      transferDate: findVal(rawHeader, 'TransferDate'),
+      fromLocation: String(findVal(rawHeader, 'FromLocation') || '').trim(),
+      toLocation: String(findVal(rawHeader, 'ToLocation') || '').trim(),
+      remarks: String(findVal(rawHeader, 'Remarks') || '').trim(),
+      totalWeight: parseFloat(findVal(rawHeader, 'TotalWeight', 'Totalweight') || 0),
+      totalPcs: parseInt(findVal(rawHeader, 'TotalPcs', 'TotalPCS') || 0, 10),
+      totalCost: parseFloat(findVal(rawHeader, 'TotalCost') || 0),
+      salesManCode: String(findVal(rawHeader, 'SalesManCode') || '').trim(),
+    };
+
+    // 3. Detail rows
+    let detailRes;
+    try {
+      detailRes = await pool.request()
+        .input("TransferNo", sql.VarChar(50), cleanNo)
+        .query(`
+          SELECT 
+            d.*,
+            ISNULL(RTRIM(i.SupplierCode), '') as InvSupplierCode
+          FROM tblInventoryTransferDetail d
+          LEFT JOIN tblInventory i ON RTRIM(LTRIM(CAST(d.InventoryCode AS VARCHAR(50)))) = RTRIM(LTRIM(CAST(i.InventoryCode AS VARCHAR(50))))
+          WHERE RTRIM(LTRIM(CONVERT(VARCHAR(50), d.TransferNo))) = @TransferNo
+          ORDER BY d.InventoryCode ASC
+        `);
+    } catch (eDet) {
+      detailRes = await pool.request()
+        .input("TransferNo", sql.VarChar(50), cleanNo)
+        .query(`
+          SELECT *
+          FROM tblInventoryTransferDetail
+          WHERE RTRIM(LTRIM(CONVERT(VARCHAR(50), TransferNo))) = @TransferNo
+          ORDER BY InventoryCode ASC
+        `);
+    }
+
+    const details = (detailRes.recordset || []).map(row => {
+      const rawSize = findVal(row, 'SizeCode', 'Size');
+      const sizeVal = rawSize !== null && rawSize !== undefined && !isNaN(parseFloat(rawSize)) ? parseFloat(rawSize) : 0;
+      const grossWeight = parseFloat(findVal(row, 'GrossWeight', 'Weight') || 0);
+      const netWeight = parseFloat(findVal(row, 'NetWeight', 'Weight') || 0);
+      const rawPcs = findVal(row, 'PCS', 'QtyOnHand', 'Qty');
+      const pcsVal = (rawPcs !== null && rawPcs !== undefined && rawPcs !== '') ? (parseInt(rawPcs, 10) || 0) : 0;
+      const totalCost = parseFloat(findVal(row, 'TotalCost') || 0);
+      const sCode = String(findVal(row, 'SupplierCode', 'InvSupplierCode') || '').trim();
+
+      return {
+        inventoryCode: String(findVal(row, 'InventoryCode') || '').trim(),
+        description: String(findVal(row, 'Description') || '').trim(),
+        size: sizeVal.toFixed(2),
+        supplierCode: sCode,
+        grossWeight: grossWeight,
+        netWeight: netWeight,
+        pcs: pcsVal,
+        totalCost: totalCost
+      };
+    });
+
+    // Dates
+    let transferDateFormatted = "-";
+    if (header.transferDate) {
+      const d = new Date(header.transferDate);
+      if (!isNaN(d.getTime())) {
+        transferDateFormatted = `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`;
+      }
+    }
+    const now = new Date();
+    const printTimeStr = `${String(now.getDate()).padStart(2, '0')}/${String(now.getMonth() + 1).padStart(2, '0')}/${now.getFullYear()} ${now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })}`;
+
+    const reportTitle = "TRANSFER OUT";
+
+    const totalGrossWeight = details.length > 0 ? details.reduce((sum, r) => sum + r.grossWeight, 0) : header.totalWeight;
+    const totalNetWeight = details.length > 0 ? details.reduce((sum, r) => sum + r.netWeight, 0) : header.totalWeight;
+    const totalPcs = details.length > 0 ? details.reduce((sum, r) => sum + r.pcs, 0) : header.totalPcs;
+    const totalCost = details.length > 0 ? details.reduce((sum, r) => sum + r.totalCost, 0) : header.totalCost;
+
+    const XLSX = require("xlsx");
+    const wb = XLSX.utils.book_new();
+    const rows = [];
+
+    rows.push([companyName]);
+    rows.push([companyAddress]);
+    rows.push([]);
+    rows.push([reportTitle]);
+    rows.push([`Printed: ${printTimeStr}`]);
+    rows.push([]);
+
+    // Two panels
+    rows.push(["TRANSFER DETAILS", "", "", "TRANSFER SPECIFICATION"]);
+    rows.push(["Transfer No:", header.transferNo, "", "Staff / Salesman:", header.salesManCode || "Staff"]);
+    rows.push(["Transfer Date:", transferDateFormatted, "", "Status:", "TRANSFER OUT"]);
+    rows.push(["From Location:", header.fromLocation, "", "Remarks:", header.remarks || "-"]);
+    rows.push(["To Location:", header.toLocation, "", "", ""]);
+    rows.push([]);
+
+    // Items table
+    rows.push(["#", "INVENTORY CODE", "DESCRIPTION", "SIZE", "SUPPLIER CODE", "GROSS WT (G)", "NET WT (G)", "PCS", "COST ($)"]);
+    details.forEach((it, idx) => {
+      rows.push([
+        idx + 1,
+        it.inventoryCode,
+        it.description,
+        it.size,
+        it.supplierCode,
+        Number(it.grossWeight.toFixed(3)),
+        Number(it.netWeight.toFixed(3)),
+        it.pcs > 0 ? it.pcs : "",
+        Number(it.totalCost.toFixed(2))
+      ]);
+    });
+    rows.push([]);
+
+    // Totals
+    rows.push(["", "", "", "", "TOTAL GROSS WEIGHT (G):", Number(totalGrossWeight.toFixed(3))]);
+    rows.push(["", "", "", "", "TOTAL NET WEIGHT (G):", Number(totalNetWeight.toFixed(3))]);
+    rows.push(["", "", "", "", "TOTAL PCS:", totalPcs]);
+    rows.push(["", "", "", "", "GRAND TOTAL COST ($):", Number(totalCost.toFixed(2))]);
+    rows.push([]);
+
+    // Signatures
+    rows.push(["PREPARED BY (STAFF)", "", "", "", "AUTHORIZED RECEIVER"]);
+    rows.push(["Staff Name:", (header.salesManCode || "Staff").trim(), "", "", "Receiver Name:", "-"]);
+    rows.push(["Signature:", "______________________", "", "", "Signature:", "______________________"]);
+    rows.push(["Date:", "______________________", "", "", "Date:", "______________________"]);
+    rows.push([]);
+    rows.push(["*** System Generated Report ***"]);
+    rows.push(["Powered by Unipro SG"]);
+
+    const ws = XLSX.utils.aoa_to_sheet(rows);
+    ws["!cols"] = [
+      { wch: 6 },
+      { wch: 18 },
+      { wch: 28 },
+      { wch: 10 },
+      { wch: 16 },
+      { wch: 15 },
+      { wch: 15 },
+      { wch: 8 },
+      { wch: 16 }
+    ];
+    XLSX.utils.book_append_sheet(wb, ws, "Transfer Out Voucher");
+
+    const excelBuffer = XLSX.write(wb, { type: "buffer", bookType: "xlsx" });
+    const downloadName = `Transfer_Out_${cleanNo.replace(/[^a-zA-Z0-9_\-]/g, "_")}.xlsx`;
+
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    res.setHeader("Content-Disposition", `attachment; filename="${downloadName}"`);
+    res.setHeader("Content-Length", excelBuffer.length);
+    return res.send(excelBuffer);
+  } catch (err) {
+    console.error("Transfer Out Export Excel Error:", err);
+    return res.status(500).json({ success: false, message: "Failed to generate Excel: " + err.message });
+  }
+});
+
 module.exports = router;

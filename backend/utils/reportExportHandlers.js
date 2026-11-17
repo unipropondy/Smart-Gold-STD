@@ -153,7 +153,8 @@ function handleExportExcel({ req, res, defaultTitle = "Report" }) {
     XLSX.utils.book_append_sheet(wb, ws, "Report");
 
     const excelBuffer = XLSX.write(wb, { type: "buffer", bookType: "xlsx" });
-    const safeTitle = (title || defaultTitle).replace(/[^a-zA-Z0-9_-]/g, "_");
+    const dateSuffix = (fromDate && toDate) ? `_${fromDate}_to_${toDate}`.replace(/[^a-zA-Z0-9_-]/g, "_") : (fromDate ? `_${fromDate}`.replace(/[^a-zA-Z0-9_-]/g, "_") : "");
+    const safeTitle = ((title || defaultTitle).replace(/[^a-zA-Z0-9_-]/g, "_") + dateSuffix);
 
     res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
     res.setHeader("Content-Disposition", `attachment; filename="${safeTitle}.xlsx"`);
@@ -190,7 +191,8 @@ async function handleExportPdf({ req, res, defaultTitle = "Report", orientation 
     });
 
     const pdfBuffer = await convertHtmlToPdf(html);
-    const safeTitle = (title || defaultTitle).replace(/[^a-zA-Z0-9_-]/g, "_");
+    const dateSuffix = (fromDate && toDate) ? `_${fromDate}_to_${toDate}`.replace(/[^a-zA-Z0-9_-]/g, "_") : (fromDate ? `_${fromDate}`.replace(/[^a-zA-Z0-9_-]/g, "_") : "");
+    const safeTitle = ((title || defaultTitle).replace(/[^a-zA-Z0-9_-]/g, "_") + dateSuffix);
 
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader("Content-Disposition", `attachment; filename="${safeTitle}.pdf"`);

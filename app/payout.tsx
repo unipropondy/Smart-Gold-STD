@@ -1,6 +1,8 @@
 /** Developer: durairaj */
 import { ThemedText } from '@/components/themed-text';
+import { PrintReportModal } from '@/components/PrintReportModal';
 import { API_BASE_URL } from '@/constants/api';
+import { getStandardReportCss, renderStandardReportFooter, renderStandardReportHeader } from '@/utils/standardPrintReport';
 import { UNIPRO_LOGO_DATA_URI } from '@/utils/uniproLogo';
 import { Ionicons } from '@expo/vector-icons';
 import { Stack, useFocusEffect, useRouter } from 'expo-router';
@@ -42,6 +44,11 @@ export default function PayOutScreen() {
   const [lovData, setLovData] = useState<any[]>([]);
   const [filteredLovData, setFilteredLovData] = useState<any[]>([]);
   const [lovSearch, setLovSearch] = useState('');
+
+  // Print Report Modal State
+  const [isPrintModalVisible, setIsPrintModalVisible] = useState(false);
+  const [printVoucherNo, setPrintVoucherNo] = useState('');
+  const [isReprintMode, setIsReprintMode] = useState(false);
 
   const showToast = (message: string, type: 'success' | 'error' = 'success') => {
     setToast({ message, type });
@@ -178,13 +185,14 @@ export default function PayOutScreen() {
       const json = await res.json();
       if (json.success) {
         showToast("PayOut detail saved successfully.", "success");
-        const savedPayoutNo = (json.payoutNo || json.data || '').trim();
-        // Automatic Print After Save matching frmPayOut.vb:
-        // subPrintBill(txtPayOutNo.Text.Trim)
-        if (savedPayoutNo !== '') {
-          subPrintBill(savedPayoutNo);
-        }
+        const savedPayoutNo = (json.payoutNo || json.data || payoutNo || '').trim();
         handleClear();
+        // Open Print Invoice confirmation popup after successful backend save
+        if (savedPayoutNo !== '') {
+          setPrintVoucherNo(savedPayoutNo);
+          setIsReprintMode(false);
+          setIsPrintModalVisible(true);
+        }
       } else {
         showToast(json.message || "Failed to save payout detail.", "error");
       }
@@ -195,12 +203,413 @@ export default function PayOutScreen() {
     }
   };
 
-  // Original Print Function matching subPrintBill(ByVal sInvoiceNo As String) in frmPayOut.vb
-  // Report: Reports/rptPayOut.rpt
-  // Selection: {tblPayoutdetail.PayOutNo} = @PayOutNo
-  // Formula Fields: CompAddress1, CompAddress2, CompAddress3
-  // Copy count: CR.PrintToPrinter(1, True, 0, 0)
-  const subPrintBill = async (sInvoiceNo: string) => {
+  // Helper to build standardized HTML for Payout Voucher
+  const buildPayoutVoucherHtml = (trimmedPayoutNo: string, isReprint: boolean, printData: any) => {
+    const { company, payout, payModes, rates } = printData;
+
+    // Singapore Date & Time
+    const now = new Date();
+    const sgTimeStr = now.toLocaleTimeString('en-US', {
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: true,
+    });
+
+    const formatDate = (val: any) => {
+      if (!val) return '-';
+      const d = new Date(val);
+      if (isNaN(d.getTime())) return String(val).split('T')[0] || '-';
+      return d.toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' });
+    };
+
+    const voucherDateFormatted = formatDate(payout.PayOutDate || payout.CreateDate);
+
+    // Company Information
+    const compName = (company.name || 'SMART').trim();
+    const compAddr1 = (company.address1 || '').trim();
+    const compAddr2 = [company.address2, company.city, company.country].filter(Boolean).join(' ');
+    const compContact = [
+      company.phone ? `Tel: ${company.phone}` : '',
+      company.fax ? `Fax: ${company.fax}` : ''
+    ].filter(Boolean).join(' | ');
+
+    // Daily Gold Rates
+    const s999 = rates?.rate999 ? parseFloat(rates.rate999).toFixed(2) : '190.00';
+    const s916 = rates?.rate916 ? parseFloat(rates.rate916).toFixed(2) : '176.00';
+    const s835 = rates?.rate835 && parseFloat(rates.rate835) > 0 ? parseFloat(rates.rate835).toFixed(2) : '-';
+
+    const pAmount = parseFloat(payout.Amount) || 0;
+    const disbursementText = payModes && payModes.length > 0
+      ? payModes.map((pm: any) => pm.payMode).join(', ')
+      : 'CASH';
+
+    const reportTitle = 'PAYOUT';
+    const docTitle = `Payout - ${trimmedPayoutNo}`;
+
+    return `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <meta charset="utf-8" />
+          <title>${docTitle}</title>
+          <style>
+            @page {
+              size: A4 portrait;
+              margin: 0 !important;
+            }
+            ${getStandardReportCss()}
+
+            @media print {
+              @page {
+                margin: 0 !important;
+              }
+              html, body {
+                width: 210mm !important;
+                height: 100% !important;
+                margin: 0 !important;
+                padding: 0 !important;
+                background: #FFFFFF !important;
+                -webkit-print-color-adjust: exact !important;
+                print-color-adjust: exact !important;
+              }
+              .page-sheet {
+                width: 210mm !important;
+                min-height: 297mm !important;
+                height: 297mm !important;
+                margin: 0 !important;
+                padding: 12mm 14mm !important;
+                box-shadow: none !important;
+                display: flex !important;
+                flex-direction: column !important;
+                justify-content: space-between !important;
+                box-sizing: border-box !important;
+                page-break-after: avoid !important;
+                break-after: avoid !important;
+              }
+            }
+
+            html, body {
+              height: 100%;
+              margin: 0;
+              padding: 0;
+            }
+
+            .page-sheet {
+              width: 210mm;
+              min-height: 297mm;
+              padding: 12mm 14mm;
+              display: flex;
+              flex-direction: column;
+              justify-content: space-between;
+              box-sizing: border-box;
+            }
+
+            .report-main-content {
+              flex-grow: 1;
+            }
+
+            .std-footer-container {
+              margin-top: auto !important;
+              padding-top: 14px !important;
+              page-break-inside: avoid !important;
+              break-inside: avoid !important;
+            }
+
+            /* Cambria Typography across all elements */
+            *, *:before, *:after, body, div, table, tr, th, td, span, p, h1, h2, h3, h4, h5, h6 {
+              font-family: 'Cambria', Georgia, 'Times New Roman', serif !important;
+            }
+
+            body {
+              font-family: 'Cambria', Georgia, 'Times New Roman', serif !important;
+            }
+
+            .std-company-name {
+              font-family: 'Cambria', Georgia, serif !important;
+              font-size: 24px !important;
+              font-weight: 800 !important;
+              letter-spacing: 2px !important;
+              color: #A37416 !important;
+            }
+
+            .std-company-address {
+              font-family: 'Cambria', Georgia, serif !important;
+              font-size: 11px !important;
+              font-weight: 700 !important;
+              color: #1A1A1A !important;
+              letter-spacing: 0.5px !important;
+            }
+
+            .std-report-title {
+              font-family: 'Cambria', Georgia, serif !important;
+              font-size: 22px !important;
+              font-weight: 800 !important;
+              letter-spacing: 1.5px !important;
+              color: #4A3511 !important;
+            }
+
+            .std-printed-time {
+              font-family: 'Cambria', Georgia, serif !important;
+              font-size: 11.5px !important;
+              font-weight: 700 !important;
+              color: #222222 !important;
+            }
+
+            /* GOLD RATES STRIP */
+            .gold-rate-strip {
+              display: flex;
+              justify-content: space-around;
+              background: #FAF8F5;
+              border: 1px solid #C49A45;
+              border-radius: 4px;
+              padding: 6px 12px;
+              margin-top: 6px;
+              margin-bottom: 12px;
+              font-size: 11px;
+              font-weight: 700;
+              color: #222222;
+            }
+            .rate-cell {
+              display: inline-flex;
+              align-items: center;
+              gap: 4px;
+            }
+            .rate-lbl {
+              color: #444444;
+            }
+            .rate-val {
+              color: #8C5D08;
+              font-weight: 800;
+            }
+
+            /* INFO GRID */
+            .info-grid {
+              display: grid;
+              grid-template-columns: 1fr 1fr;
+              gap: 16px;
+              margin-bottom: 14px;
+            }
+            .info-card {
+              border: 1px solid #C49A45;
+              background: #FAF8F5;
+              border-radius: 4px;
+              padding: 10px 14px;
+            }
+            .card-title {
+              font-size: 11.5px;
+              font-weight: 800;
+              color: #8C5D08;
+              border-bottom: 1px dotted #DDC89A;
+              padding-bottom: 5px;
+              margin-bottom: 8px;
+              text-transform: uppercase;
+              letter-spacing: 0.5px;
+            }
+            .info-row {
+              display: flex;
+              font-size: 11px;
+              margin-bottom: 3.5px;
+              line-height: 1.35;
+            }
+            .info-lbl {
+              width: 120px;
+              font-weight: 700;
+              color: #222222;
+              flex-shrink: 0;
+            }
+            .info-colon {
+              width: 15px;
+              font-weight: 700;
+              color: #222222;
+              text-align: center;
+              flex-shrink: 0;
+            }
+            .info-val {
+              color: #222222;
+              font-weight: 700;
+              flex-grow: 1;
+              word-break: break-word;
+            }
+
+            /* TOTAL AMOUNT PAID OUT BANNER */
+            .payout-banner {
+              background: #FAF8F5;
+              border: 1px solid #C49A45;
+              border-radius: 4px;
+              padding: 12px 18px;
+              text-align: center;
+              margin-bottom: 14px;
+            }
+            .payout-lbl {
+              font-size: 11px;
+              font-weight: 800;
+              color: #8C5D08;
+              letter-spacing: 1px;
+              text-transform: uppercase;
+              margin-bottom: 4px;
+            }
+            .payout-val {
+              font-size: 26px;
+              font-weight: 800;
+              color: #8C5D08;
+              margin-bottom: 3px;
+            }
+            .payout-sub {
+              font-size: 10.5px;
+              font-weight: 700;
+              color: #555555;
+              letter-spacing: 0.5px;
+            }
+
+            /* DETAIL TABLE */
+            .detail-table {
+              width: 100%;
+              border-collapse: collapse;
+              margin-top: 4px;
+              margin-bottom: 12px;
+              font-size: 11px;
+            }
+            .detail-table th {
+              background: #8C5D08;
+              color: #FFFFFF;
+              text-align: left;
+              padding: 6px 8px;
+              font-weight: 800;
+              border: 1px solid #734C06;
+              text-transform: uppercase;
+              font-size: 10px;
+              letter-spacing: 0.5px;
+            }
+            .detail-table td {
+              padding: 6px 8px;
+              border: 1px solid #D9C8A5;
+              background: #FFFFFF;
+              color: #222222;
+            }
+            .detail-table tr:nth-child(even) td {
+              background: #FAF8F5;
+            }
+
+            /* TOTALS SECTION */
+            .totals-section {
+              display: flex;
+              justify-content: flex-end;
+              margin-bottom: 14px;
+            }
+            .totals-box {
+              width: 290px;
+              border: 1px solid #C49A45;
+              background: #FAF8F5;
+              border-radius: 4px;
+              padding: 8px 12px;
+            }
+            .total-row {
+              display: flex;
+              justify-content: space-between;
+              font-size: 11.5px;
+              padding: 2.5px 0;
+              color: #222222;
+              font-weight: 700;
+            }
+            .total-row-grand {
+              border-top: 2px solid #8C5D08;
+              margin-top: 4px;
+              padding-top: 4px;
+              font-weight: 800;
+              font-size: 13.5px;
+              color: #8C5D08;
+            }
+          </style>
+        </head>
+        <body>
+          <div class="page-sheet">
+            <div class="report-main-content">
+              ${renderStandardReportHeader({
+                company: {
+                  name: compName,
+                  address: [compAddr1, compAddr2, compContact].filter(Boolean).join(' ')
+                },
+                reportTitle: reportTitle,
+                printedDateTime: `${voucherDateFormatted} ${sgTimeStr}`
+              })}
+
+              <!-- INFO GRID: Expense Classification & Voucher Audit Details -->
+              <div class="info-grid">
+                <!-- EXPENSE CLASSIFICATION -->
+                <div class="info-card">
+                  <div class="card-title">EXPENSE CLASSIFICATION</div>
+                  <div class="info-row"><span class="info-lbl">Expense Code</span><span class="info-colon">:</span><span class="info-val font-bold">${payout.Code || '-'}</span></div>
+                  <div class="info-row"><span class="info-lbl">Category</span><span class="info-colon">:</span><span class="info-val font-bold">${payout.Description || '-'}</span></div>
+                  <div class="info-row"><span class="info-lbl">Disbursement</span><span class="info-colon">:</span><span class="info-val font-bold">${disbursementText}</span></div>
+                </div>
+
+                <!-- VOUCHER AUDIT DETAILS -->
+                <div class="info-card">
+                  <div class="card-title">VOUCHER AUDIT DETAILS</div>
+                  <div class="info-row"><span class="info-lbl">Voucher No</span><span class="info-colon">:</span><span class="info-val font-bold">${payout.PayOutNo || trimmedPayoutNo}</span></div>
+                  <div class="info-row"><span class="info-lbl">Issued Date</span><span class="info-colon">:</span><span class="info-val font-bold">${voucherDateFormatted}</span></div>
+                  <div class="info-row"><span class="info-lbl">Processed By</span><span class="info-colon">:</span><span class="info-val">${payout.CreateUser || 'sys'}</span></div>
+                </div>
+              </div>
+
+              <!-- TOTAL AMOUNT PAID OUT SECTION -->
+              <div class="payout-banner">
+                <div class="payout-lbl">TOTAL AMOUNT PAID OUT</div>
+                <div class="payout-val">$ ${pAmount.toFixed(2)}</div>
+                <div class="payout-sub">SETTLED IN FULL VIA ${disbursementText}</div>
+              </div>
+
+              <!-- PAYOUT PARTICULARS & DETAILS TABLE -->
+              <table class="detail-table">
+                <thead>
+                  <tr>
+                    <th style="width: 6%; text-align: center;">#</th>
+                    <th style="width: 32%;">CODE / CATEGORY</th>
+                    <th style="width: 44%;">PAYOUT DESCRIPTION / PURPOSE</th>
+                    <th style="width: 18%; text-align: right;">AMOUNT ($)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td style="text-align: center; font-weight: 700;">1</td>
+                    <td style="font-weight: 700;">${payout.Code ? `${payout.Code} - ${payout.Description}` : payout.Description || '-'}</td>
+                    <td style="font-weight: 700;">${payout.PayOutDescription || payout.Remarks || payout.Description || '-'}</td>
+                    <td style="text-align: right; font-weight: 800; color: #8C5D08;">$ ${pAmount.toFixed(2)}</td>
+                  </tr>
+                </tbody>
+              </table>
+
+              <!-- PAYOUT TOTALS SECTION -->
+              <div class="totals-section">
+                <div class="totals-box">
+                  <div class="total-row">
+                    <span>Subtotal Payout:</span>
+                    <span>$ ${pAmount.toFixed(2)}</span>
+                  </div>
+                  <div class="total-row total-row-grand">
+                    <span>NET CASH DISBURSED:</span>
+                    <span>$ ${pAmount.toFixed(2)}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            ${renderStandardReportFooter({
+              staff: {
+                staffLabel: 'PREPARED BY (STAFF)',
+                staffName: (payout.CreateUser || 'sys').trim(),
+                receiverLabel: 'SUPPLIER / AUTHORIZED RECEIVER',
+                receiverName: '-'
+              }
+            })}
+          </div>
+        </body>
+      </html>
+    `;
+  };
+
+  // Original Print Function matching subPrintBill in frmPayOut.vb
+  const subPrintBill = async (sInvoiceNo: string, isReprint: boolean = false) => {
     const trimmedPayoutNo = (sInvoiceNo || '').trim();
     if (!trimmedPayoutNo) {
       return;
@@ -208,7 +617,6 @@ export default function PayOutScreen() {
 
     try {
       setLoading(true);
-
       const res = await fetch(`${API_URL}/payout/print-data?payoutNo=${encodeURIComponent(trimmedPayoutNo)}`);
       const json = await res.json();
 
@@ -218,515 +626,69 @@ export default function PayOutScreen() {
         return;
       }
 
-      const { company, payout, payModes, rates } = json.data;
+      const htmlContent = buildPayoutVoucherHtml(trimmedPayoutNo, isReprint, json.data);
+      const docTitle = isReprint ? `Payout Voucher (Duplicate) - ${trimmedPayoutNo}` : `Payout Voucher - ${trimmedPayoutNo}`;
 
-      // Singapore Date & Time
-      const now = new Date();
-      const sgDateStr = now.toLocaleDateString('en-GB', {
-        timeZone: 'Asia/Singapore',
-        day: '2-digit',
-        month: '2-digit',
-        year: 'numeric',
-      });
-      const sgTimeStr = now.toLocaleTimeString('en-US', {
-        timeZone: 'Asia/Singapore',
-        hour: '2-digit',
-        minute: '2-digit',
-        hour12: true,
-      });
-
-      // Original Formula Field Values from frmPayOut.vb:
-      // CompAddress1: sCompanyname
-      // CompAddress2: sAddress (Address1 & " " & Address2 & " " & Country)
-      // CompAddress3: sPhone & " " & sFax
-      const sCompanyName = (company.name || 'SMART').trim();
-      const sCompAddress2 = [company.address1, company.address2, company.country].filter(Boolean).join(' ');
-      const sCompAddress3 = [company.phone, company.fax].filter(Boolean).join(' ');
-
-      const s999 = rates?.rate999 || '-';
-      const s916 = rates?.rate916 || '-';
-      const s835 = rates?.rate835 || '-';
-
-      const payoutAmt = parseFloat(payout.Amount) || 0;
-
-      // Format date helper
-      const formatDate = (val: any) => {
-        if (!val) return '-';
-        const d = new Date(val);
-        if (isNaN(d.getTime())) return String(val).split('T')[0] || '-';
-        return d.toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' });
-      };
-
-      const voucherDateFormatted = formatDate(payout.PayOutDate || payout.CreateDate);
-
-      // Print HTML (1 single copy matching CR.PrintToPrinter(1, True, 0, 0))
-      const printHtml = `
-        <!DOCTYPE html>
-        <html>
-          <head>
-            <meta charset="utf-8" />
-            <title>PayOut Voucher - ${trimmedPayoutNo}</title>
-            <style>
-              @page {
-                size: A4 portrait;
-                margin: 0;
-              }
-              *, *:before, *:after {
-                box-sizing: border-box;
-              }
-              body {
-                font-family: 'Segoe UI', Tahoma, Arial, sans-serif;
-                margin: 0;
-                padding: 0;
-                background-color: #525659;
-                color: #222;
-                -webkit-print-color-adjust: exact;
-                print-color-adjust: exact;
-              }
-              .page-sheet {
-                background: #FFFFFF;
-                width: 210mm;
-                min-height: 297mm;
-                margin: 10mm auto;
-                padding: 12mm 15mm;
-                box-shadow: 0 4px 15px rgba(0, 0, 0, 0.35);
-                display: flex;
-                flex-direction: column;
-                justify-content: space-between;
-              }
-              .report-header {
-                display: flex;
-                justify-content: space-between;
-                align-items: flex-start;
-                border-bottom: 2px solid #8D6409;
-                padding-bottom: 8px;
-              }
-              .header-brand {
-                display: flex;
-                align-items: center;
-                gap: 12px;
-                max-width: 58%;
-              }
-              .brand-logo {
-                width: 55px;
-                height: 55px;
-                object-fit: contain;
-              }
-              .company-name {
-                font-size: 18px;
-                font-weight: 800;
-                color: #5C4A28;
-                letter-spacing: 0.5px;
-                text-transform: uppercase;
-              }
-              .company-address {
-                font-size: 10px;
-                color: #555;
-                line-height: 1.35;
-                margin-top: 2px;
-              }
-              .header-meta {
-                text-align: right;
-              }
-              .report-badge {
-                font-size: 13px;
-                font-weight: 800;
-                color: #8D6409;
-                letter-spacing: 0.6px;
-                text-transform: uppercase;
-              }
-              .copy-tag {
-                display: inline-block;
-                background: #FDF4D9;
-                color: #7D5E19;
-                font-size: 9px;
-                font-weight: 700;
-                padding: 2px 8px;
-                border-radius: 4px;
-                margin-top: 3px;
-                border: 1px solid #E6D29F;
-              }
-              .doc-no {
-                font-size: 12px;
-                font-weight: 700;
-                color: #111;
-                margin-top: 4px;
-              }
-              .doc-no span {
-                color: #8D6409;
-                font-family: monospace;
-                font-size: 13px;
-              }
-              .meta-date {
-                font-size: 10px;
-                color: #666;
-                margin-top: 2px;
-              }
-
-              /* GOLD RATE STRIP */
-              .gold-rate-strip {
-                display: flex;
-                justify-content: center;
-                align-items: center;
-                gap: 16px;
-                background: #FAF6EB;
-                border: 1px solid #E6D7AD;
-                padding: 5px 12px;
-                margin: 8px 0;
-                border-radius: 4px;
-                font-size: 10px;
-              }
-              .rate-lbl {
-                font-weight: 600;
-                color: #6E5316;
-              }
-              .rate-val {
-                font-weight: 800;
-                color: #222;
-                margin-left: 4px;
-              }
-              .rate-divider {
-                color: #D4C3A3;
-              }
-
-              /* TWO-COLUMN INFO */
-              .info-grid {
-                display: grid;
-                grid-template-columns: 1fr 1fr;
-                gap: 12px;
-                margin-bottom: 8px;
-              }
-              .info-card {
-                background: #FAF8F4;
-                border: 1px solid #E5DFD4;
-                border-radius: 4px;
-                padding: 8px 10px;
-              }
-              .card-title {
-                font-size: 10px;
-                font-weight: 700;
-                color: #7D5E19;
-                border-bottom: 1px solid #E5DFD4;
-                padding-bottom: 3px;
-                margin-bottom: 4px;
-                text-transform: uppercase;
-              }
-              .info-row {
-                font-size: 10px;
-                line-height: 1.4;
-                display: flex;
-              }
-              .info-lbl {
-                width: 32%;
-                color: #666;
-                font-weight: 500;
-              }
-              .info-val {
-                width: 68%;
-                color: #222;
-              }
-              .font-bold {
-                font-weight: 700;
-              }
-
-              /* CURRENT PAYOUT CARD */
-              .current-payout-card {
-                background: #FFF8E1;
-                border: 1.5px solid #FFE082;
-                border-radius: 6px;
-                padding: 10px 14px;
-                text-align: center;
-                margin: 6px 0 10px 0;
-              }
-              .payout-card-title {
-                font-size: 11px;
-                font-weight: 700;
-                color: #7D5E19;
-                letter-spacing: 0.5px;
-                text-transform: uppercase;
-              }
-              .payout-card-amount {
-                font-size: 24px;
-                font-weight: 800;
-                color: #B71C1C;
-                margin-top: 2px;
-                font-family: monospace;
-              }
-
-              .paymode-strip {
-                margin-top: 4px;
-                font-size: 10px;
-                color: #7D5E19;
-                font-weight: 600;
-              }
-
-              .section-heading {
-                font-size: 11px;
-                font-weight: 700;
-                color: #5C4A28;
-                text-transform: uppercase;
-                margin: 6px 0 4px 0;
-                border-bottom: 1px solid #D4C3A3;
-                padding-bottom: 2px;
-              }
-
-              /* TABLE */
-              .receipt-table {
-                width: 100%;
-                border-collapse: collapse;
-                margin-bottom: 8px;
-                font-size: 10px;
-              }
-              .receipt-table th {
-                background: #F1ECE0;
-                color: #4A3A1E;
-                font-weight: 700;
-                padding: 6px 8px;
-                border: 1px solid #D8CFC0;
-              }
-              .receipt-table td {
-                padding: 6px 8px;
-                border: 1px solid #E5DFD4;
-                color: #222;
-              }
-
-              /* SUMMARY */
-              .summary-box {
-                margin-left: auto;
-                width: 60%;
-                background: #FAF8F4;
-                border: 1px solid #E5DFD4;
-                border-radius: 4px;
-                padding: 8px 12px;
-                margin-bottom: 10px;
-              }
-              .summary-row {
-                display: flex;
-                justify-content: space-between;
-                font-size: 10px;
-                line-height: 1.6;
-              }
-              .summary-divider {
-                border-top: 1px dashed #C9BC9F;
-                margin: 4px 0;
-              }
-              .grand-total-row {
-                padding-top: 2px;
-              }
-
-              /* SIGNATURE */
-              .signature-section {
-                display: grid;
-                grid-template-columns: 1fr 1fr;
-                gap: 20px;
-                margin-top: 16px;
-              }
-              .sign-card {
-                border: 1px dashed #B8AB91;
-                border-radius: 4px;
-                padding: 8px 10px;
-                font-size: 10px;
-                background: #FFFEFC;
-              }
-              .sign-header {
-                font-weight: 700;
-                color: #5C4A28;
-                border-bottom: 1px solid #EDE6D8;
-                padding-bottom: 3px;
-                margin-bottom: 6px;
-                font-size: 9px;
-              }
-              .sign-row {
-                color: #333;
-                line-height: 1.4;
-              }
-
-              /* FOOTER */
-              .report-footer {
-                margin-top: 8px;
-                text-align: center;
-              }
-              .footer-divider {
-                border-top: 1px solid #E0D7C5;
-                margin-bottom: 4px;
-              }
-              .footer-gen-text {
-                font-size: 9px;
-                color: #777;
-                font-style: italic;
-              }
-              .footer-powered {
-                font-size: 8px;
-                color: #999;
-                margin-top: 1px;
-              }
-
-              @media print {
-                body {
-                  background: none !important;
-                }
-                .page-sheet {
-                  width: 100% !important;
-                  min-height: 297mm !important;
-                  height: 100% !important;
-                  margin: 0 !important;
-                  padding: 10mm 12mm !important;
-                  box-shadow: none !important;
-                  display: flex !important;
-                  flex-direction: column !important;
-                }
-              }
-            </style>
-          </head>
-          <body>
-            <div class="page-sheet">
-              <!-- BRAND / HEADER -->
-              <div class="report-header">
-                <div class="header-brand">
-                  <img src="${UNIPRO_LOGO_DATA_URI}" alt="Logo" class="brand-logo" />
-                  <div class="brand-details">
-                    <div class="company-name">${sCompanyName}</div>
-                    <div class="company-address">${sCompAddress2}</div>
-                    ${sCompAddress3 ? `<div class="company-address">${sCompAddress3}</div>` : ''}
-                  </div>
-                </div>
-                <div class="header-meta">
-                  <div class="report-badge">PAYOUT VOUCHER</div>
-                  <div class="copy-tag">OFFICIAL VOUCHER</div>
-                  <div class="doc-no">VOUCHER NO: <span>${trimmedPayoutNo}</span></div>
-                  <div class="meta-date">Date: ${voucherDateFormatted} &nbsp;|&nbsp; ${sgTimeStr}</div>
-                </div>
-              </div>
-
-              <!-- GOLD RATES BANNER -->
-              <div class="gold-rate-strip">
-                <div class="rate-cell"><span class="rate-lbl">Gold 999:</span> <span class="rate-val">$${s999}/g</span></div>
-                <div class="rate-divider">|</div>
-                <div class="rate-cell"><span class="rate-lbl">Gold 916 (22K):</span> <span class="rate-val">$${s916}/g</span></div>
-                <div class="rate-divider">|</div>
-                <div class="rate-cell"><span class="rate-lbl">Gold 835 (20K):</span> <span class="rate-val">$${s835}/g</span></div>
-              </div>
-
-              <!-- TWO-COLUMN INFO: PAYOUT EXPENSE & DISBURSEMENT DETAILS -->
-              <div class="info-grid">
-                <!-- Payout Category Card -->
-                <div class="info-card">
-                  <div class="card-title">EXPENSE CLASSIFICATION</div>
-                  <div class="info-row"><span class="info-lbl">Expense Code:</span> <span class="info-val font-bold">${payout.Code || '-'}</span></div>
-                  <div class="info-row"><span class="info-lbl">Category:</span> <span class="info-val">${payout.Description || '-'}</span></div>
-                  <div class="info-row"><span class="info-lbl">Disbursement:</span> <span class="info-val font-bold">${payModes.length > 0 ? payModes.map((p: any) => p.payMode).join(', ') : 'CASH'}</span></div>
-                </div>
-
-                <!-- Voucher Specification Card -->
-                <div class="info-card">
-                  <div class="card-title">VOUCHER AUDIT DETAILS</div>
-                  <div class="info-row"><span class="info-lbl">Voucher No:</span> <span class="info-val font-bold">${trimmedPayoutNo}</span></div>
-                  <div class="info-row"><span class="info-lbl">Issued Date:</span> <span class="info-val">${voucherDateFormatted}</span></div>
-                  <div class="info-row"><span class="info-lbl">Processed By:</span> <span class="info-val font-bold">${payout.CreateUser || 'sys'}</span></div>
-                </div>
-              </div>
-
-              <!-- CURRENT PAYOUT HIGHLIGHT CARD -->
-              <div class="current-payout-card">
-                <div class="payout-card-title">TOTAL AMOUNT PAID OUT</div>
-                <div class="payout-card-amount">$ ${payoutAmt.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
-                <div class="paymode-strip">SETTLED IN FULL VIA CASH</div>
-              </div>
-
-              <!-- PARTICULARS / EXPENSE BREAKDOWN TABLE -->
-              <div class="section-heading">PAYOUT PARTICULARS & DETAILS</div>
-              <table class="receipt-table">
-                <thead>
-                  <tr>
-                    <th style="width: 10%; text-align: center;">#</th>
-                    <th style="width: 25%; text-align: left;">Code / Category</th>
-                    <th style="width: 45%; text-align: left;">Payout Description / Purpose</th>
-                    <th style="width: 20%; text-align: right;">Amount ($)</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr>
-                    <td style="text-align: center;">1</td>
-                    <td style="text-align: left; font-weight: 600;">${payout.Code} - ${payout.Description}</td>
-                    <td style="text-align: left;">${payout.PayOutDescription || '-'}</td>
-                    <td style="text-align: right; font-weight: 700; color: #B71C1C;">$ ${payoutAmt.toFixed(2)}</td>
-                  </tr>
-                  ${
-                    payout.Remarks
-                      ? `
-                    <tr>
-                      <td style="text-align: center;">-</td>
-                      <td colspan="3" style="text-align: left; font-style: italic; color: #555;"><strong>Remarks:</strong> ${payout.Remarks}</td>
-                    </tr>
-                  `
-                      : ''
-                  }
-                </tbody>
-              </table>
-
-              <!-- SUMMARY BOX -->
-              <div class="summary-box">
-                <div class="summary-row">
-                  <span class="sum-lbl">Subtotal Payout:</span>
-                  <span class="sum-val">$ ${payoutAmt.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                </div>
-                <div class="summary-divider"></div>
-                <div class="summary-row grand-total-row">
-                  <span class="sum-lbl font-bold" style="font-size: 13px;">NET CASH DISBURSED:</span>
-                  <span class="sum-val font-bold" style="font-size: 15px; color: #B71C1C;">
-                    $ ${payoutAmt.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                  </span>
-                </div>
-              </div>
-
-              <!-- SIGNATURE SECTION -->
-              <div class="signature-section">
-                <div class="sign-card">
-                  <div class="sign-header">PREPARED BY (CASHIER / STAFF)</div>
-                  <div class="sign-row">Staff: ${payout.CreateUser || 'sys'}</div>
-                  <div class="sign-row" style="margin-top: 18px;">Signature: ....................................................</div>
-                </div>
-                <div class="sign-card">
-                  <div class="sign-header">RECEIVED BY / AUTHORIZED SIGNATORY</div>
-                  <div class="sign-row">Payee Name: ................................................</div>
-                  <div class="sign-row" style="margin-top: 18px;">Signature: ....................................................</div>
-                </div>
-              </div>
-
-              <!-- FOOTER -->
-              <div class="report-footer">
-                <div class="footer-divider"></div>
-                <div class="footer-gen-text">*** System Generated PayOut Voucher ***</div>
-                <div class="footer-powered">Powered by Unipro SG</div>
-              </div>
-            </div>
-
-            <script>
-              window.onload = function() {
-                setTimeout(function() {
-                  window.print();
-                }, 300);
-              };
-            </script>
-          </body>
-        </html>
+      const printScript = `
+        <script>
+          window.onload = function() {
+            setTimeout(function() {
+              window.print();
+            }, 300);
+          };
+        </script>
       `;
+      const printHtml = htmlContent.replace('</body>', `${printScript}</body>`);
 
       if (Platform.OS === 'web' && typeof window !== 'undefined') {
-        const printWindow = window.open('', '_blank', 'width=900,height=750');
-        if (printWindow) {
-          printWindow.document.open();
-          printWindow.document.write(printHtml);
-          printWindow.document.close();
-          showToast('PayOut voucher preview opened', 'success');
+        const frameId = '__payout_voucher_print_frame__';
+        let iframe = document.getElementById(frameId) as HTMLIFrameElement;
+        if (!iframe) {
+          iframe = document.createElement('iframe');
+          iframe.id = frameId;
+          iframe.style.position = 'fixed';
+          iframe.style.right = '0';
+          iframe.style.bottom = '0';
+          iframe.style.width = '0';
+          iframe.style.height = '0';
+          iframe.style.border = '0';
+          iframe.style.visibility = 'hidden';
+          document.body.appendChild(iframe);
+        }
+
+        const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
+        if (iframeDoc && iframe.contentWindow) {
+          iframeDoc.open();
+          iframeDoc.write(htmlContent);
+          iframeDoc.title = docTitle;
+          iframeDoc.close();
+
+          setTimeout(() => {
+            try {
+              iframe.contentWindow?.focus();
+              iframe.contentWindow?.print();
+              showToast(`PayOut voucher ${trimmedPayoutNo} print dialog opened`, 'success');
+            } catch (printErr) {
+              console.error('Iframe print error:', printErr);
+              const printWindow = window.open('', '_blank', 'width=900,height=750');
+              if (printWindow) {
+                printWindow.document.open();
+                printWindow.document.write(printHtml);
+                printWindow.document.title = docTitle;
+                printWindow.document.close();
+              }
+            }
+          }, 350);
         } else {
-          const blob = new Blob([printHtml], { type: 'text/html;charset=utf-8;' });
-          const url = URL.createObjectURL(blob);
-          const win = window.open(url, '_blank');
-          if (!win) {
-            showToast('Popup blocker prevented opening print preview. Please allow popups.', 'error');
+          const printWindow = window.open('', '_blank', 'width=900,height=750');
+          if (printWindow) {
+            printWindow.document.open();
+            printWindow.document.write(printHtml);
+            printWindow.document.title = docTitle;
+            printWindow.document.close();
+            showToast(`PayOut voucher ${trimmedPayoutNo} preview opened`, 'success');
           } else {
-            showToast('PayOut voucher preview opened', 'success');
+            showToast('Popup blocker prevented opening print preview. Please allow popups.', 'error');
           }
         }
       } else {
@@ -741,13 +703,122 @@ export default function PayOutScreen() {
     }
   };
 
+  // Dedicated PDF Download Functionality
+  const handleDownloadPdf = async (sInvoiceNo?: string, isReprint: boolean = false) => {
+    const trimmedPayoutNo = (sInvoiceNo || payoutNo || '').trim();
+    if (!trimmedPayoutNo) {
+      showToast('Validation Error: PayOut No is required to download PDF', 'error');
+      return;
+    }
+
+    try {
+      setLoading(true);
+      const res = await fetch(`${API_URL}/payout/print-data?payoutNo=${encodeURIComponent(trimmedPayoutNo)}`);
+      const json = await res.json();
+
+      if (!json.success || !json.data) {
+        showToast(json.message || `PayOut voucher "${trimmedPayoutNo}" not found`, 'error');
+        return;
+      }
+
+      const htmlContent = buildPayoutVoucherHtml(trimmedPayoutNo, isReprint, json.data);
+      const downloadFilename = `Payout_Voucher_${trimmedPayoutNo.replace(/[^a-zA-Z0-9_-]/g, '_')}.pdf`;
+
+      const pdfRes = await fetch(`${API_URL}/payout/export-pdf`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          html: htmlContent,
+          filename: downloadFilename
+        })
+      });
+
+      if (!pdfRes.ok) {
+        throw new Error('Server returned error while generating PDF');
+      }
+
+      const pdfBlob = await pdfRes.blob();
+
+      if (Platform.OS === 'web' && typeof window !== 'undefined') {
+        const url = URL.createObjectURL(pdfBlob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = downloadFilename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+        showToast(`Payout Voucher PDF downloaded: ${downloadFilename}`, 'success');
+      } else {
+        showToast('PDF generated successfully.', 'success');
+      }
+    } catch (err: any) {
+      console.error('PDF Export Error:', err);
+      showToast('Failed to download PDF: ' + (err.message || 'Error'), 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Dedicated Excel Download Functionality
+  const handleDownloadExcel = async (sInvoiceNo?: string, isReprint: boolean = false) => {
+    const trimmedPayoutNo = (sInvoiceNo || payoutNo || '').trim();
+    if (!trimmedPayoutNo) {
+      showToast('Validation Error: PayOut No is required to download Excel', 'error');
+      return;
+    }
+
+    try {
+      setLoading(true);
+      const excelRes = await fetch(`${API_URL}/payout/export-excel`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          payoutNo: trimmedPayoutNo,
+          isReprint: isReprint
+        })
+      });
+
+      if (!excelRes.ok) {
+        const errJson = await excelRes.json().catch(() => ({}));
+        throw new Error(errJson.message || 'Server error generating Excel file');
+      }
+
+      const excelBlob = await excelRes.blob();
+      const downloadFilename = `Payout_Voucher_${trimmedPayoutNo.replace(/[^a-zA-Z0-9_-]/g, '_')}.xlsx`;
+
+      if (Platform.OS === 'web' && typeof window !== 'undefined') {
+        const url = URL.createObjectURL(excelBlob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = downloadFilename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+        showToast(`Payout Voucher Excel downloaded: ${downloadFilename}`, 'success');
+      } else {
+        showToast('Excel file generated successfully.', 'success');
+      }
+    } catch (err: any) {
+      console.error('Excel Export Error:', err);
+      showToast('Failed to download Excel: ' + (err.message || 'Error'), 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   // Original VB.NET btnPrint_Click:
   // If txtPayOutNo.Text.Trim <> "" Then
   //     subPrintBill(txtPayOutNo.Text.Trim)
   // End If
   const handlePrint = () => {
     if (payoutNo.trim() !== '') {
-      subPrintBill(payoutNo.trim());
+      setPrintVoucherNo(payoutNo.trim());
+      setIsReprintMode(true);
+      setIsPrintModalVisible(true);
+    } else {
+      showToast('Please enter or select a PayOut Voucher No', 'error');
     }
   };
 
@@ -770,7 +841,7 @@ export default function PayOutScreen() {
         </View>
 
         <View style={styles.headerRight}>
-          {/* Print */}
+          {/* Reprint / Print */}
           <TouchableOpacity
             style={[styles.actionBtn, styles.clearBtn]}
             onPress={handlePrint}
@@ -778,7 +849,7 @@ export default function PayOutScreen() {
             disabled={loading}
           >
             <Ionicons name="print-outline" size={14} color="#5C4A28" />
-            <ThemedText style={styles.clearBtnText}>Print</ThemedText>
+            <ThemedText style={styles.clearBtnText}>Reprint</ThemedText>
           </TouchableOpacity>
 
           {/* New / Clear */}
@@ -984,6 +1055,42 @@ export default function PayOutScreen() {
           </TouchableWithoutFeedback>
         </TouchableOpacity>
       </Modal>
+
+      {/* PRINT INVOICE CONFIRMATION POPUP */}
+      <PrintReportModal
+        visible={isPrintModalVisible}
+        title="Print Invoice"
+        message="Do you want to print ?"
+        loading={loading}
+        onCancel={() => {
+          setIsPrintModalVisible(false);
+          setPrintVoucherNo('');
+        }}
+        onPdf={() => {
+          const vNo = printVoucherNo || payoutNo;
+          setIsPrintModalVisible(false);
+          setPrintVoucherNo('');
+          if (vNo) {
+            handleDownloadPdf(vNo, isReprintMode);
+          }
+        }}
+        onExcel={() => {
+          const vNo = printVoucherNo || payoutNo;
+          setIsPrintModalVisible(false);
+          setPrintVoucherNo('');
+          if (vNo) {
+            handleDownloadExcel(vNo, isReprintMode);
+          }
+        }}
+        onPrint={() => {
+          const vNo = printVoucherNo || payoutNo;
+          setIsPrintModalVisible(false);
+          setPrintVoucherNo('');
+          if (vNo) {
+            subPrintBill(vNo, isReprintMode);
+          }
+        }}
+      />
 
       {/* TOAST ALERT */}
       {toast && (

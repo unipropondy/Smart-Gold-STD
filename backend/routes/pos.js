@@ -1711,6 +1711,283 @@ router.get("/print-data", async (req, res) => {
   }
 });
 
+// ================= EXPORT PDF ENDPOINT =================
+// POST /api/pos/export-pdf
+router.post("/export-pdf", async (req, res) => {
+  try {
+    const { html, filename } = req.body;
+    if (!html) {
+      return res.status(400).json({ success: false, message: "HTML content is required for PDF export." });
+    }
+
+    const { convertHtmlToPdf } = require("../utils/htmlToPdf");
+    const pdfBuffer = await convertHtmlToPdf(html);
+    const downloadName = (filename || "Tax_Invoice.pdf").replace(/[^a-zA-Z0-9_\-\.]/g, "_");
+
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `attachment; filename="${downloadName}"`);
+    res.setHeader("Content-Length", pdfBuffer.length);
+    return res.send(pdfBuffer);
+  } catch (err) {
+    console.error("POS Export PDF Error:", err);
+    return res.status(500).json({ success: false, message: "Failed to generate PDF: " + err.message });
+  }
+});
+
+// ================= EXPORT EXCEL ENDPOINT =================
+// POST /api/pos/export-excel
+router.post("/export-excel", async (req, res) => {
+  try {
+    const { invoiceNo, isReprint } = req.body;
+    const rawInvoiceNo = (invoiceNo || "").trim();
+    if (!rawInvoiceNo) {
+      return res.status(400).json({ success: false, message: "Invoice Number is required." });
+    }
+
+    const pool = req.pool;
+
+    // Fetch Company Info
+    const compRes = await pool.request().query("SELECT TOP 1 * FROM tblCompany");
+    const compRow = compRes.recordset[0] || {};
+    const companyName = (compRow.Name || "SMART").trim();
+    const companyAddress = [compRow.Address1, compRow.Address2, compRow.City, compRow.Country].filter(Boolean).map(s => String(s).trim()).join(" ");
+
+    // Fetch Header
+    const headerRes = await pool.request()
+      .input("InvoiceNo", sql.VarChar, rawInvoiceNo)
+      .query(`
+        SELECT TOP 1 
+          h.*,
+          c.CustomerName AS CustMasterName,
+          c.Address1 AS CustAddress1,
+          c.Address2 AS CustAddress2,
+          c.Address3 AS CustAddress3,
+          c.CustomerType AS CustType,
+          c.NricNo AS CustNricNo,
+          sm.SalesManName
+        FROM tblSalesHeader h
+        LEFT JOIN tblCustomer c ON RTRIM(h.CustomerCode) = RTRIM(c.CustomerCode)
+        LEFT JOIN tblSalesMan sm ON RTRIM(h.SalesManCode) = RTRIM(sm.SalesManCode)
+        WHERE RTRIM(h.InvoiceNo) = RTRIM(@InvoiceNo)
+      `);
+
+    if (headerRes.recordset.length === 0) {
+      return res.status(404).json({ success: false, message: `Invoice No "${rawInvoiceNo}" not found.` });
+    }
+
+    const header = headerRes.recordset[0];
+
+    let finalCustName = "";
+    if (header.CustMasterName) {
+      finalCustName = Array.isArray(header.CustMasterName) ? header.CustMasterName[0] : header.CustMasterName;
+    } else if (header.CustomerName) {
+      finalCustName = Array.isArray(header.CustomerName) ? header.CustomerName[0] : header.CustomerName;
+    } else {
+      finalCustName = header.CustomerCode || "CASH CUSTOMER";
+    }
+
+    const custAddress = [header.CustAddress1 || header.Address1, header.CustAddress2 || header.Address2, header.CustAddress3 || header.Address3].filter(Boolean).map(s => String(s).trim()).join(", ") || "-";
+
+    // Fetch Items
+    const itemsRes = await pool.request()
+      .input("InvoiceNo", sql.VarChar, rawInvoiceNo)
+      .query(`
+        SELECT d.*
+        FROM tblSalesDetail d
+        WHERE RTRIM(d.InvoiceNo) = RTRIM(@InvoiceNo)
+        ORDER BY d.SortCode ASC, d.InventoryCode ASC
+      `);
+    const items = itemsRes.recordset || [];
+
+    // Fetch Payments
+    const payRes = await pool.request()
+      .input("InvoiceNo", sql.VarChar, rawInvoiceNo)
+      .query(`
+        SELECT *
+        FROM tblPayModeDetail
+        WHERE RTRIM(InvoiceNo) = RTRIM(@InvoiceNo)
+        ORDER BY PayMode ASC
+      `);
+    const payments = payRes.recordset || [];
+
+    // Daily Rates
+    let rate999 = "-";
+    let rate916 = "-";
+    let rate835 = "-";
+    try {
+      const salesDate = header.InvoiceDate ? new Date(header.InvoiceDate) : new Date();
+      const rateRes = await pool.request()
+        .input("SalesDate", sql.DateTime, salesDate)
+        .query(`
+          SELECT ClassCode, ISNULL(Rate, 0.00) AS Rate
+          FROM tblClassRate
+          WHERE @SalesDate BETWEEN FromDate AND ToDate
+          ORDER BY ClassCode
+        `);
+      for (const row of rateRes.recordset) {
+        const code = (row.ClassCode || "").trim().toUpperCase();
+        const rVal = parseFloat(row.Rate) || 0;
+        const formatted = rVal.toFixed(2);
+        if (code === "22K" || code === "916" || code === "22K-916") rate916 = formatted;
+        if (code === "999" || code === "24K" || code === "24K-999") rate999 = formatted;
+        if (code === "SILVER" || code === "835") rate835 = formatted;
+      }
+    } catch (_) {}
+
+    // Format Dates
+    let invoiceDateFormatted = "";
+    if (header.InvoiceDate) {
+      const d = new Date(header.InvoiceDate);
+      if (!isNaN(d.getTime())) {
+        invoiceDateFormatted = `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}/${d.getFullYear()}`;
+      }
+    }
+    const now = new Date();
+    const printTimeStr = `${String(now.getDate()).padStart(2, "0")}/${String(now.getMonth() + 1).padStart(2, "0")}/${now.getFullYear()} ${now.toLocaleTimeString()}`;
+
+    // Financial totals
+    const totalWeight = parseFloat(header.TotalWeight) || items.reduce((acc, it) => acc + (parseFloat(it.Weight) || 0), 0);
+    const totalPCS = parseInt(header.TotalPCS) || items.reduce((acc, it) => acc + (parseInt(it.PCS) || 0), 0);
+    const totalSMC = parseFloat(header.TotalSMC) || items.reduce((acc, it) => acc + (parseFloat(it.SMC) || 0), 0);
+    const netTotalVal = parseFloat(header.NetTotal) || parseFloat(header.TotalValue) || 0;
+    const paidAmtVal = parseFloat(header.PaidAmt) || 0;
+    const balanceAmtVal = parseFloat(header.BalanceAmt) || 0;
+    const gstAmtVal = parseFloat(header.GST) || 0;
+
+    const reportTitle = "POS";
+
+    const XLSX = require("xlsx");
+    const wb = XLSX.utils.book_new();
+
+    const rows = [
+      // Company Information
+      ["COMPANY NAME", companyName],
+      ["COMPANY ADDRESS", companyAddress],
+      [],
+      // Invoice Information
+      ["REPORT NAME", reportTitle],
+      ["PRINTED DATE & TIME", printTimeStr],
+      ["INVOICE NUMBER", rawInvoiceNo],
+      ["INVOICE DATE", invoiceDateFormatted || "-"],
+      ["CUSTOMER NAME", String(finalCustName).trim()],
+      ["CUSTOMER ADDRESS", custAddress],
+      ["SALESMAN", (header.SalesManName || header.SalesManCode || "-").trim()],
+      ["LOCATION", (header.LocationCode || "HQ").trim()],
+      ["SALES TYPE", (header.SalesType || "CASH").trim()],
+      [],
+      // Inventory Items Table Header (8 columns A-H)
+      ["#", "ITEM CODE", "DESCRIPTION", "PCS", "WEIGHT (G)", "RATE / G", "SMC", "AMOUNT ($)"]
+    ];
+
+    const itemStartRow = rows.length + 1;
+
+    items.forEach((it, idx) => {
+      const code = (it.InventoryCode || "").trim();
+      const desc = (it.Description || "").trim();
+      const pcs = parseInt(it.PCS) || 1;
+      const wt = parseFloat(it.Weight) || 0;
+      const rate = parseFloat(it.Rate || it.DailyRate) || 0;
+      const smc = parseFloat(it.SMC) || 0;
+      const amount = parseFloat(it.NetAmount || it.TotalValue) || 0;
+
+      rows.push([
+        idx + 1,
+        code,
+        desc,
+        pcs,
+        Number(wt.toFixed(2)),
+        Number(rate.toFixed(2)),
+        Number(smc.toFixed(2)),
+        Number(amount.toFixed(2))
+      ]);
+    });
+
+    const itemEndRow = rows.length;
+
+    // Payments & Totals Section
+    rows.push(
+      [],
+      ["PAYMENT BREAKDOWN", "", "", "", "", "INVOICE TOTALS", "", ""]
+    );
+
+    const paymentRows = payments.map(p => [
+      (p.PayMode || "").trim(),
+      Number(parseFloat(p.Amount || 0).toFixed(2))
+    ]);
+
+    const totalSummaryRows = [
+      ["Total PCS:", totalPCS, ""],
+      ["Total Weight (g):", Number(totalWeight.toFixed(2)), "g"],
+      ["Total SMC:", Number(totalSMC.toFixed(2)), "$"],
+      ["GST (9%):", Number(gstAmtVal.toFixed(2)), "$"],
+      ["Net Total:", Number(netTotalVal.toFixed(2)), "$"],
+      ["Paid Amount:", Number(paidAmtVal.toFixed(2)), "$"],
+      ["Balance Due:", Number(balanceAmtVal.toFixed(2)), "$"]
+    ];
+
+    const maxSideRows = Math.max(paymentRows.length, totalSummaryRows.length);
+    for (let i = 0; i < maxSideRows; i++) {
+      const pay = paymentRows[i] || ["", ""];
+      const tot = totalSummaryRows[i] || ["", "", ""];
+      rows.push([
+        pay[0],
+        pay[1],
+        "",
+        "",
+        "",
+        tot[0],
+        tot[1],
+        tot[2]
+      ]);
+    }
+
+    rows.push(
+      [],
+      // Staff / Receiver Information
+      ["PREPARED BY (STAFF)", (header.SalesManName || header.SalesManCode || "Staff").trim()],
+      ["AUTHORIZED RECEIVER", String(finalCustName).trim()]
+    );
+
+    const ws = XLSX.utils.aoa_to_sheet(rows);
+
+    // Set precise column widths matching content
+    ws["!cols"] = [
+      { wch: 8 },   // Col A: # / Section Labels
+      { wch: 22 },  // Col B: Item Code / Values
+      { wch: 32 },  // Col C: Description
+      { wch: 10 },  // Col D: PCS
+      { wch: 15 },  // Col E: Weight (G)
+      { wch: 16 },  // Col F: Rate /g / Total Labels
+      { wch: 15 },  // Col G: SMC / Total Values
+      { wch: 16 }   // Col H: Amount ($) / Units
+    ];
+
+    // Format numeric cells in item rows
+    if (items.length > 0) {
+      for (let r = itemStartRow; r <= itemEndRow; r++) {
+        if (ws[`D${r}`]) ws[`D${r}`].z = "#,##0";
+        if (ws[`E${r}`]) ws[`E${r}`].z = "#,##0.00";
+        if (ws[`F${r}`]) ws[`F${r}`].z = "$#,##0.00";
+        if (ws[`G${r}`]) ws[`G${r}`].z = "$#,##0.00";
+        if (ws[`H${r}`]) ws[`H${r}`].z = "$#,##0.00";
+      }
+    }
+
+    XLSX.utils.book_append_sheet(wb, ws, "Tax Invoice");
+
+    const excelBuffer = XLSX.write(wb, { type: "buffer", bookType: "xlsx" });
+    const downloadName = `Tax_Invoice_${rawInvoiceNo}.xlsx`;
+
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    res.setHeader("Content-Disposition", `attachment; filename="${downloadName}"`);
+    res.setHeader("Content-Length", excelBuffer.length);
+    return res.send(excelBuffer);
+  } catch (err) {
+    console.error("POS Export Excel Error:", err);
+    return res.status(500).json({ success: false, message: "Failed to generate Excel: " + err.message });
+  }
+});
+
 // ================= GET INVOICE BY NO =================
 router.get("/:invoiceNo", async (req, res) => {
   try {

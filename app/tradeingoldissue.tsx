@@ -1,6 +1,8 @@
 import { ThemedText } from '@/components/themed-text';
+import { PrintReportModal } from '@/components/PrintReportModal';
 import { API_BASE_URL } from '@/constants/api';
 import { useThemeColors } from '@/hooks/useThemeColors';
+import { getStandardReportCss, renderStandardReportFooter, renderStandardReportHeader } from '@/utils/standardPrintReport';
 import { UNIPRO_LOGO_DATA_URI } from '@/utils/uniproLogo';
 import { Ionicons } from '@expo/vector-icons';
 import { Stack, useRouter } from 'expo-router';
@@ -61,6 +63,11 @@ export default function TradeInGoldIssueScreen() {
   const [lovVisible, setLovVisible] = useState(false);
   const [lovData, setLovData] = useState<any[]>([]);
   const [lovSearch, setLovSearch] = useState('');
+
+  // Standardized Print Report Modal state
+  const [isPrintModalVisible, setIsPrintModalVisible] = useState(false);
+  const [activePrintInvoiceNo, setActivePrintInvoiceNo] = useState('');
+  const [activePrintIsReprint, setActivePrintIsReprint] = useState(false);
 
   // Summary
   const salesAmount = 0.0;
@@ -251,14 +258,10 @@ export default function TradeInGoldIssueScreen() {
         setInvoiceNo(assignedInvoiceNo);
         showToast(data.message || 'Trade-in Saved Successfully', 'success');
 
-        // Automatically prompt to print matching VB.NET subPrintBill after save
-        setTimeout(() => {
-          if (Platform.OS === 'web' && typeof window !== 'undefined') {
-            if (window.confirm('Do you want to print Trade-In Voucher?')) {
-              handlePrint(assignedInvoiceNo);
-            }
-          }
-        }, 500);
+        // Automatically prompt with standard PrintReportModal confirmation after save
+        setActivePrintInvoiceNo(assignedInvoiceNo);
+        setActivePrintIsReprint(false);
+        setIsPrintModalVisible(true);
       } else {
         showToast(data.message || 'Save failed', 'error');
       }
@@ -271,726 +274,746 @@ export default function TradeInGoldIssueScreen() {
 
   const combinedAddress = [address1, address2, address3].filter(Boolean).join(' ');
 
-  // Print Trade-In Voucher Functionality
-  const handlePrint = async (targetInvoiceNo?: string) => {
-    // 1. Validation (matching original VB.NET frmTradeInOnly & frmTradeInIssue)
+  // Helper to retrieve trade-in print data either from backend or from active on-screen inputs
+  const fetchPrintData = async (targetInvoiceNo?: string) => {
     const tNo = (targetInvoiceNo || invoiceNo || '').trim();
-
-    // If no voucher number saved yet, check if there is an active assessment on screen
     const hasUnsavedItems = gridData.length > 0 && customerCode.trim() !== '';
 
-    if (!tNo && !hasUnsavedItems) {
-      showToast('Please enter/save a Trade-In Voucher or enter customer & items to print.', 'error');
-      return;
+    let company: any = { name: '', address1: '', address2: '', city: '', state: '', country: '', phone: '', fax: '' };
+    let header: any = null;
+    let details: any[] = [];
+    let rates: any = { rate999: '-', rate916: '-', rate835: '-', rate22k: '-' };
+
+    let fetchSuccess = false;
+
+    if (tNo && tNo !== 'TI-DRAFT' && tNo !== 'DRAFT') {
+      try {
+        const res = await fetch(`${API_URL}/print-data?invoiceNo=${encodeURIComponent(tNo)}`);
+        const cType = res.headers.get('content-type') || '';
+        if (res.ok && cType.includes('application/json')) {
+          const json = await res.json();
+          if (json.success && json.data) {
+            company = json.data.company || company;
+            header = json.data.header;
+            details = json.data.details || [];
+            rates = json.data.rates || rates;
+            fetchSuccess = true;
+          }
+        }
+      } catch (e) {
+        console.warn('Dedicated print-data fetch error:', e);
+      }
     }
 
-    try {
-      setLoading(true);
-
-      let company: any = { name: '', address1: '', address2: '', city: '', state: '', country: '', phone: '', fax: '' };
-      let header: any = null;
-      let details: any[] = [];
-      let rates: any = { rate999: '', rate916: '', rate835: '', rate22k: '' };
-
-      // 2. Fetch actual data from backend SQL Server
-      let fetchSuccess = false;
-
-      if (tNo) {
-        try {
-          const res = await fetch(`${API_URL}/print-data?invoiceNo=${encodeURIComponent(tNo)}`);
-          const cType = res.headers.get('content-type') || '';
-          if (res.ok && cType.includes('application/json')) {
-            const json = await res.json();
-            if (json.success && json.data) {
-              company = json.data.company || company;
-              header = json.data.header;
-              details = json.data.details || [];
-              rates = json.data.rates || rates;
-              fetchSuccess = true;
-            }
-          }
-        } catch (eDedicated) {
-          console.warn('Dedicated print-data fetch error:', eDedicated);
-        }
-      }
-
-      // If no saved voucher found in DB but user has current on-screen assessment, use current on-screen data
-      if (!fetchSuccess && hasUnsavedItems) {
-        // Query company info fallback
-        try {
-          const compRes = await fetch(`${API_BASE_URL}/company`).then(r => r.json()).catch(() => null);
-          if (compRes?.success && Array.isArray(compRes.data) && compRes.data.length > 0) {
-            const c = compRes.data[0];
-            company = {
-              name: (c.Name || c.CompanyName || '').trim(),
-              address1: (c.Address1 || '').trim(),
-              address2: (c.Address2 || '').trim(),
-              city: (c.City || '').trim(),
-              state: (c.State || '').trim(),
-              country: (c.Country || '').trim(),
-              phone: (c.Phone || '').trim(),
-              fax: (c.Fax || '').trim(),
-            };
-          }
-        } catch (eComp) {}
-
-        let totalWt = 0;
-        let totalLoss = 0;
-        let totalSt = 0;
-        let totalAmt = 0;
-
-        const mappedDet = gridData.map((item, idx) => {
-          const wt = parseFloat(item.weight) || 0;
-          const loss = parseFloat(item.goldLoss) || 0;
-          const st = parseFloat(item.stoneWeight) || 0;
-          const cost = parseFloat(item.totalCost) || 0;
-          totalWt += wt;
-          totalLoss += loss;
-          totalSt += st;
-          totalAmt += cost;
-
-          return {
-            itemNo: idx + 1,
-            description: item.description || '',
-            diamondDescription: item.stoneDescription || '',
-            weight: wt,
-            stoneWeight: st,
-            goldLoss: loss,
-            costPerGram: parseFloat(item.costPerGram) || 0,
-            totalCost: cost,
-            class: item.class || selectedClass || '',
-            remarks: '',
+    if (!fetchSuccess && hasUnsavedItems) {
+      try {
+        const compRes = await fetch(`${API_BASE_URL}/company`).then(r => r.json()).catch(() => null);
+        if (compRes?.success && Array.isArray(compRes.data) && compRes.data.length > 0) {
+          const c = compRes.data[0];
+          company = {
+            name: (c.Name || c.CompanyName || '').trim(),
+            address1: (c.Address1 || '').trim(),
+            address2: (c.Address2 || '').trim(),
+            city: (c.City || '').trim(),
+            state: (c.State || '').trim(),
+            country: (c.Country || '').trim(),
+            phone: (c.Phone || '').trim(),
+            fax: (c.Fax || '').trim(),
           };
-        });
-
-        header = {
-          inventoryCode: tNo || 'TI-DRAFT',
-          invoiceNo: tNo || 'DRAFT',
-          customerCode: customerCode.trim(),
-          customerName: customerName.trim(),
-          address1: address1.trim(),
-          address2: address2.trim(),
-          address3: address3.trim(),
-          costPerGram: parseFloat(costPerGram) || 0,
-          totalWeight: totalWt,
-          totalGoldLoss: totalLoss,
-          totalStoneWeight: totalSt,
-          totalPCS: mappedDet.length,
-          totalCost: totalAmt,
-          amount: totalAmt,
-          remarks: remarks.trim(),
-          date: new Date(),
-        };
-
-        details = mappedDet;
-        fetchSuccess = true;
-      }
-
-      if (!fetchSuccess || !header) {
-        showToast('Trade-in record not found for: ' + (tNo || 'active voucher'), 'error');
-        setLoading(false);
-        return;
-      }
-
-      // Singapore Print Date & Time (Asia/Singapore)
-      const now = new Date();
-      const sgDateStr = now.toLocaleDateString('en-GB', {
-        timeZone: 'Asia/Singapore',
-        day: '2-digit',
-        month: '2-digit',
-        year: 'numeric',
-      });
-      const sgTimeStr = now.toLocaleTimeString('en-US', {
-        timeZone: 'Asia/Singapore',
-        hour: '2-digit',
-        minute: '2-digit',
-        hour12: true,
-      });
-      const printTimestamp = `Printed: ${sgDateStr}, ${sgTimeStr}`;
-
-      // Voucher Date
-      let voucherDateFormatted = '';
-      if (header.date) {
-        const vd = new Date(header.date);
-        if (!isNaN(vd.getTime())) {
-          voucherDateFormatted = `${String(vd.getDate()).padStart(2, '0')}/${String(vd.getMonth() + 1).padStart(2, '0')}/${vd.getFullYear()}`;
         }
-      }
-      if (!voucherDateFormatted) {
-        voucherDateFormatted = sgDateStr;
-      }
+      } catch (_) {}
 
-      // Totals calculation
-      const totalGrossWeight = details.reduce((sum, r) => sum + (Number(r.weight) || 0), 0);
-      const totalGoldLossSum = details.reduce((sum, r) => sum + (Number(r.goldLoss) || 0), 0);
-      const totalStoneWtSum = details.reduce((sum, r) => sum + (Number(r.stoneWeight) || 0), 0);
-      const totalCostSum = details.reduce((sum, r) => sum + (Number(r.totalCost) || 0), 0);
+      let totalWt = 0;
+      let totalLoss = 0;
+      let totalSt = 0;
+      let totalAmt = 0;
 
-      const rowsHtml = details
-        .map(
-          (item: any, idx: number) => `
-          <tr>
-            <td style="text-align: center; font-weight: 700;">${item.itemNo || (idx + 1)}</td>
-            <td style="text-align: left; font-weight: 600;">${item.description || ''}</td>
-            <td style="text-align: center; font-weight: 700;">${item.class || '22K'}</td>
-            <td style="text-align: right;">${Number(item.weight || 0).toFixed(3)}</td>
-            <td style="text-align: right;">${Number(item.stoneWeight || 0).toFixed(3)}</td>
-            <td style="text-align: right;">${Number(item.goldLoss || 0).toFixed(3)}</td>
-            <td style="text-align: right;">$ ${Number(item.costPerGram || 0).toFixed(2)}</td>
-            <td style="text-align: right; font-weight: 700;">$ ${Number(item.totalCost || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-          </tr>`
-        )
-        .join('');
+      const mappedDet = gridData.map((item, idx) => {
+        const wt = parseFloat(item.weight) || 0;
+        const loss = parseFloat(item.goldLoss) || 0;
+        const st = parseFloat(item.stoneWeight) || 0;
+        const cost = parseFloat(item.totalCost) || 0;
+        totalWt += wt;
+        totalLoss += loss;
+        totalSt += st;
+        totalAmt += cost;
 
-      const companyName = (company.name || 'SMART GOLD').trim();
-      const compAddress = [company.address1, company.address2, company.city, company.state, company.country].filter(Boolean).join(', ');
-      const compPhone = (company.phone || '').trim();
-      const companyLogo = UNIPRO_LOGO_DATA_URI;
-      const custAddress = [header.address1, header.address2, header.address3].filter(Boolean).join(', ');
+        return {
+          itemNo: idx + 1,
+          description: item.description || '',
+          diamondDescription: item.stoneDescription || item.diamondDescription || '',
+          weight: wt,
+          stoneWeight: st,
+          goldLoss: loss,
+          costPerGram: parseFloat(item.costPerGram) || 0,
+          totalCost: cost,
+          class: item.class || selectedClass || '22K',
+          remarks: '',
+        };
+      });
 
-      const printHtml = `
-        <!DOCTYPE html>
-        <html>
-          <head>
-            <meta charset="utf-8" />
-            <title>Trade-In Voucher - ${header.invoiceNo || header.inventoryCode}</title>
-            <style>
+      header = {
+        inventoryCode: tNo || 'TI-DRAFT',
+        invoiceNo: tNo || 'DRAFT',
+        customerCode: customerCode.trim(),
+        customerName: customerName.trim(),
+        address1: address1.trim(),
+        address2: address2.trim(),
+        address3: address3.trim(),
+        costPerGram: parseFloat(costPerGram) || 0,
+        totalWeight: totalWt,
+        totalGoldLoss: totalLoss,
+        totalStoneWeight: totalSt,
+        totalPCS: mappedDet.length,
+        totalCost: totalAmt,
+        amount: totalAmt,
+        remarks: remarks.trim(),
+        date: new Date(),
+      };
+
+      details = mappedDet;
+      fetchSuccess = true;
+    }
+
+    return { success: fetchSuccess, company, header, details, rates, targetNo: tNo };
+  };
+
+  // Standardized Cambria HTML report builder
+  const buildTradeInGoldIssueHtml = (targetInvoiceNo: string, isReprint: boolean, printData: any) => {
+    const { company, header, details, rates } = printData || {};
+
+    const now = new Date();
+    const sgTimeStr = now.toLocaleTimeString('en-US', {
+      timeZone: 'Asia/Singapore',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: true,
+    });
+
+    const sCompanyName = (company?.name || 'SMART').trim();
+    const sCompAddress2 = [company?.address1, company?.address2, company?.country].filter(Boolean).join(' ');
+    const sCompAddress3 = [company?.phone, company?.fax].filter(Boolean).join(' ');
+
+    const sCustomerName = (header?.customerName || customerName || '').trim();
+    const sCustomerCode = (header?.customerCode || customerCode || '').trim();
+    const sCustomerAddress = [
+      header?.address1 || address1,
+      header?.address2 || address2,
+      header?.address3 || address3,
+    ].filter(Boolean).map((s: string) => String(s).trim()).join(' ');
+
+    const s999 = rates?.rate999 || '-';
+    const s916 = rates?.rate916 || rates?.rate22k || '-';
+    const s835 = rates?.rate835 || '-';
+
+    const formatDate = (val: any) => {
+      if (!val) return '-';
+      const d = new Date(val);
+      if (isNaN(d.getTime())) return String(val).split('T')[0] || '-';
+      return d.toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' });
+    };
+
+    const voucherDateFormatted = formatDate(header?.date || new Date());
+    const sReportTitle = 'TRADE-IN GOLD ISSUE';
+
+    const totalGrossWeight = (details || []).reduce((sum: number, r: any) => sum + (Number(r.weight) || 0), 0);
+    const totalGoldLossSum = (details || []).reduce((sum: number, r: any) => sum + (Number(r.goldLoss) || 0), 0);
+    const totalStoneWtSum = (details || []).reduce((sum: number, r: any) => sum + (Number(r.stoneWeight) || 0), 0);
+    const totalCostSum = (details || []).reduce((sum: number, r: any) => sum + (Number(r.totalCost) || 0), 0);
+
+    const sInvoiceNo = (header?.invoiceNo || header?.inventoryCode || targetInvoiceNo || '').trim();
+
+    const generatePageMarkup = (copyLabel: string) => `
+      <div class="page-sheet">
+        <div class="report-main-content">
+          ${renderStandardReportHeader({
+            company: {
+              name: sCompanyName,
+              address: [sCompAddress2, sCompAddress3].filter(Boolean).join(' ')
+            },
+            reportTitle: `${sReportTitle} (${copyLabel})`,
+            printedDateTime: `${voucherDateFormatted} ${sgTimeStr}`
+          })}
+
+          <!-- TWO-COLUMN INFO: CUSTOMER vs TRADE-IN VOUCHER -->
+          <div class="info-grid">
+            <div class="info-card">
+              <div class="card-title">CUSTOMER INFORMATION</div>
+              <table class="info-table">
+                <tr>
+                  <td class="lbl">Customer</td>
+                  <td class="colon">:</td>
+                  <td class="val font-bold">${sCustomerName || 'CASH CUSTOMER'}</td>
+                </tr>
+                <tr>
+                  <td class="lbl">Cust Code</td>
+                  <td class="colon">:</td>
+                  <td class="val">${sCustomerCode || '-'}</td>
+                </tr>
+                <tr>
+                  <td class="lbl">Address</td>
+                  <td class="colon">:</td>
+                  <td class="val">${sCustomerAddress || '-'}</td>
+                </tr>
+              </table>
+            </div>
+
+            <div class="info-card">
+              <div class="card-title">TRADE-IN VOUCHER DETAILS</div>
+              <table class="info-table">
+                <tr>
+                  <td class="lbl">Voucher No</td>
+                  <td class="colon">:</td>
+                  <td class="val font-bold">${sInvoiceNo}</td>
+                </tr>
+                <tr>
+                  <td class="lbl">Voucher Date</td>
+                  <td class="colon">:</td>
+                  <td class="val">${voucherDateFormatted}</td>
+                </tr>
+                <tr>
+                  <td class="lbl">Purity / Class</td>
+                  <td class="colon">:</td>
+                  <td class="val font-bold">${(details && details[0]?.class) || selectedClass || '22K'}</td>
+                </tr>
+                <tr>
+                  <td class="lbl">Status</td>
+                  <td class="colon">:</td>
+                  <td class="val font-bold">ISSUED</td>
+                </tr>
+                <tr>
+                  <td class="lbl">Remarks</td>
+                  <td class="colon">:</td>
+                  <td class="val">${header?.remarks || remarks || '-'}</td>
+                </tr>
+              </table>
+            </div>
+          </div>
+
+          <!-- CURRENT SUMMARY HIGHLIGHT CARD -->
+          <div class="current-payment-card">
+            <div class="payment-title">TOTAL TRADE-IN SETTLEMENT VALUE</div>
+            <div class="payment-amount">$ ${totalCostSum.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+          </div>
+
+          <!-- TRADE-IN ITEMS TABLE -->
+          <div class="table-section-title">ASSESSED TRADE-IN ITEMS & VALUATION</div>
+          <table class="detail-table">
+            <thead>
+              <tr>
+                <th style="width: 5%; text-align: center;">#</th>
+                <th style="width: 27%; text-align: left;">ITEM DESCRIPTION</th>
+                <th style="width: 12%; text-align: center;">PURITY / CLASS</th>
+                <th style="width: 12%; text-align: right;">GROSS WT (G)</th>
+                <th style="width: 12%; text-align: right;">STONE WT (G)</th>
+                <th style="width: 10%; text-align: right;">LOSS (G)</th>
+                <th style="width: 10%; text-align: right;">RATE / G ($)</th>
+                <th style="width: 12%; text-align: right;">TOTAL COST ($)</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${(details && details.length > 0)
+                ? details.map((item: any, idx: number) => `
+                  <tr>
+                    <td style="text-align: center; font-weight: 700;">${item.itemNo || idx + 1}</td>
+                    <td style="text-align: left; font-weight: 700;">${(item.description || 'Trade-In Item').trim()}</td>
+                    <td style="text-align: center; font-weight: 700;">${item.class || '22K'}</td>
+                    <td style="text-align: right; font-weight: 700;">${parseFloat(item.weight || 0).toFixed(3)}</td>
+                    <td style="text-align: right;">${parseFloat(item.stoneWeight || 0).toFixed(3)}</td>
+                    <td style="text-align: right;">${parseFloat(item.goldLoss || 0).toFixed(3)}</td>
+                    <td style="text-align: right;">$ ${parseFloat(item.costPerGram || 0).toFixed(2)}</td>
+                    <td style="text-align: right; font-weight: 800; color: #8C5D08;">$ ${parseFloat(item.totalCost || 0).toFixed(2)}</td>
+                  </tr>
+                `).join('')
+                : `
+                  <tr>
+                    <td style="text-align: center; font-weight: 700;">1</td>
+                    <td style="text-align: left; font-weight: 700;">TRADE-IN GOLD ITEMS</td>
+                    <td style="text-align: center; font-weight: 700;">22K</td>
+                    <td style="text-align: right; font-weight: 700;">0.000</td>
+                    <td style="text-align: right;">0.000</td>
+                    <td style="text-align: right;">0.000</td>
+                    <td style="text-align: right;">$ 0.00</td>
+                    <td style="text-align: right; font-weight: 800; color: #8C5D08;">$ ${totalCostSum.toFixed(2)}</td>
+                  </tr>
+                `
+              }
+            </tbody>
+          </table>
+
+          <!-- SUMMARY FINANCIAL BALANCES -->
+          <div class="totals-section">
+            <div class="totals-box">
+              <div class="total-row">
+                <span>Total Gross Weight:</span>
+                <span>${totalGrossWeight.toFixed(3)} g</span>
+              </div>
+              <div class="total-row">
+                <span>Total Stone Weight:</span>
+                <span>${totalStoneWtSum.toFixed(3)} g</span>
+              </div>
+              <div class="total-row">
+                <span>Total Gold Loss:</span>
+                <span>${totalGoldLossSum.toFixed(3)} g</span>
+              </div>
+              <div class="total-row total-row-grand">
+                <span>TOTAL SETTLEMENT VALUE:</span>
+                <span>$ ${totalCostSum.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        ${renderStandardReportFooter({
+          staff: {
+            staffLabel: 'PREPARED BY (STAFF)',
+            staffName: 'Staff',
+            receiverLabel: 'SUPPLIER / AUTHORIZED RECEIVER',
+            receiverName: (sCustomerName || '-').trim()
+          }
+        })}
+      </div>
+    `;
+
+    const printPagesHtml = `
+      ${generatePageMarkup('CUSTOMER COPY')}
+      ${generatePageMarkup('OFFICE COPY')}
+    `;
+
+    return `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <meta charset="utf-8" />
+          <title>${sReportTitle} - ${sInvoiceNo}</title>
+          <style>
+            @page {
+              size: A4 portrait;
+              margin: 0 !important;
+            }
+            ${getStandardReportCss()}
+
+            @media print {
               @page {
-                size: A4 portrait;
                 margin: 0 !important;
               }
               html, body {
-                margin: 0;
-                padding: 0;
-                background-color: #f7f5f0;
-                font-family: Cambria, Georgia, "Times New Roman", serif !important;
-                color: #3b2d17;
+                width: 210mm !important;
+                height: 100% !important;
+                margin: 0 !important;
+                padding: 0 !important;
+                background: #FFFFFF !important;
                 -webkit-print-color-adjust: exact !important;
                 print-color-adjust: exact !important;
               }
               .page-sheet {
-                width: 210mm;
-                min-height: 297mm;
-                margin: 15px auto;
-                background: #ffffff;
-                padding: 10mm 12mm;
-                box-sizing: border-box;
-                display: flex;
-                flex-direction: column;
-                font-family: Cambria, Georgia, "Times New Roman", serif !important;
-                box-shadow: 0 4px 14px rgba(0,0,0,0.08);
+                width: 210mm !important;
+                min-height: 297mm !important;
+                height: 297mm !important;
+                margin: 0 !important;
+                padding: 12mm 14mm !important;
+                box-shadow: none !important;
+                display: flex !important;
+                flex-direction: column !important;
+                justify-content: space-between !important;
+                box-sizing: border-box !important;
+                page-break-after: always !important;
+                break-after: page !important;
               }
+              .page-sheet:last-child {
+                page-break-after: auto !important;
+                break-after: auto !important;
+              }
+            }
 
-              /* HEADER SECTION */
-              .header-row {
-                display: flex;
-                justify-content: space-between;
-                align-items: center;
-                margin-bottom: 6px;
-                position: relative;
-              }
-              .header-left {
-                width: 140px;
-                display: flex;
-                align-items: center;
-              }
-              .header-left img.unipro-logo-img {
-                max-height: 48px;
-                max-width: 135px;
-                object-fit: contain;
-                display: block;
-              }
-              .header-center {
-                flex: 1;
-                text-align: center;
-                padding: 0 10px;
-              }
-              .company-title {
-                font-family: Cambria, Georgia, "Times New Roman", serif !important;
-                font-size: 26px;
-                font-weight: 700;
-                color: #996515;
-                letter-spacing: 2px;
-                text-transform: uppercase;
-                margin-bottom: 3px;
-                line-height: 1.15;
-              }
-              .company-address {
-                font-family: Cambria, Georgia, "Times New Roman", serif !important;
-                font-size: 11px;
-                color: #4a3b22;
-                font-weight: 700;
-                letter-spacing: 0.5px;
-                text-transform: uppercase;
-              }
-              .header-right {
-                width: 140px;
-                text-align: right;
-                font-size: 11px;
-                color: #705832;
-                font-weight: 600;
-              }
-              .header-right table {
-                float: right;
-                font-size: 10.5px;
-                border-collapse: collapse;
-              }
-              .header-right td {
-                padding: 1px 3px;
-              }
-              .header-ornament {
-                text-align: center;
-                margin: 6px 0 10px 0;
-                color: #d4a742;
-                font-size: 14px;
-                position: relative;
-              }
-              .header-ornament::before,
-              .header-ornament::after {
-                content: "";
-                position: absolute;
-                top: 50%;
-                width: calc(50% - 18px);
-                height: 1.5px;
-                background: #d4a742;
-              }
-              .header-ornament::before { left: 0; }
-              .header-ornament::after { right: 0; }
+            html, body {
+              height: 100%;
+              margin: 0;
+              padding: 0;
+            }
 
-              /* REPORT TITLE AREA */
-              .report-title-area {
-                text-align: center;
-                margin-bottom: 12px;
-              }
-              .report-main-title {
-                font-family: Cambria, Georgia, "Times New Roman", serif !important;
-                font-size: 20px;
-                font-weight: 700;
-                color: #3b2d17;
-                letter-spacing: 1px;
-                text-transform: uppercase;
-                margin-bottom: 4px;
-              }
-              .report-sub-info {
-                font-family: Cambria, Georgia, "Times New Roman", serif !important;
-                font-size: 11.5px;
-                color: #705832;
-                font-weight: 600;
-                margin-bottom: 2px;
-              }
-              .report-period-line {
-                font-family: Cambria, Georgia, "Times New Roman", serif !important;
-                font-size: 11.5px;
-                color: #705832;
-                font-weight: 600;
-                margin-top: 3px;
-              }
+            .page-sheet {
+              width: 210mm;
+              min-height: 297mm;
+              padding: 12mm 14mm;
+              display: flex;
+              flex-direction: column;
+              justify-content: space-between;
+              box-sizing: border-box;
+            }
 
-              /* META CARD */
-              .meta-card-container {
-                display: flex;
-                flex-direction: column;
-                gap: 8px;
-                margin-bottom: 14px;
-              }
-              .meta-info-card {
-                display: flex;
-                justify-content: space-between;
-                background: #fffbf2;
-                border: 1px solid #d4a742;
-                border-radius: 6px;
-                padding: 8px 14px;
-                font-size: 11.5px;
-              }
-              .meta-item {
-                display: flex;
-                flex-direction: column;
-              }
-              .meta-label {
-                font-size: 10px;
-                font-weight: 700;
-                color: #705832;
-                text-transform: uppercase;
-                letter-spacing: 0.5px;
-                margin-bottom: 2px;
-              }
-              .meta-val {
-                font-size: 12px;
-                font-weight: 700;
-                color: #996515;
-              }
+            .report-main-content {
+              flex-grow: 1;
+            }
 
-              /* DETAIL TABLE */
-              .table-container {
-                width: 100%;
-                overflow: hidden;
-                margin-bottom: 10px;
-              }
-              table.report-table {
-                width: 100% !important;
-                border-collapse: collapse;
-                font-family: Cambria, Georgia, "Times New Roman", serif !important;
-                font-size: 11px;
-                border: 0.75px solid #d4a742;
-              }
-              table.report-table thead th {
-                background-color: #996515 !important;
-                color: #ffffff !important;
-                font-weight: 700 !important;
-                font-family: Cambria, Georgia, "Times New Roman", serif !important;
-                padding: 7px 6px;
-                letter-spacing: 0.4px;
-                border: 0.75px solid #d4a742;
-                font-size: 11px;
-                line-height: 1.2;
-                text-align: center !important;
-                text-transform: uppercase !important;
-              }
-              table.report-table tbody td {
-                padding: 6px 6px;
-                color: #3b2d17;
-                font-family: Cambria, Georgia, "Times New Roman", serif !important;
-                border: 0.75px solid #f0d9a0;
-                font-size: 11px;
-                line-height: 1.25;
-              }
-              table.report-table tbody tr:nth-child(even) td {
-                background-color: #fffbf2 !important;
-              }
-              table.report-table tbody tr:nth-child(odd) td {
-                background-color: #ffffff !important;
-              }
-              table.report-table tr.item-total-row td,
-              table.report-table tr.grand-total-row td {
-                background-color: #fff8e7 !important;
-                font-weight: 700 !important;
-                font-family: Cambria, Georgia, "Times New Roman", serif !important;
-                color: #996515 !important;
-                border: 0.75px solid #d4a742 !important;
-                border-top: 1.5px solid #d4a742 !important;
-                border-bottom: 1.5px solid #d4a742 !important;
-                padding: 7px 6px;
-                font-size: 11px;
-              }
+            .std-footer-container {
+              margin-top: auto !important;
+              padding-top: 14px !important;
+              page-break-inside: avoid !important;
+              break-inside: avoid !important;
+            }
 
-              /* REMARKS */
-              .remarks-box {
-                margin-top: 12px;
-                font-size: 11.5px;
-                font-weight: 700;
-                color: #4a3b22;
-                padding: 6px 10px;
-                background-color: #fffdf8;
-                border-left: 3px solid #996515;
-              }
+            *, *:before, *:after, body, div, table, tr, th, td, span, p, h1, h2, h3, h4, h5, h6 {
+              font-family: 'Cambria', Georgia, 'Times New Roman', serif !important;
+            }
 
-              /* SIGNATURE SECTION */
-              .signature-section {
-                margin-top: 30px;
-                width: 100%;
-                display: flex;
-                justify-content: space-between;
-                font-size: 11px;
-                page-break-inside: avoid;
-                break-inside: avoid;
-              }
-              .sign-card {
-                width: 48%;
-                border: 1px solid #d4a742;
-                border-radius: 6px;
-                background-color: #ffffff;
-                padding: 10px 14px;
-                box-sizing: border-box;
-              }
-              .sign-header {
-                font-size: 11.5px;
-                font-weight: 700;
-                color: #996515;
-                text-transform: uppercase;
-                margin-bottom: 10px;
-                border-bottom: 1px dashed #d4a742;
-                padding-bottom: 4px;
-              }
-              .sign-row {
-                margin-bottom: 8px;
-                color: #4a3b22;
-                font-size: 11px;
-                white-space: nowrap;
-              }
+            /* GOLD RATES BANNER */
+            .gold-rate-strip {
+              display: flex;
+              justify-content: space-around;
+              background: #FAF8F5;
+              border: 1px solid #C49A45;
+              border-radius: 4px;
+              padding: 6px 12px;
+              margin-top: 6px;
+              margin-bottom: 12px;
+              font-size: 11px;
+              font-weight: 700;
+              color: #222222;
+            }
+            .rate-cell span.rate-lbl {
+              color: #222222;
+              font-weight: 700;
+            }
+            .rate-cell span.rate-val {
+              color: #8C5D08;
+              font-weight: 800;
+              margin-left: 4px;
+            }
 
-              /* FOOTER */
-              .report-footer {
-                margin-top: auto !important;
-                text-align: center;
-                padding-top: 14px;
-                padding-bottom: 2mm;
-                page-break-inside: avoid;
-                break-inside: avoid;
-              }
-              .footer-divider {
-                width: 100%;
-                height: 1.5px;
-                background: #d4a742;
-                margin-bottom: 10px;
-              }
-              .footer-gen-text {
-                font-size: 11px;
-                color: #705832;
-                font-weight: 600;
-                margin-bottom: 3px;
-              }
-              .footer-powered {
-                font-size: 12px;
-                color: #996515;
-                font-weight: 700;
-              }
+            /* TWO-COLUMN INFO */
+            .info-grid {
+              display: grid;
+              grid-template-columns: 1fr 1fr;
+              gap: 16px;
+              margin-bottom: 12px;
+            }
+            .info-card {
+              border: 1px solid #C49A45;
+              background: #FAF8F5;
+              border-radius: 4px;
+              padding: 10px 14px;
+            }
+            .card-title {
+              font-size: 11.5px;
+              font-weight: 800;
+              color: #8C5D08;
+              border-bottom: 1px dotted #DDC89A;
+              padding-bottom: 5px;
+              margin-bottom: 8px;
+              text-transform: uppercase;
+              letter-spacing: 0.5px;
+            }
+            .info-table {
+              width: 100%;
+              border-collapse: collapse;
+              font-size: 11px;
+            }
+            .info-table td {
+              padding: 2px 0;
+              vertical-align: top;
+              line-height: 1.35;
+            }
+            .info-table .lbl {
+              width: 130px;
+              font-weight: 700;
+              color: #222222;
+            }
+            .info-table .colon {
+              width: 15px;
+              font-weight: 700;
+              color: #222222;
+              text-align: center;
+            }
+            .info-table .val {
+              color: #222222;
+              font-weight: 700;
+              word-break: break-word;
+            }
+            .font-bold {
+              font-weight: 800;
+            }
 
-              /* TOOLBAR */
-              .print-toolbar {
-                position: fixed;
-                top: 16px;
-                right: 20px;
-                z-index: 1000;
-              }
-              .btn-action {
-                background: #996515;
-                color: #fff;
-                border: none;
-                padding: 9px 20px;
-                font-family: Cambria, Georgia, serif;
-                font-size: 12px;
-                font-weight: 700;
-                border-radius: 6px;
-                cursor: pointer;
-                box-shadow: 0 4px 12px rgba(153, 101, 21, 0.25);
-              }
-              .btn-action:hover {
-                background: #7a5408;
-              }
+            /* CURRENT HIGHLIGHT CARD */
+            .current-payment-card {
+              background: #FAF8F5;
+              border: 1px solid #C49A45;
+              border-radius: 4px;
+              padding: 10px 16px;
+              text-align: center;
+              margin-bottom: 12px;
+            }
+            .payment-title {
+              font-size: 11px;
+              font-weight: 800;
+              color: #8C5D08;
+              letter-spacing: 0.8px;
+              text-transform: uppercase;
+              margin-bottom: 2px;
+            }
+            .payment-amount {
+              font-size: 24px;
+              font-weight: 800;
+              color: #8C5D08;
+              letter-spacing: 1px;
+            }
 
-              @media print {
-                @page {
-                  margin: 0 !important;
-                  size: A4 portrait;
-                }
-                html, body {
-                  background: #fff !important;
-                  padding: 0 !important;
-                  margin: 0 !important;
-                  height: 100% !important;
-                }
-                .print-toolbar {
-                  display: none !important;
-                }
-                .page-sheet {
-                  width: 100% !important;
-                  min-height: 297mm !important;
-                  height: 100% !important;
-                  margin: 0 !important;
-                  padding: 10mm 12mm 10mm 12mm !important;
-                  box-shadow: none !important;
-                  box-sizing: border-box !important;
-                  display: flex !important;
-                  flex-direction: column !important;
-                }
-                table.report-table {
-                  page-break-inside: auto;
-                }
-                tr {
-                  page-break-inside: avoid;
-                  break-inside: avoid;
-                }
-                thead {
-                  display: table-header-group;
-                }
-                tfoot {
-                  display: table-footer-group;
-                }
-                .signature-section {
-                  page-break-inside: avoid;
-                  break-inside: avoid;
-                }
-                .report-footer {
-                  margin-top: auto !important;
-                  page-break-inside: avoid !important;
-                  break-inside: avoid !important;
-                  padding-bottom: 4mm !important;
-                }
-              }
-            </style>
-          </head>
-          <body>
-            <div class="print-toolbar">
-              <button class="btn-action" onclick="window.print()">Print Report</button>
-            </div>
+            /* TABLE */
+            .table-section-title {
+              font-size: 11px;
+              font-weight: 800;
+              color: #8C5D08;
+              text-transform: uppercase;
+              letter-spacing: 0.5px;
+              margin-bottom: 6px;
+            }
+            .detail-table {
+              width: 100%;
+              border-collapse: collapse;
+              margin-bottom: 12px;
+              font-size: 10.5px;
+            }
+            .detail-table th {
+              background: #8C5D08;
+              color: #FFFFFF;
+              text-align: left;
+              padding: 6px 8px;
+              font-weight: 800;
+              border: 1px solid #734C06;
+              text-transform: uppercase;
+              font-size: 10px;
+              letter-spacing: 0.5px;
+            }
+            .detail-table td {
+              padding: 6px 8px;
+              border: 1px solid #D9C8A5;
+              background: #FFFFFF;
+              color: #222222;
+            }
+            .detail-table tr:nth-child(even) td {
+              background: #FAF8F5;
+            }
 
-            <div class="page-sheet">
-              <!-- HEADER -->
-              <div class="header-row">
-                <div class="header-left">
-                  <img src="${companyLogo}" alt="UNIPRO" class="unipro-logo-img" />
-                </div>
+            /* TOTALS SECTION */
+            .totals-section {
+              display: flex;
+              justify-content: flex-end;
+              margin-bottom: 14px;
+            }
+            .totals-box {
+              width: 330px;
+              border: 1px solid #C49A45;
+              background: #FAF8F5;
+              border-radius: 4px;
+              padding: 8px 12px;
+            }
+            .total-row {
+              display: flex;
+              justify-content: space-between;
+              font-size: 11.5px;
+              padding: 2.5px 0;
+              color: #222222;
+              font-weight: 700;
+            }
+            .total-row-grand {
+              border-top: 2px solid #8C5D08;
+              margin-top: 4px;
+              padding-top: 4px;
+              font-weight: 800;
+              font-size: 13.5px;
+              color: #8C5D08;
+            }
+          </style>
+        </head>
+        <body>
+          ${printPagesHtml}
+        </body>
+      </html>
+    `;
+  };
 
-                <div class="header-center">
-                  <div class="company-title">${companyName}</div>
-                  ${compAddress ? `<div class="company-address">${compAddress}</div>` : ''}
-                  ${compPhone ? `<div class="company-address" style="margin-top: 2px;">TEL: ${compPhone}</div>` : ''}
-                </div>
+  // Hidden iframe Print handler
+  const handlePrint = async (targetInvoiceNo?: string, isReprintMode: boolean = false) => {
+    try {
+      setLoading(true);
+      const printResult = await fetchPrintData(targetInvoiceNo);
 
-                <div class="header-right">
-                  <table>
-                    <tr><td>PAGE</td><td>:</td><td style="font-weight: 700;">1</td></tr>
-                  </table>
-                </div>
-              </div>
+      if (!printResult.success || !printResult.header) {
+        showToast('Trade-in record not found for: ' + (targetInvoiceNo || invoiceNo || 'active voucher'), 'error');
+        return;
+      }
 
-              <div class="header-ornament">◆</div>
+      const sInvoiceNo = printResult.targetNo || invoiceNo || 'Trade-In';
+      const htmlContent = buildTradeInGoldIssueHtml(sInvoiceNo, isReprintMode, printResult);
+      const docTitle = isReprintMode ? `Trade-In Gold Issue (Duplicate) - ${sInvoiceNo}` : `Trade-In Gold Issue - ${sInvoiceNo}`;
 
-              <!-- REPORT TITLE -->
-              <div class="report-title-area">
-                <div class="report-main-title">TRADE-IN VOUCHER</div>
-                <div class="report-sub-info">OLD GOLD PURCHASE & SETTLEMENT</div>
-                <div class="report-period-line">${printTimestamp}</div>
-              </div>
-
-              <!-- META CARDS -->
-              <div class="meta-card-container">
-                <div class="meta-info-card">
-                  <div class="meta-item">
-                    <span class="meta-label">Voucher / Invoice No</span>
-                    <span class="meta-val">${header.invoiceNo || header.inventoryCode || ''}</span>
-                  </div>
-                  <div class="meta-item">
-                    <span class="meta-label">Date</span>
-                    <span class="meta-val">${voucherDateFormatted}</span>
-                  </div>
-                  <div class="meta-item">
-                    <span class="meta-label">Customer Code</span>
-                    <span class="meta-val">${header.customerCode || 'N/A'}</span>
-                  </div>
-                  <div class="meta-item">
-                    <span class="meta-label">Customer Name</span>
-                    <span class="meta-val">${header.customerName || 'WALK-IN'}</span>
-                  </div>
-                </div>
-
-                ${custAddress ? `
-                <div class="meta-info-card" style="background: #ffffff; padding: 6px 14px;">
-                  <div class="meta-item" style="width: 100%;">
-                    <span class="meta-label">Customer Address</span>
-                    <span style="font-size: 11px; color: #4a3b22;">${custAddress}</span>
-                  </div>
-                </div>` : ''}
-              </div>
-
-              <!-- DETAIL TABLE -->
-              <div class="table-container">
-                <table class="report-table">
-                  <colgroup>
-                    <col style="width: 6%;" />
-                    <col style="width: 28%;" />
-                    <col style="width: 10%;" />
-                    <col style="width: 12%;" />
-                    <col style="width: 11%;" />
-                    <col style="width: 11%;" />
-                    <col style="width: 10%;" />
-                    <col style="width: 12%;" />
-                  </colgroup>
-                  <thead>
-                    <tr>
-                      <th>#</th>
-                      <th style="text-align: left !important; padding-left: 10px;">ITEM DESCRIPTION</th>
-                      <th>PURITY / CLASS</th>
-                      <th style="text-align: right !important; padding-right: 8px;">GROSS WT (g)</th>
-                      <th style="text-align: right !important; padding-right: 8px;">STONE WT (g)</th>
-                      <th style="text-align: right !important; padding-right: 8px;">LOSS (g)</th>
-                      <th style="text-align: right !important; padding-right: 8px;">RATE / g</th>
-                      <th style="text-align: right !important; padding-right: 8px;">TOTAL ($)</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    ${rowsHtml || '<tr><td colspan="8" style="text-align:center; padding: 12px;">No trade-in items assessed</td></tr>'}
-
-                    <!-- Total Row -->
-                    <tr class="grand-total-row">
-                      <td colspan="3" style="text-align: right !important; padding-right: 14px; font-weight: 700;">TOTAL SETTLEMENT:</td>
-                      <td style="text-align: right !important; padding-right: 8px; font-weight: 700;">${totalGrossWeight.toFixed(3)}</td>
-                      <td style="text-align: right !important; padding-right: 8px; font-weight: 700;">${totalStoneWtSum.toFixed(3)}</td>
-                      <td style="text-align: right !important; padding-right: 8px; font-weight: 700;">${totalGoldLossSum.toFixed(3)}</td>
-                      <td></td>
-                      <td style="text-align: right !important; padding-right: 8px; font-weight: 700;">$ ${totalCostSum.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-
-              <!-- REMARKS -->
-              <div class="remarks-box">
-                REMARKS &nbsp;&nbsp; : &nbsp;&nbsp; <span style="font-weight: 500;">${header.remarks && header.remarks.trim() ? header.remarks.trim() : 'N/A'}</span>
-              </div>
-
-              <!-- SIGNATURE SECTION -->
-              <div class="signature-section">
-                <!-- Customer Signature -->
-                <div class="sign-card">
-                  <div class="sign-header">CUSTOMER ACKNOWLEDGEMENT</div>
-                  <div class="sign-row">Customer Name: ${header.customerName || '...............................'}</div>
-                  <div class="sign-row" style="margin-top: 14px;">Signature: ....................................................</div>
-                  <div class="sign-row" style="margin-top: 14px;">Date: ..............................................................</div>
-                </div>
-
-                <!-- Verified By -->
-                <div class="sign-card">
-                  <div class="sign-header">AUTHORIZED STORE OFFICER</div>
-                  <div class="sign-row">Assessed & Verified By: ................................</div>
-                  <div class="sign-row" style="margin-top: 14px;">Officer Signature: ..........................................</div>
-                  <div class="sign-row" style="margin-top: 14px;">Date: ..............................................................</div>
-                </div>
-              </div>
-
-              <!-- FOOTER -->
-              <div class="report-footer">
-                <div class="footer-divider"></div>
-                <div class="footer-gen-text">*** System Generated Report ***</div>
-                <div class="footer-powered">Powered by Unipro SG</div>
-              </div>
-            </div>
-
-            <script>
-              window.onload = function() {
-                setTimeout(function() {
-                  window.print();
-                }, 300);
-              };
-            </script>
-          </body>
-        </html>
+      const printScript = `
+        <script>
+          window.onload = function() {
+            setTimeout(function() {
+              window.print();
+            }, 300);
+          };
+        </script>
       `;
+      const printHtml = htmlContent.replace('</body>', `${printScript}</body>`);
 
       if (Platform.OS === 'web' && typeof window !== 'undefined') {
-        const printWindow = window.open('', '_blank', 'width=900,height=750');
-        if (printWindow) {
-          printWindow.document.open();
-          printWindow.document.write(printHtml);
-          printWindow.document.close();
-          showToast('Trade-in voucher preview opened', 'success');
+        const frameId = '__trade_in_gold_issue_print_frame__';
+        let iframe = document.getElementById(frameId) as HTMLIFrameElement;
+        if (!iframe) {
+          iframe = document.createElement('iframe');
+          iframe.id = frameId;
+          iframe.style.position = 'fixed';
+          iframe.style.right = '0';
+          iframe.style.bottom = '0';
+          iframe.style.width = '0';
+          iframe.style.height = '0';
+          iframe.style.border = '0';
+          iframe.style.visibility = 'hidden';
+          document.body.appendChild(iframe);
+        }
+
+        const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
+        if (iframeDoc && iframe.contentWindow) {
+          iframeDoc.open();
+          iframeDoc.write(htmlContent);
+          iframeDoc.title = docTitle;
+          iframeDoc.close();
+
+          setTimeout(() => {
+            try {
+              iframe.contentWindow?.focus();
+              iframe.contentWindow?.print();
+              showToast(`Trade-in voucher ${sInvoiceNo} print dialog opened`, 'success');
+            } catch (printErr) {
+              console.error('Iframe print error:', printErr);
+              const printWindow = window.open('', '_blank', 'width=900,height=750');
+              if (printWindow) {
+                printWindow.document.open();
+                printWindow.document.write(printHtml);
+                printWindow.document.title = docTitle;
+                printWindow.document.close();
+              }
+            }
+          }, 350);
         } else {
-          const blob = new Blob([printHtml], { type: 'text/html;charset=utf-8;' });
-          const url = URL.createObjectURL(blob);
-          const win = window.open(url, '_blank');
-          if (!win) {
-            showToast('Popup blocker prevented opening print preview. Please allow popups.', 'error');
-          } else {
+          const printWindow = window.open('', '_blank', 'width=900,height=750');
+          if (printWindow) {
+            printWindow.document.open();
+            printWindow.document.write(printHtml);
+            printWindow.document.title = docTitle;
+            printWindow.document.close();
             showToast('Trade-in voucher preview opened', 'success');
+          } else {
+            showToast('Popup blocker prevented opening print preview. Please allow popups.', 'error');
           }
         }
       } else {
         showToast('Print preview generated.', 'success');
       }
-
     } catch (err: any) {
       console.error('Print Error:', err);
       showToast('Error generating print preview: ' + (err.message || 'Error'), 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Dedicated PDF Download Functionality
+  const handleDownloadPdf = async (targetInvoiceNo?: string, isReprint: boolean = false) => {
+    try {
+      setLoading(true);
+      const printResult = await fetchPrintData(targetInvoiceNo);
+
+      if (!printResult.success || !printResult.header) {
+        showToast('Trade-in record not found for PDF export: ' + (targetInvoiceNo || invoiceNo || 'active voucher'), 'error');
+        return;
+      }
+
+      const sInvoiceNo = printResult.targetNo || invoiceNo || 'Trade-In';
+      const htmlContent = buildTradeInGoldIssueHtml(sInvoiceNo, isReprint, printResult);
+      const downloadFilename = `Trade_In_Gold_Issue_${sInvoiceNo.replace(/[^a-zA-Z0-9_-]/g, '_')}.pdf`;
+
+      const pdfRes = await fetch(`${API_URL}/export-pdf`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          html: htmlContent,
+          filename: downloadFilename
+        })
+      });
+
+      if (!pdfRes.ok) {
+        throw new Error('Server returned error while generating PDF');
+      }
+
+      const pdfBlob = await pdfRes.blob();
+
+      if (Platform.OS === 'web' && typeof window !== 'undefined') {
+        const url = URL.createObjectURL(pdfBlob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = downloadFilename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+        showToast(`PDF downloaded successfully: ${downloadFilename}`, 'success');
+      } else {
+        showToast('PDF file generated successfully.', 'success');
+      }
+    } catch (err: any) {
+      console.error('PDF Export Error:', err);
+      showToast('Failed to download PDF: ' + (err.message || 'Error'), 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Dedicated Excel Download Functionality
+  const handleDownloadExcel = async (targetInvoiceNo?: string, isReprint: boolean = false) => {
+    const rawNo = (targetInvoiceNo || invoiceNo || '').trim();
+    if (!rawNo || rawNo === 'TI-DRAFT' || rawNo === 'DRAFT') {
+      showToast('Please save the Trade-In voucher first to export Excel from records.', 'error');
+      return;
+    }
+
+    try {
+      setLoading(true);
+      const excelRes = await fetch(`${API_URL}/export-excel`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          invoiceNo: rawNo,
+          isReprint: isReprint
+        })
+      });
+
+      if (!excelRes.ok) {
+        const errJson = await excelRes.json().catch(() => ({}));
+        throw new Error(errJson.message || 'Server error generating Excel file');
+      }
+
+      const excelBlob = await excelRes.blob();
+      const downloadFilename = `Trade_In_Gold_Issue_${rawNo.replace(/[^a-zA-Z0-9_-]/g, '_')}.xlsx`;
+
+      if (Platform.OS === 'web' && typeof window !== 'undefined') {
+        const url = URL.createObjectURL(excelBlob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = downloadFilename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+        showToast(`Trade-In Excel downloaded: ${downloadFilename}`, 'success');
+      } else {
+        showToast('Excel file generated successfully.', 'success');
+      }
+    } catch (err: any) {
+      console.error('Excel Export Error:', err);
+      showToast('Failed to download Excel: ' + (err.message || 'Error'), 'error');
     } finally {
       setLoading(false);
     }
@@ -1026,7 +1049,16 @@ export default function TradeInGoldIssueScreen() {
 
           <TouchableOpacity
             style={[styles.actionBtn, styles.reprintBtn]}
-            onPress={() => handlePrint()}
+            onPress={() => {
+              const targetNo = (invoiceNo || '').trim();
+              if (!targetNo && gridData.length === 0) {
+                showToast('Please select/save a Trade-In Voucher or add items to print.', 'error');
+                return;
+              }
+              setActivePrintInvoiceNo(targetNo);
+              setActivePrintIsReprint(Boolean(targetNo && targetNo !== 'TI-SAVED'));
+              setIsPrintModalVisible(true);
+            }}
             activeOpacity={0.8}
             disabled={saving || loading}
           >
@@ -1539,6 +1571,39 @@ export default function TradeInGoldIssueScreen() {
           </View>
         </View>
       </Modal>
+
+      {/* STANDARDIZED PRINT REPORT CONFIRMATION MODAL */}
+      <PrintReportModal
+        visible={isPrintModalVisible}
+        title="Print Report"
+        message="Do you want to print ?"
+        loading={loading}
+        onCancel={() => {
+          setIsPrintModalVisible(false);
+          setActivePrintInvoiceNo('');
+        }}
+        onPdf={() => {
+          const invNo = activePrintInvoiceNo;
+          const reprint = activePrintIsReprint;
+          setIsPrintModalVisible(false);
+          setActivePrintInvoiceNo('');
+          handleDownloadPdf(invNo, reprint);
+        }}
+        onExcel={() => {
+          const invNo = activePrintInvoiceNo;
+          const reprint = activePrintIsReprint;
+          setIsPrintModalVisible(false);
+          setActivePrintInvoiceNo('');
+          handleDownloadExcel(invNo, reprint);
+        }}
+        onPrint={() => {
+          const invNo = activePrintInvoiceNo;
+          const reprint = activePrintIsReprint;
+          setIsPrintModalVisible(false);
+          setActivePrintInvoiceNo('');
+          handlePrint(invNo, reprint);
+        }}
+      />
     </SafeAreaView>
   );
 }

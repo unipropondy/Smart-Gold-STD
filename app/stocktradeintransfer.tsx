@@ -1,6 +1,8 @@
 import { ThemedText } from '@/components/themed-text';
 import { API_BASE_URL } from '@/constants/api';
 import { useThemeColors } from '@/hooks/useThemeColors';
+import { PrintReportModal } from '@/components/PrintReportModal';
+import { getStandardReportCss, renderStandardReportFooter, renderStandardReportHeader } from '@/utils/standardPrintReport';
 import { UNIPRO_LOGO_DATA_URI } from '@/utils/uniproLogo';
 import { Ionicons } from '@expo/vector-icons';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
@@ -41,6 +43,11 @@ export default function StockTradeInTransferScreen() {
   const [transferNo, setTransferNo] = useState(params.transferNo ? String(params.transferNo) : '');
   const [remarks, setRemarks] = useState('');
   const [isLocked, setIsLocked] = useState(false);
+
+  // Print Report Modal State
+  const [isPrintModalVisible, setIsPrintModalVisible] = useState(false);
+  const [activePrintTransferNo, setActivePrintTransferNo] = useState('');
+  const [activePrintIsReprint, setActivePrintIsReprint] = useState(false);
 
   // Location LOV modal state
   const [locationModalVisible, setLocationModalVisible] = useState(false);
@@ -379,11 +386,10 @@ export default function StockTradeInTransferScreen() {
         setTransferNo(data.transferNo);
         setIsLocked(true);
         showToast(`Please take note reference no. ${data.transferNo}`, 'success');
-        // Automatically prompt to print matching VB.NET subPrintTransferOut:
-        // If MsgBox("Do you want to print ?", vbYesNo + MsgBoxStyle.Information) = MsgBoxResult.Yes
-        setTimeout(() => {
-          handlePrint(data.transferNo);
-        }, 500);
+        // Trigger Standardized Print Confirmation Modal
+        setActivePrintTransferNo(data.transferNo);
+        setActivePrintIsReprint(false);
+        setIsPrintModalVisible(true);
       } else {
         showToast(data.message || 'Transfer failed', 'error');
       }
@@ -396,7 +402,399 @@ export default function StockTradeInTransferScreen() {
 
   const selectedLocationObj = locations.find((l) => l.LocationCode === toLocation);
 
-  const handlePrint = async (targetTransferNo?: string) => {
+  const buildStockTradeInTransferHtml = (tNo: string, isReprint: boolean, printData: any) => {
+    const { company = {}, header = {}, details = [] } = printData || {};
+
+    const now = new Date();
+    const sgDateStr = now.toLocaleDateString('en-GB', {
+      timeZone: 'Asia/Singapore',
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+    });
+    const sgTimeStr = now.toLocaleTimeString('en-US', {
+      timeZone: 'Asia/Singapore',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: true,
+    });
+    const printTimestamp = `Printed: ${sgDateStr}, ${sgTimeStr}`;
+
+    let transferDateFormatted = header.transferDate || '';
+    if (transferDateFormatted) {
+      const td = new Date(transferDateFormatted);
+      if (!isNaN(td.getTime())) {
+        transferDateFormatted = `${String(td.getDate()).padStart(2, '0')}/${String(td.getMonth() + 1).padStart(2, '0')}/${td.getFullYear()}`;
+      }
+    }
+
+    const totalGrossWeight = details.reduce((sum: number, r: any) => sum + (Number(r.grossWeight) || 0), 0);
+    const totalNetWeight = details.reduce((sum: number, r: any) => sum + (Number(r.netWeight) || 0), 0);
+    const totalPcsCount = details.reduce((sum: number, r: any) => sum + (Number(r.pcs) || 0), 0);
+    const totalCostSum = details.reduce((sum: number, r: any) => sum + (Number(r.totalCost) || 0), 0);
+
+    const sReportTitle = 'STOCK TRADE-IN TRANSFER';
+    const compAddress = [company.address1, company.address2, company.city, company.state, company.country].filter(Boolean).map((s: string) => s.trim()).join(', ');
+
+    return `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <meta charset="utf-8" />
+          <title>${sReportTitle} - ${header.transferNo || tNo}</title>
+          <style>
+            @page {
+              size: A4 portrait;
+              margin: 0 !important;
+            }
+            ${getStandardReportCss()}
+
+            @media print {
+              @page {
+                margin: 0 !important;
+              }
+              html, body {
+                width: 210mm !important;
+                height: 100% !important;
+                margin: 0 !important;
+                padding: 0 !important;
+                background: #FFFFFF !important;
+                -webkit-print-color-adjust: exact !important;
+                print-color-adjust: exact !important;
+              }
+              .page-sheet {
+                width: 210mm !important;
+                min-height: 297mm !important;
+                height: 297mm !important;
+                margin: 0 !important;
+                padding: 12mm 14mm !important;
+                box-shadow: none !important;
+                display: flex !important;
+                flex-direction: column !important;
+                justify-content: space-between !important;
+                box-sizing: border-box !important;
+                page-break-after: avoid !important;
+                break-after: avoid !important;
+              }
+            }
+
+            html, body {
+              height: 100%;
+              margin: 0;
+              padding: 0;
+            }
+
+            .page-sheet {
+              width: 210mm;
+              min-height: 297mm;
+              padding: 12mm 14mm;
+              display: flex;
+              flex-direction: column;
+              justify-content: space-between;
+              box-sizing: border-box;
+            }
+
+            .report-main-content {
+              flex-grow: 1;
+            }
+
+            .std-footer-container {
+              margin-top: auto !important;
+              padding-top: 14px !important;
+              page-break-inside: avoid !important;
+              break-inside: avoid !important;
+            }
+
+            /* Cambria Typography across all elements */
+            *, *:before, *:after, body, div, table, tr, th, td, span, p, h1, h2, h3, h4, h5, h6 {
+              font-family: 'Cambria', Georgia, 'Times New Roman', serif !important;
+            }
+
+            body {
+              font-family: 'Cambria', Georgia, 'Times New Roman', serif !important;
+            }
+
+            .std-company-name {
+              font-family: 'Cambria', Georgia, serif !important;
+              font-size: 24px !important;
+              font-weight: 800 !important;
+              letter-spacing: 2px !important;
+              color: #A37416 !important;
+            }
+
+            .std-company-address {
+              font-family: 'Cambria', Georgia, serif !important;
+              font-size: 11px !important;
+              font-weight: 700 !important;
+              color: #1A1A1A !important;
+              letter-spacing: 0.5px !important;
+            }
+
+            .std-report-title {
+              font-family: 'Cambria', Georgia, serif !important;
+              font-size: 22px !important;
+              font-weight: 800 !important;
+              letter-spacing: 1.5px !important;
+              color: #4A3511 !important;
+            }
+
+            .std-printed-time {
+              font-family: 'Cambria', Georgia, serif !important;
+              font-size: 11.5px !important;
+              font-weight: 700 !important;
+              color: #222222 !important;
+            }
+
+            /* TWO-COLUMN INFO */
+            .info-grid {
+              display: grid;
+              grid-template-columns: 1fr 1fr;
+              gap: 16px;
+              margin-bottom: 12px;
+            }
+            .info-card {
+              border: 1px solid #C49A45;
+              background: #FAF8F5;
+              border-radius: 4px;
+              padding: 10px 14px;
+            }
+            .card-title {
+              font-size: 11.5px;
+              font-weight: 800;
+              color: #8C5D08;
+              border-bottom: 1px dotted #DDC89A;
+              padding-bottom: 5px;
+              margin-bottom: 8px;
+              text-transform: uppercase;
+              letter-spacing: 0.5px;
+            }
+            .info-table {
+              width: 100%;
+              border-collapse: collapse;
+            }
+            .info-table td {
+              padding: 2.5px 0;
+              font-size: 11px;
+              vertical-align: top;
+            }
+            .info-table .lbl {
+              width: 115px;
+              font-weight: 700;
+              color: #222222;
+            }
+            .info-table .colon {
+              width: 12px;
+              font-weight: 700;
+              color: #222222;
+              text-align: center;
+            }
+            .info-table .val {
+              color: #222222;
+              font-weight: 700;
+              word-break: break-word;
+            }
+
+            /* DETAIL ITEMS TABLE */
+            .detail-table {
+              width: 100%;
+              border-collapse: collapse;
+              margin-top: 4px;
+              margin-bottom: 12px;
+              font-size: 11px;
+            }
+            .detail-table th {
+              background-color: #8C5D08;
+              color: #FFFFFF;
+              text-align: left;
+              padding: 6px 8px;
+              font-weight: 800;
+              border: 1px solid #734C06;
+              text-transform: uppercase;
+              font-size: 10px;
+              letter-spacing: 0.5px;
+            }
+            .detail-table td {
+              padding: 6px 8px;
+              border: 1px solid #D9C8A5;
+              background-color: #FFFFFF;
+              color: #222222;
+            }
+            .detail-table tr:nth-child(even) td {
+              background-color: #FAF8F5;
+            }
+
+            /* TOTALS SECTION */
+            .totals-section {
+              display: flex;
+              justify-content: flex-end;
+              margin-bottom: 14px;
+            }
+            .totals-box {
+              width: 320px;
+              border: 1px solid #C49A45;
+              background-color: #FFFFFF;
+              border-radius: 4px;
+              padding: 8px 12px;
+            }
+            .total-row {
+              display: flex;
+              justify-content: space-between;
+              font-size: 11.5px;
+              padding: 3px 0;
+              color: #222222;
+              font-weight: 700;
+            }
+            .total-row-grand {
+              border-top: 2px solid #8C5D08;
+              margin-top: 4px;
+              padding-top: 4px;
+              font-weight: 800;
+              font-size: 13.5px;
+              color: #8C5D08;
+            }
+          </style>
+        </head>
+        <body>
+          <div class="page-sheet">
+            <div class="report-main-content">
+              ${renderStandardReportHeader({
+                company: {
+                  name: (company?.name || 'SMART').trim(),
+                  address: compAddress,
+                  phone: company?.phone,
+                  fax: company?.fax,
+                  logoUrl: company?.logo || (company?.logoBase64 ? `data:image/png;base64,${company.logoBase64}` : '') || UNIPRO_LOGO_DATA_URI,
+                },
+                reportTitle: sReportTitle,
+                printedDateTime: printTimestamp,
+              })}
+
+              <!-- TWO-COLUMN INFO: TRANSFER DETAILS vs DISPATCH DETAILS -->
+              <div class="info-grid">
+                <div class="info-card">
+                  <div class="card-title">TRANSFER DETAILS</div>
+                  <table class="info-table">
+                    <tr>
+                      <td class="lbl">Transfer No</td>
+                      <td class="colon">:</td>
+                      <td class="val">${header.transferNo || tNo}</td>
+                    </tr>
+                    <tr>
+                      <td class="lbl">Transfer Date</td>
+                      <td class="colon">:</td>
+                      <td class="val">${transferDateFormatted || '-'}</td>
+                    </tr>
+                    <tr>
+                      <td class="lbl">From Location</td>
+                      <td class="colon">:</td>
+                      <td class="val">${header.fromLocation || '-'}</td>
+                    </tr>
+                    <tr>
+                      <td class="lbl">To Location</td>
+                      <td class="colon">:</td>
+                      <td class="val">${header.toLocation || '-'}</td>
+                    </tr>
+                  </table>
+                </div>
+
+                <div class="info-card">
+                  <div class="card-title">DISPATCH & AUTHORIZATION</div>
+                  <table class="info-table">
+                    <tr>
+                      <td class="lbl">Staff / Salesman</td>
+                      <td class="colon">:</td>
+                      <td class="val">${header.salesManCode || 'Staff'}</td>
+                    </tr>
+                    <tr>
+                      <td class="lbl">Transfer Type</td>
+                      <td class="colon">:</td>
+                      <td class="val">STOCK TRADE-IN TRANSFER</td>
+                    </tr>
+                    <tr>
+                      <td class="lbl">Remarks</td>
+                      <td class="colon">:</td>
+                      <td class="val">${header.remarks || '-'}</td>
+                    </tr>
+                  </table>
+                </div>
+              </div>
+
+              <!-- DETAIL ITEMS TABLE -->
+              <table class="detail-table">
+                <thead>
+                  <tr>
+                    <th style="width: 4%; text-align: center;">#</th>
+                    <th style="width: 17%;">INVENTORY CODE</th>
+                    <th style="width: 25%;">DESCRIPTION</th>
+                    <th style="width: 8%; text-align: center;">SIZE</th>
+                    <th style="width: 9%; text-align: center;">SUPPLIER</th>
+                    <th style="width: 10%; text-align: right;">GROSS WT (G)</th>
+                    <th style="width: 10%; text-align: right;">NET WT (G)</th>
+                    <th style="width: 5%; text-align: center;">PCS</th>
+                    <th style="width: 12%; text-align: right;">COST ($)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${details.length > 0 ? details.map((item: any, idx: number) => `
+                    <tr>
+                      <td style="text-align: center; font-weight: 700;">${idx + 1}</td>
+                      <td style="font-weight: 700;">${item.inventoryCode || ''}</td>
+                      <td style="font-weight: 700; text-transform: uppercase;">${item.description || ''}</td>
+                      <td style="text-align: center;">${item.size !== null && item.size !== undefined && item.size !== '' ? (isNaN(Number(item.size)) ? item.size : Number(item.size).toFixed(2)) : '0.00'}</td>
+                      <td style="text-align: center;">${item.supplierCode || '-'}</td>
+                      <td style="text-align: right; font-weight: 700;">${Number(item.grossWeight || 0).toFixed(3)}</td>
+                      <td style="text-align: right; font-weight: 700;">${Number(item.netWeight || 0).toFixed(3)}</td>
+                      <td style="text-align: center; font-weight: 700;">${item.pcs !== null && item.pcs !== undefined && item.pcs !== '' && Number(item.pcs) > 0 ? item.pcs : '1'}</td>
+                      <td style="text-align: right; font-weight: 800; color: #8C5D08;">$ ${Number(item.totalCost || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                    </tr>
+                  `).join('') : `
+                    <tr>
+                      <td colspan="9" style="text-align: center; padding: 14px; color: #777;">
+                        No detail records in this Stock Trade-In Transfer Voucher
+                      </td>
+                    </tr>
+                  `}
+                </tbody>
+              </table>
+
+              <!-- TOTALS SECTION -->
+              <div class="totals-section">
+                <div class="totals-box">
+                  <div class="total-row">
+                    <span>Total Gross Weight:</span>
+                    <span style="font-weight: 800;">${totalGrossWeight.toFixed(3)} G</span>
+                  </div>
+                  <div class="total-row">
+                    <span>Total Net Weight:</span>
+                    <span style="font-weight: 800;">${totalNetWeight.toFixed(3)} G</span>
+                  </div>
+                  <div class="total-row">
+                    <span>Total PCS:</span>
+                    <span style="font-weight: 800;">${totalPcsCount}</span>
+                  </div>
+                  <div class="total-row total-row-grand">
+                    <span>GRAND TOTAL COST:</span>
+                    <span>$ ${totalCostSum.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            ${renderStandardReportFooter({
+              staff: {
+                staffLabel: 'PREPARED BY (STAFF)',
+                staffName: (header.salesManCode || 'Staff').trim(),
+                receiverLabel: 'AUTHORIZED RECEIVER',
+                receiverName: '-'
+              }
+            })}
+          </div>
+        </body>
+      </html>
+    `;
+  };
+
+  const executePrint = async (targetTransferNo?: string, isReprint: boolean = false) => {
     const tNo = (targetTransferNo || transferNo || '').trim();
     if (!tNo) {
       showToast('Please select or enter a Transfer Number to print.', 'error');
@@ -405,720 +803,162 @@ export default function StockTradeInTransferScreen() {
 
     try {
       setLoading(true);
-
-      let company: any = { name: '', address1: '', address2: '', city: '', state: '', country: '', phone: '', fax: '', logo: '' };
-      let header: any = null;
-      let details: any[] = [];
-
-      // 1. Attempt to fetch dedicated print-data from backend
-      let fetchSuccess = false;
-      try {
-        const res = await fetch(`${API_URL}/print-data?transferNo=${encodeURIComponent(tNo)}`);
-        const cType = res.headers.get('content-type') || '';
-        if (res.ok && cType.includes('application/json')) {
-          const json = await res.json();
-          if (json.success && json.data) {
-            company = json.data.company || company;
-            header = json.data.header;
-            details = json.data.details || [];
-            fetchSuccess = true;
-          }
-        }
-      } catch (eDedicated) {
-        // Fallback below
-      }
-
-      // 2. If dedicated route is not available (e.g. deployed backend not yet updated),
-      // query the active endpoints: /api/stocktradeintransfer/fetch and /api/company
-      if (!fetchSuccess) {
-        const [fetchRes, compRes] = await Promise.all([
-          fetch(`${API_URL}/fetch?transferNo=${encodeURIComponent(tNo)}`).then(r => {
-            const ct = r.headers.get('content-type') || '';
-            return ct.includes('application/json') ? r.json() : null;
-          }).catch(() => null),
-          fetch(`${API_BASE_URL}/company`).then(r => {
-            const ct = r.headers.get('content-type') || '';
-            return ct.includes('application/json') ? r.json() : null;
-          }).catch(() => null),
-        ]);
-
-        if (compRes?.success && Array.isArray(compRes.data) && compRes.data.length > 0) {
-          const c = compRes.data[0];
-          company = {
-            name: (c.Name || c.CompanyName || '').trim(),
-            address1: (c.Address1 || '').trim(),
-            address2: (c.Address2 || '').trim(),
-            city: (c.City || '').trim(),
-            state: (c.State || '').trim(),
-            country: (c.Country || '').trim(),
-            phone: (c.Phone || '').trim(),
-            fax: (c.Fax || '').trim(),
-            logo: '',
-          };
-        }
-
-        if (fetchRes?.success && fetchRes?.header) {
-          const h = fetchRes.header;
-          header = {
-            transferNo: String(h.TransferNo || tNo).trim(),
-            transferDate: h.TransferDate,
-            fromLocation: String(h.FromLocation || '').trim(),
-            toLocation: String(h.ToLocation || '').trim(),
-            remarks: String(h.Remarks || '').trim(),
-            totalWeight: parseFloat(h.TotalWeight || 0),
-            totalPcs: parseInt(h.TotalPcs || 0, 10),
-            totalCost: parseFloat(h.TotalCost || 0),
-          };
-
-          const rawDetails = fetchRes.details || [];
-          // Retrieve supplier codes if missing
-          const mappedDetails = await Promise.all(
-            rawDetails.map(async (row: any) => {
-              let sCode = (row.SupplierCode || '').trim();
-              if (!sCode && row.InventoryCode) {
-                try {
-                  const invRes = await fetch(
-                    `${API_BASE_URL}/inventorymaintenance/lov/inventory?search=${encodeURIComponent(row.InventoryCode.trim())}`
-                  );
-                  const invJson = await invRes.json();
-                  if (invJson?.success && Array.isArray(invJson.data)) {
-                    const match = invJson.data.find(
-                      (x: any) => (x.InventoryCode || '').trim() === row.InventoryCode.trim()
-                    );
-                    if (match && match.SupplierCode) {
-                      sCode = match.SupplierCode.trim();
-                    }
-                  }
-                } catch (eLov) {}
-              }
-
-              const w = parseFloat(row.Weight || 0);
-              const sz = parseFloat(row.SizeCode || 0);
-              const rawP = row.Pcs !== undefined && row.Pcs !== null ? row.Pcs : row.QtyOnHand;
-              return {
-                inventoryCode: String(row.InventoryCode || '').trim(),
-                description: String(row.Description || '').trim(),
-                size: sz.toFixed(2),
-                supplierCode: sCode,
-                grossWeight: w,
-                netWeight: w,
-                pcs: rawP !== undefined && rawP !== null && rawP !== '' ? rawP : '',
-                totalCost: parseFloat(row.TotalCost || 0),
-              };
-            })
-          );
-          details = mappedDetails;
-          fetchSuccess = true;
-        }
-      }
-
-      if (!fetchSuccess || !header) {
-        showToast('Transfer record not found for Transfer No: ' + tNo, 'error');
-        setLoading(false);
+      const res = await fetch(`${API_URL}/print-data?transferNo=${encodeURIComponent(tNo)}`);
+      const json = await res.json();
+      if (!json.success || !json.data) {
+        showToast(json.message || `Transfer record ${tNo} not found for print.`, 'error');
         return;
       }
 
-      // Singapore Print Date & Time (Asia/Singapore) matching other Smart Gold reports
-      const now = new Date();
-      const sgDateStr = now.toLocaleDateString('en-GB', {
-        timeZone: 'Asia/Singapore',
-        day: '2-digit',
-        month: '2-digit',
-        year: 'numeric',
-      });
-      const sgTimeStr = now.toLocaleTimeString('en-US', {
-        timeZone: 'Asia/Singapore',
-        hour: '2-digit',
-        minute: '2-digit',
-        hour12: true,
-      });
-      const printTimestamp = `Printed: ${sgDateStr}, ${sgTimeStr}`;
-
-      // Transfer Date formatting
-      let transferDateFormatted = header.transferDate || '';
-      if (transferDateFormatted) {
-        const td = new Date(transferDateFormatted);
-        if (!isNaN(td.getTime())) {
-          transferDateFormatted = `${String(td.getDate()).padStart(2, '0')}/${String(td.getMonth() + 1).padStart(2, '0')}/${td.getFullYear()}`;
-        }
-      }
-
-      // Compute Totals directly from details if available
-      const totalGrossWeight = details.reduce((sum: number, r: any) => sum + (Number(r.grossWeight) || 0), 0);
-      const totalNetWeight = details.reduce((sum: number, r: any) => sum + (Number(r.netWeight) || 0), 0);
-      const totalPcsCount = details.reduce((sum: number, r: any) => sum + (Number(r.pcs) || 0), 0);
-      const totalCostSum = details.reduce((sum: number, r: any) => sum + (Number(r.totalCost) || 0), 0);
-
-      const rowsHtml = details
-        .map(
-          (item: any) => `
-          <tr>
-            <td style="text-align: center; font-weight: 700;">${item.inventoryCode || ''}</td>
-            <td style="text-align: left; font-weight: 600;">${item.description || ''}</td>
-            <td style="text-align: center;">${item.size !== null && item.size !== undefined && item.size !== '' ? (isNaN(Number(item.size)) ? item.size : Number(item.size).toFixed(2)) : '0.00'}</td>
-            <td style="text-align: center;">${item.supplierCode || ''}</td>
-            <td style="text-align: right;">${Number(item.grossWeight || 0).toFixed(2)}</td>
-            <td style="text-align: right;">${Number(item.netWeight || 0).toFixed(2)}</td>
-            <td style="text-align: center;">${item.pcs !== null && item.pcs !== undefined && item.pcs !== '' && Number(item.pcs) > 0 ? item.pcs : ''}</td>
-            <td style="text-align: right;">$ ${Number(item.totalCost || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-          </tr>`
-        )
-        .join('');
-
-      const companyName = (company.name || '').trim();
-      const compAddress = [company.address1, company.address2, company.city, company.state, company.country].filter(Boolean).join(', ');
-      const compPhone = (company.phone || '').trim();
-      const companyLogo = company.logo || (company.logoBase64 ? `data:image/png;base64,${company.logoBase64}` : '') || UNIPRO_LOGO_DATA_URI;
-
-      const printHtml = `
-        <!DOCTYPE html>
-        <html>
-          <head>
-            <meta charset="utf-8" />
-            <title>Transfer Note - ${header.transferNo}</title>
-            <style>
-              @page {
-                size: A4 portrait;
-                margin: 0 !important;
-              }
-              html, body {
-                margin: 0;
-                padding: 0;
-                background-color: #f7f5f0;
-                font-family: Cambria, Georgia, "Times New Roman", serif !important;
-                color: #3b2d17;
-                -webkit-print-color-adjust: exact !important;
-                print-color-adjust: exact !important;
-              }
-              .page-sheet {
-                width: 210mm;
-                min-height: 297mm;
-                margin: 15px auto;
-                background: #ffffff;
-                padding: 10mm 12mm;
-                box-sizing: border-box;
-                display: flex;
-                flex-direction: column;
-                font-family: Cambria, Georgia, "Times New Roman", serif !important;
-                box-shadow: 0 4px 14px rgba(0,0,0,0.08);
-              }
-
-              /* HEADER SECTION */
-              .header-row {
-                display: flex;
-                justify-content: space-between;
-                align-items: center;
-                margin-bottom: 6px;
-                position: relative;
-              }
-              .header-left {
-                width: 140px;
-                display: flex;
-                align-items: center;
-              }
-              .header-left img.unipro-logo-img {
-                max-height: 48px;
-                max-width: 135px;
-                object-fit: contain;
-                display: block;
-              }
-              .header-center {
-                flex: 1;
-                text-align: center;
-                padding: 0 10px;
-              }
-              .company-title {
-                font-family: Cambria, Georgia, "Times New Roman", serif !important;
-                font-size: 26px;
-                font-weight: 700;
-                color: #996515;
-                letter-spacing: 2px;
-                text-transform: uppercase;
-                margin-bottom: 3px;
-                line-height: 1.15;
-              }
-              .company-address {
-                font-family: Cambria, Georgia, "Times New Roman", serif !important;
-                font-size: 11px;
-                color: #4a3b22;
-                font-weight: 700;
-                letter-spacing: 0.5px;
-                text-transform: uppercase;
-              }
-              .header-right {
-                width: 140px;
-                text-align: right;
-                font-size: 11px;
-                color: #705832;
-                font-weight: 600;
-              }
-              .header-right table {
-                float: right;
-                font-size: 10.5px;
-                border-collapse: collapse;
-              }
-              .header-right td {
-                padding: 1px 3px;
-              }
-              .header-ornament {
-                text-align: center;
-                margin: 6px 0 10px 0;
-                color: #d4a742;
-                font-size: 14px;
-                position: relative;
-              }
-              .header-ornament::before,
-              .header-ornament::after {
-                content: "";
-                position: absolute;
-                top: 50%;
-                width: calc(50% - 18px);
-                height: 1.5px;
-                background: #d4a742;
-              }
-              .header-ornament::before { left: 0; }
-              .header-ornament::after { right: 0; }
-
-              /* REPORT TITLE & TRANSFER INFO */
-              .report-title-area {
-                text-align: center;
-                margin-bottom: 12px;
-              }
-              .report-main-title {
-                font-family: Cambria, Georgia, "Times New Roman", serif !important;
-                font-size: 20px;
-                font-weight: 700;
-                color: #3b2d17;
-                letter-spacing: 1px;
-                text-transform: uppercase;
-                margin-bottom: 4px;
-              }
-              .report-sub-info {
-                font-family: Cambria, Georgia, "Times New Roman", serif !important;
-                font-size: 11.5px;
-                color: #705832;
-                font-weight: 600;
-                margin-bottom: 2px;
-              }
-              .report-period-line {
-                font-family: Cambria, Georgia, "Times New Roman", serif !important;
-                font-size: 11.5px;
-                color: #705832;
-                font-weight: 600;
-                margin-top: 3px;
-              }
-
-              /* TRANSFER META INFO BAR */
-              .transfer-meta-card {
-                display: flex;
-                justify-content: space-between;
-                background: #fffbf2;
-                border: 1px solid #d4a742;
-                border-radius: 6px;
-                padding: 8px 14px;
-                margin-bottom: 14px;
-                font-size: 11.5px;
-              }
-              .meta-item {
-                display: flex;
-                flex-direction: column;
-              }
-              .meta-label {
-                font-size: 10px;
-                font-weight: 700;
-                color: #705832;
-                text-transform: uppercase;
-                letter-spacing: 0.5px;
-                margin-bottom: 2px;
-              }
-              .meta-val {
-                font-size: 12.5px;
-                font-weight: 700;
-                color: #996515;
-              }
-
-              /* DETAIL TABLE MATCHING SMART GOLD TEMPLATE */
-              .table-container {
-                width: 100%;
-                overflow: hidden;
-                margin-bottom: 10px;
-              }
-              table.report-table {
-                width: 100% !important;
-                border-collapse: collapse;
-                font-family: Cambria, Georgia, "Times New Roman", serif !important;
-                font-size: 11px;
-                border: 0.75px solid #d4a742;
-              }
-              table.report-table thead th {
-                background-color: #996515 !important;
-                color: #ffffff !important;
-                font-weight: 700 !important;
-                font-family: Cambria, Georgia, "Times New Roman", serif !important;
-                padding: 7px 6px;
-                letter-spacing: 0.4px;
-                border: 0.75px solid #d4a742;
-                font-size: 11px;
-                line-height: 1.2;
-                text-align: center !important;
-                text-transform: uppercase !important;
-              }
-              table.report-table tbody td {
-                padding: 6px 6px;
-                color: #3b2d17;
-                font-family: Cambria, Georgia, "Times New Roman", serif !important;
-                border: 0.75px solid #f0d9a0;
-                font-size: 11px;
-                line-height: 1.25;
-              }
-              table.report-table tbody tr:nth-child(even) td {
-                background-color: #fffbf2 !important;
-              }
-              table.report-table tbody tr:nth-child(odd) td {
-                background-color: #ffffff !important;
-              }
-              table.report-table tr.item-total-row td,
-              table.report-table tr.grand-total-row td {
-                background-color: #fff8e7 !important;
-                font-weight: 700 !important;
-                font-family: Cambria, Georgia, "Times New Roman", serif !important;
-                color: #996515 !important;
-                border: 0.75px solid #d4a742 !important;
-                border-top: 1.5px solid #d4a742 !important;
-                border-bottom: 1.5px solid #d4a742 !important;
-                padding: 7px 6px;
-                font-size: 11px;
-              }
-
-              /* REMARKS */
-              .remarks-box {
-                margin-top: 12px;
-                font-size: 11.5px;
-                font-weight: 700;
-                color: #4a3b22;
-                padding: 6px 10px;
-                background-color: #fffdf8;
-                border-left: 3px solid #996515;
-              }
-
-              /* SIGNATURE SECTION */
-              .signature-section {
-                margin-top: 30px;
-                width: 100%;
-                display: flex;
-                justify-content: space-between;
-                font-size: 11px;
-                page-break-inside: avoid;
-                break-inside: avoid;
-              }
-              .sign-card {
-                width: 31%;
-                border: 1px solid #d4a742;
-                border-radius: 6px;
-                background-color: #ffffff;
-                padding: 10px 12px;
-                box-sizing: border-box;
-              }
-              .sign-header {
-                font-size: 11.5px;
-                font-weight: 700;
-                color: #996515;
-                text-transform: uppercase;
-                margin-bottom: 10px;
-                border-bottom: 1px dashed #d4a742;
-                padding-bottom: 4px;
-              }
-              .sign-row {
-                margin-bottom: 8px;
-                color: #4a3b22;
-                font-size: 11px;
-                white-space: nowrap;
-              }
-
-              /* FOOTER */
-              .report-footer {
-                margin-top: auto !important;
-                text-align: center;
-                padding-top: 14px;
-                padding-bottom: 2mm;
-                page-break-inside: avoid;
-                break-inside: avoid;
-              }
-              .footer-divider {
-                width: 100%;
-                height: 1.5px;
-                background: #d4a742;
-                margin-bottom: 10px;
-              }
-              .footer-gen-text {
-                font-size: 11px;
-                color: #705832;
-                font-weight: 600;
-                margin-bottom: 3px;
-              }
-              .footer-powered {
-                font-size: 12px;
-                color: #996515;
-                font-weight: 700;
-              }
-
-              /* TOOLBAR */
-              .print-toolbar {
-                position: fixed;
-                top: 16px;
-                right: 20px;
-                z-index: 1000;
-              }
-              .btn-action {
-                background: #996515;
-                color: #fff;
-                border: none;
-                padding: 9px 20px;
-                font-family: Cambria, Georgia, serif;
-                font-size: 12px;
-                font-weight: 700;
-                border-radius: 6px;
-                cursor: pointer;
-                box-shadow: 0 4px 12px rgba(153, 101, 21, 0.25);
-              }
-              .btn-action:hover {
-                background: #7a5408;
-              }
-
-              @media print {
-                @page {
-                  margin: 0 !important;
-                  size: A4 portrait;
-                }
-                html, body {
-                  background: #fff !important;
-                  padding: 0 !important;
-                  margin: 0 !important;
-                  height: 100% !important;
-                }
-                .print-toolbar {
-                  display: none !important;
-                }
-                .page-sheet {
-                  width: 100% !important;
-                  min-height: 297mm !important;
-                  height: 100% !important;
-                  margin: 0 !important;
-                  padding: 10mm 12mm 10mm 12mm !important;
-                  box-shadow: none !important;
-                  box-sizing: border-box !important;
-                  display: flex !important;
-                  flex-direction: column !important;
-                }
-                table.report-table {
-                  page-break-inside: auto;
-                }
-                tr {
-                  page-break-inside: avoid;
-                  break-inside: avoid;
-                }
-                thead {
-                  display: table-header-group;
-                }
-                tfoot {
-                  display: table-footer-group;
-                }
-                .signature-section {
-                  page-break-inside: avoid;
-                  break-inside: avoid;
-                }
-                .report-footer {
-                  margin-top: auto !important;
-                  page-break-inside: avoid !important;
-                  break-inside: avoid !important;
-                  padding-bottom: 4mm !important;
-                }
-              }
-            </style>
-          </head>
-          <body>
-            <div class="print-toolbar">
-              <button class="btn-action" onclick="window.print()">Print Report</button>
-            </div>
-
-            <div class="page-sheet">
-              <!-- HEADER -->
-              <div class="header-row">
-                <div class="header-left">
-                  <img src="${companyLogo}" alt="UNIPRO" class="unipro-logo-img" />
-                </div>
-
-                <div class="header-center">
-                  <div class="company-title">${companyName}</div>
-                  ${compAddress ? `<div class="company-address">${compAddress}</div>` : ''}
-                  ${compPhone ? `<div class="company-address" style="margin-top: 2px;">TEL: ${compPhone}</div>` : ''}
-                </div>
-
-                <div class="header-right">
-                  <table>
-                    <tr><td>PAGE</td><td>:</td><td style="font-weight: 700;">1</td></tr>
-                  </table>
-                </div>
-              </div>
-
-              <div class="header-ornament">◆</div>
-
-              <!-- REPORT TITLE -->
-              <div class="report-title-area">
-                <div class="report-main-title">TRANSFER NOTE</div>
-                <div class="report-sub-info">STOCK TRADE-IN TRANSFER</div>
-                <div class="report-period-line">${printTimestamp}</div>
-              </div>
-
-              <!-- TRANSFER META CARD -->
-              <div class="transfer-meta-card">
-                <div class="meta-item">
-                  <span class="meta-label">Transfer Number</span>
-                  <span class="meta-val">${header.transferNo || ''}</span>
-                </div>
-                <div class="meta-item">
-                  <span class="meta-label">Transfer Date</span>
-                  <span class="meta-val">${transferDateFormatted || ''}</span>
-                </div>
-                <div class="meta-item">
-                  <span class="meta-label">From Location</span>
-                  <span class="meta-val">${header.fromLocation || ''}</span>
-                </div>
-                <div class="meta-item">
-                  <span class="meta-label">To Location</span>
-                  <span class="meta-val">${header.toLocation || ''}</span>
-                </div>
-              </div>
-
-              <!-- DETAIL TABLE -->
-              <div class="table-container">
-                <table class="report-table">
-                  <colgroup>
-                    <col style="width: 14%;" />
-                    <col style="width: 24%;" />
-                    <col style="width: 8%;" />
-                    <col style="width: 12%;" />
-                    <col style="width: 11%;" />
-                    <col style="width: 11%;" />
-                    <col style="width: 6%;" />
-                    <col style="width: 14%;" />
-                  </colgroup>
-                  <thead>
-                    <tr>
-                      <th>INV. CODE</th>
-                      <th style="text-align: left !important; padding-left: 10px;">DESC.</th>
-                      <th>SIZE</th>
-                      <th>SUPP. CODE</th>
-                      <th style="text-align: right !important; padding-right: 8px;">GROSS WT.</th>
-                      <th style="text-align: right !important; padding-right: 8px;">NET WT.</th>
-                      <th>PCS</th>
-                      <th style="text-align: right !important; padding-right: 8px;">TOTAL COST</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    ${rowsHtml || '<tr><td colspan="8" style="text-align:center; padding: 12px;">No inventory records found</td></tr>'}
-
-                    <!-- Item-level Total Row -->
-                    <tr class="item-total-row">
-                      <td colspan="4" style="text-align: right !important; padding-right: 14px; font-weight: 700;">TOTAL:</td>
-                      <td style="text-align: right !important; padding-right: 8px; font-weight: 700;">${totalGrossWeight.toFixed(2)}</td>
-                      <td style="text-align: right !important; padding-right: 8px; font-weight: 700;">${totalNetWeight.toFixed(2)}</td>
-                      <td style="text-align: center;">${totalPcsCount > 0 ? totalPcsCount : ''}</td>
-                      <td style="text-align: right !important; padding-right: 8px; font-weight: 700;">$ ${totalCostSum.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-                    </tr>
-
-                    <!-- Grand Total Row -->
-                    <tr class="grand-total-row">
-                      <td colspan="4" style="text-align: left !important; padding-left: 10px; font-weight: 700;">GRAND TOTAL :</td>
-                      <td style="text-align: right !important; padding-right: 8px; font-weight: 700;">${totalGrossWeight.toFixed(2)}</td>
-                      <td style="text-align: right !important; padding-right: 8px; font-weight: 700;">${totalNetWeight.toFixed(2)}</td>
-                      <td style="text-align: center;">${totalPcsCount > 0 ? totalPcsCount : ''}</td>
-                      <td style="text-align: right !important; padding-right: 8px; font-weight: 700;">$ ${totalCostSum.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-
-              <!-- REMARKS -->
-              <div class="remarks-box">
-                REMARKS &nbsp;&nbsp; : &nbsp;&nbsp; <span style="font-weight: 500;">${header.remarks && header.remarks.trim() ? header.remarks.trim() : 'N/A'}</span>
-              </div>
-
-              <!-- SIGNATURE SECTION -->
-              <div class="signature-section">
-                <!-- Send Stock From -->
-                <div class="sign-card">
-                  <div class="sign-header">SEND STOCK FROM: ${header.fromLocation || ''}</div>
-                  <div class="sign-row">No. of Items: ...........................</div>
-                  <div class="sign-row">Name: .....................................</div>
-                  <div class="sign-row">Sign: .......................................</div>
-                  <div class="sign-row">Date: .......................................</div>
-                </div>
-
-                <!-- Received Stock At -->
-                <div class="sign-card">
-                  <div class="sign-header">RECEIVED STOCK AT: ${header.toLocation || header.fromLocation || ''}</div>
-                  <div class="sign-row">No. of Items: ...........................</div>
-                  <div class="sign-row">Name: .....................................</div>
-                  <div class="sign-row">Sign: .......................................</div>
-                  <div class="sign-row">Date: .......................................</div>
-                </div>
-
-                <!-- Cross Verification -->
-                <div class="sign-card">
-                  <div class="sign-header">CROSS VERIFICATION</div>
-                  <div class="sign-row">Weight Cross Checked By: ..........</div>
-                  <div class="sign-row">No. of PCS Checked: ...............</div>
-                  <div class="sign-row">Sign & Date: .............................</div>
-                </div>
-              </div>
-
-              <!-- FOOTER -->
-              <div class="report-footer">
-                <div class="footer-divider"></div>
-                <div class="footer-gen-text">*** System Generated Report ***</div>
-                <div class="footer-powered">Powered by Unipro SG</div>
-              </div>
-            </div>
-
-            <script>
-              window.onload = function() {
-                setTimeout(function() {
-                  window.print();
-                }, 300);
-              };
-            </script>
-          </body>
-        </html>
-      `;
+      const htmlContent = buildStockTradeInTransferHtml(tNo, isReprint, json.data);
+      const docTitle = isReprint ? `Stock Trade-In Transfer Voucher (Duplicate) - ${tNo}` : `Stock Trade-In Transfer Voucher - ${tNo}`;
 
       if (Platform.OS === 'web' && typeof window !== 'undefined') {
-        const printWindow = window.open('', '_blank', 'width=900,height=750');
-        if (printWindow) {
-          printWindow.document.open();
-          printWindow.document.write(printHtml);
-          printWindow.document.close();
-        } else {
-          // If popup is blocked, write blob and trigger
-          const blob = new Blob([printHtml], { type: 'text/html;charset=utf-8;' });
-          const url = URL.createObjectURL(blob);
-          const win = window.open(url, '_blank');
-          if (!win) {
-            showToast('Popup blocker prevented opening print preview. Please allow popups.', 'error');
-          }
+        const frameId = '__stock_trade_in_transfer_print_frame__';
+        let iframe = document.getElementById(frameId) as HTMLIFrameElement;
+        if (!iframe) {
+          iframe = document.createElement('iframe');
+          iframe.id = frameId;
+          iframe.style.position = 'fixed';
+          iframe.style.right = '0';
+          iframe.style.bottom = '0';
+          iframe.style.width = '0';
+          iframe.style.height = '0';
+          iframe.style.border = '0';
+          iframe.style.visibility = 'hidden';
+          document.body.appendChild(iframe);
+        }
+
+        const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
+        if (iframeDoc && iframe.contentWindow) {
+          iframeDoc.open();
+          iframeDoc.write(htmlContent);
+          iframeDoc.title = docTitle;
+          iframeDoc.close();
+
+          setTimeout(() => {
+            try {
+              iframe.contentWindow?.focus();
+              iframe.contentWindow?.print();
+              showToast(`Stock Trade-In Transfer Voucher ${tNo} print dialog opened`, 'success');
+            } catch (printErr) {
+              console.error('Iframe print error:', printErr);
+            }
+          }, 350);
         }
       } else {
         showToast('Print preview generated.', 'success');
       }
-
     } catch (err: any) {
       console.error('Print Error:', err);
-      showToast('Error generating print preview: ' + (err.message || 'Error'), 'error');
+      showToast('Error generating print: ' + (err.message || 'Error'), 'error');
     } finally {
       setLoading(false);
     }
   };
 
+  const handleDownloadPdf = async (targetTransferNo?: string, isReprint: boolean = false) => {
+    const tNo = (targetTransferNo || transferNo || '').trim();
+    if (!tNo) {
+      showToast('Validation Error: Transfer Number is required to download PDF', 'error');
+      return;
+    }
+
+    try {
+      setLoading(true);
+      const res = await fetch(`${API_URL}/print-data?transferNo=${encodeURIComponent(tNo)}`);
+      const json = await res.json();
+
+      if (!json.success || !json.data) {
+        showToast(json.message || `Transfer record "${tNo}" not found`, 'error');
+        return;
+      }
+
+      const htmlContent = buildStockTradeInTransferHtml(tNo, isReprint, json.data);
+      const downloadFilename = `Stock_Trade_In_Transfer_${tNo.replace(/[^a-zA-Z0-9_-]/g, '_')}.pdf`;
+
+      const pdfRes = await fetch(`${API_URL}/export-pdf`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          html: htmlContent,
+          filename: downloadFilename
+        })
+      });
+
+      if (!pdfRes.ok) {
+        throw new Error('Server returned error while generating PDF');
+      }
+
+      const pdfBlob = await pdfRes.blob();
+
+      if (Platform.OS === 'web' && typeof window !== 'undefined') {
+        const url = URL.createObjectURL(pdfBlob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = downloadFilename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+        showToast(`PDF downloaded successfully: ${downloadFilename}`, 'success');
+      } else {
+        showToast('PDF file generated successfully.', 'success');
+      }
+    } catch (err: any) {
+      console.error('PDF Export Error:', err);
+      showToast('Failed to download PDF: ' + (err.message || 'Error'), 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDownloadExcel = async (targetTransferNo?: string, isReprint: boolean = false) => {
+    const tNo = (targetTransferNo || transferNo || '').trim();
+    if (!tNo) {
+      showToast('Validation Error: Transfer Number is required to download Excel', 'error');
+      return;
+    }
+
+    try {
+      setLoading(true);
+      const excelRes = await fetch(`${API_URL}/export-excel`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          transferNo: tNo,
+          isReprint: isReprint
+        })
+      });
+
+      if (!excelRes.ok) {
+        const errJson = await excelRes.json().catch(() => ({}));
+        throw new Error(errJson.message || 'Server error generating Excel file');
+      }
+
+      const excelBlob = await excelRes.blob();
+      const downloadFilename = `Stock_Trade_In_Transfer_${tNo.replace(/[^a-zA-Z0-9_-]/g, '_')}.xlsx`;
+
+      if (Platform.OS === 'web' && typeof window !== 'undefined') {
+        const url = URL.createObjectURL(excelBlob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = downloadFilename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+        showToast(`Excel downloaded successfully: ${downloadFilename}`, 'success');
+      } else {
+        showToast('Excel file generated successfully.', 'success');
+      }
+    } catch (err: any) {
+      console.error('Excel Export Error:', err);
+      showToast('Failed to download Excel: ' + (err.message || 'Error'), 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
   return (
     <SafeAreaView style={styles.safeArea} edges={['top']}>
       <Stack.Screen options={{ headerShown: false }} />
@@ -1146,7 +986,16 @@ export default function StockTradeInTransferScreen() {
 
           <TouchableOpacity
             style={[styles.actionBtn, styles.reprintBtn]}
-            onPress={() => handlePrint()}
+            onPress={() => {
+              const tNo = (transferNo || '').trim();
+              if (!tNo) {
+                showToast('Please select or enter a Transfer Number to print.', 'error');
+                return;
+              }
+              setActivePrintTransferNo(tNo);
+              setActivePrintIsReprint(isLocked);
+              setIsPrintModalVisible(true);
+            }}
             activeOpacity={0.8}
             disabled={saving || loading}
           >
@@ -1737,6 +1586,45 @@ export default function StockTradeInTransferScreen() {
           </View>
         </View>
       </Modal>
+
+      {/* STANDARDIZED PRINT REPORT CONFIRMATION MODAL */}
+      <PrintReportModal
+        visible={isPrintModalVisible}
+        title="Print Report"
+        message="Do you want to print ?"
+        loading={loading}
+        onCancel={() => {
+          setIsPrintModalVisible(false);
+          setActivePrintTransferNo('');
+        }}
+        onPdf={() => {
+          const tNo = activePrintTransferNo;
+          const reprint = activePrintIsReprint;
+          setIsPrintModalVisible(false);
+          setActivePrintTransferNo('');
+          if (tNo) {
+            handleDownloadPdf(tNo, reprint);
+          }
+        }}
+        onExcel={() => {
+          const tNo = activePrintTransferNo;
+          const reprint = activePrintIsReprint;
+          setIsPrintModalVisible(false);
+          setActivePrintTransferNo('');
+          if (tNo) {
+            handleDownloadExcel(tNo, reprint);
+          }
+        }}
+        onPrint={() => {
+          const tNo = activePrintTransferNo;
+          const reprint = activePrintIsReprint;
+          setIsPrintModalVisible(false);
+          setActivePrintTransferNo('');
+          if (tNo) {
+            executePrint(tNo, reprint);
+          }
+        }}
+      />
     </SafeAreaView>
   );
 }

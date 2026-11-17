@@ -486,6 +486,219 @@ router.get("/print-data/:salesOrderNo", async (req, res) => {
   }
 });
 
+// ================= EXPORT PDF ENDPOINT =================
+// POST /api/salesorder/export-pdf
+router.post("/export-pdf", async (req, res) => {
+  try {
+    const { html, filename } = req.body;
+    if (!html) {
+      return res.status(400).json({ success: false, message: "HTML content is required for PDF export." });
+    }
+
+    const { convertHtmlToPdf } = require("../utils/htmlToPdf");
+    const pdfBuffer = await convertHtmlToPdf(html);
+    const downloadName = (filename || "Sales_Order.pdf").replace(/[^a-zA-Z0-9_\-\.]/g, "_");
+
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `attachment; filename="${downloadName}"`);
+    res.setHeader("Content-Length", pdfBuffer.length);
+    return res.send(pdfBuffer);
+  } catch (err) {
+    console.error("Sales Order Export PDF Error:", err);
+    return res.status(500).json({ success: false, message: "Failed to generate PDF: " + err.message });
+  }
+});
+
+// ================= EXPORT EXCEL ENDPOINT =================
+// POST /api/salesorder/export-excel
+router.post("/export-excel", async (req, res) => {
+  try {
+    const { salesOrderNo } = req.body;
+    const cleanNo = (salesOrderNo || "").trim();
+    if (!cleanNo) {
+      return res.status(400).json({ success: false, message: "Sales Order Number is required." });
+    }
+
+    const pool = req.pool || (await poolPromise);
+
+    // Fetch Company Info
+    const compRes = await pool.request().query("SELECT TOP 1 * FROM tblCompany");
+    const rawCompany = compRes.recordset[0] || {};
+    const companyName = String(rawCompany.Name || rawCompany.CompanyName || "SMART").trim();
+    const address = [
+      String(rawCompany.Address1 || "").trim(),
+      String(rawCompany.Address2 || "").trim(),
+      String(rawCompany.Country || rawCompany.City || "").trim()
+    ].filter(Boolean).join(" ");
+
+    // Fetch Header
+    const headerRes = await pool.request()
+      .input("SalesOrderNo", sql.VarChar, cleanNo)
+      .query(`
+        SELECT h.*, s.SupplierName
+        FROM tblSalesOrderHeader h
+        LEFT JOIN tblSupplier s ON h.SupplierCode = s.SupplierCode
+        WHERE h.SalesOrderNo = @SalesOrderNo
+      `);
+
+    const header = headerRes.recordset.length > 0 ? headerRes.recordset[0] : { SalesOrderNo: cleanNo };
+
+    // Fetch Details
+    const detailRes = await pool.request()
+      .input("SalesOrderNo", sql.VarChar, cleanNo)
+      .query(`
+        SELECT 
+          d.*,
+          c.CategoryName,
+          ct.CatalogueName
+        FROM tblSalesOrderDetail d
+        LEFT JOIN tblCategory c ON d.CategoryCode = c.CategoryCode
+        LEFT JOIN tblCatalogue ct ON d.CatalogueCode = ct.CatalogueCode
+        WHERE d.SalesOrderNo = @SalesOrderNo
+        ORDER BY d.CategoryCode ASC, d.CatalogueCode ASC
+      `);
+
+    const details = detailRes.recordset || [];
+
+    // Format dates
+    const rawSODate = header.SalesOrderDate || header.CreateDate;
+    let soDateFormatted = "";
+    if (rawSODate) {
+      const d = new Date(rawSODate);
+      if (!isNaN(d.getTime())) {
+        soDateFormatted = `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}/${d.getFullYear()}`;
+      } else {
+        soDateFormatted = String(rawSODate);
+      }
+    }
+
+    const rawDueDate = header.DueDate;
+    let dueDateFormatted = "";
+    if (rawDueDate) {
+      const d = new Date(rawDueDate);
+      if (!isNaN(d.getTime())) {
+        dueDateFormatted = `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}/${d.getFullYear()}`;
+      } else {
+        dueDateFormatted = String(rawDueDate);
+      }
+    }
+
+    const now = new Date();
+    const printTimeStr = `${String(now.getDate()).padStart(2, "0")}/${String(now.getMonth() + 1).padStart(2, "0")}/${now.getFullYear()} ${now.toLocaleTimeString()}`;
+
+    // Calculate totals
+    let totalQty = 0;
+    let totalWeight = 0;
+    details.forEach((row) => {
+      totalQty += parseFloat(row.SalesOrderQty) || 0;
+      totalWeight += parseFloat(row.Weight) || 0;
+    });
+
+    const XLSX = require("xlsx");
+    const wb = XLSX.utils.book_new();
+
+    const rows = [
+      // Company Information
+      ["COMPANY NAME", companyName],
+      ["COMPANY ADDRESS", address],
+      [],
+      // Sales Order Information
+      ["REPORT NAME", "TRANSFER NOTE / SALES ORDER"],
+      ["PRINTED DATE & TIME", printTimeStr],
+      ["SALES ORDER NO", cleanNo],
+      ["ORDER DATE", soDateFormatted || "-"],
+      ["DUE DATE", dueDateFormatted || "-"],
+      ["LOCATION CODE", (header.LocationCode || "").trim() || "-"],
+      [],
+      // Supplier & Particulars Information
+      ["SUPPLIER CODE", (header.SupplierCode || "").trim() || "-"],
+      ["SUPPLIER NAME", (header.SupplierName || "-").trim()],
+      ["REMARKS", (header.Remarks || "-").trim()],
+      ["CREATED BY", (header.CreateUser || "sys").trim()],
+      [],
+      // Inventory Details Header (Aligned across 8 columns A-H)
+      ["#", "CATEGORY", "CATALOGUE", "WEIGHT (G)", "TO WT (G)", "SIZE", "REORDER", "SO QTY"]
+    ];
+
+    const itemStartRow = rows.length + 1; // 1-based row index for details
+
+    details.forEach((row, idx) => {
+      const catCode = (row.CategoryCode || "").trim();
+      const catgCode = (row.CatalogueCode || "").trim();
+      const catName = row.CategoryName ? ` (${row.CategoryName.trim()})` : "";
+      const catgName = row.CatalogueName ? ` (${row.CatalogueName.trim()})` : "";
+      const wt = parseFloat(row.Weight) || 0;
+      const toWt = parseFloat(row.ToWeight) || 0;
+      const sz = row.SizeCode !== null && row.SizeCode !== undefined ? row.SizeCode : "-";
+      const szType = row.SizeType ? ` ${row.SizeType.trim()}` : "";
+      const reorder = parseFloat(row.ReOrderLevel) || 0;
+      const soQty = parseFloat(row.SalesOrderQty) || 0;
+
+      rows.push([
+        idx + 1,
+        `${catCode}${catName}`,
+        `${catgCode}${catgName}`,
+        Number(wt.toFixed(3)),
+        Number(toWt.toFixed(3)),
+        `${sz}${szType}`,
+        Number(reorder.toFixed(2)),
+        Number(soQty)
+      ]);
+    });
+
+    const itemEndRow = rows.length;
+
+    // Totals Section
+    rows.push(
+      [],
+      ["", "", "", "", "", "Total Items:", details.length, ""],
+      ["", "", "", "", "", "Total Weight:", Number(totalWeight.toFixed(3)), "G"],
+      ["", "", "", "", "", "TOTAL SO QTY:", Number(totalQty), ""],
+      [],
+      // Staff / Receiver Information
+      ["PREPARED BY (STAFF)", (header.CreateUser || "sys").trim()],
+      ["SUPPLIER / AUTHORIZED RECEIVER", (header.SupplierName || header.SupplierCode || "-").trim()]
+    );
+
+    const ws = XLSX.utils.aoa_to_sheet(rows);
+
+    // Set precise column widths matching content
+    ws["!cols"] = [
+      { wch: 8 },   // Col A: # / Section Labels
+      { wch: 25 },  // Col B: Category / Values
+      { wch: 30 },  // Col C: Catalogue
+      { wch: 16 },  // Col D: Weight (G)
+      { wch: 16 },  // Col E: To Wt (G)
+      { wch: 16 },  // Col F: Size / Total Labels
+      { wch: 16 },  // Col G: ReOrder / Total Values
+      { wch: 16 }   // Col H: SO Qty / Units
+    ];
+
+    // Format numeric cells in item rows
+    if (details.length > 0) {
+      for (let r = itemStartRow; r <= itemEndRow; r++) {
+        if (ws[`D${r}`]) ws[`D${r}`].z = "#,##0.000";
+        if (ws[`E${r}`]) ws[`E${r}`].z = "#,##0.000";
+        if (ws[`G${r}`]) ws[`G${r}`].z = "#,##0.00";
+        if (ws[`H${r}`]) ws[`H${r}`].z = "#,##0";
+      }
+    }
+
+    XLSX.utils.book_append_sheet(wb, ws, "Sales Order");
+
+    const excelBuffer = XLSX.write(wb, { type: "buffer", bookType: "xlsx" });
+    const downloadName = `Sales_Order_${cleanNo}.xlsx`;
+
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    res.setHeader("Content-Disposition", `attachment; filename="${downloadName}"`);
+    res.setHeader("Content-Length", excelBuffer.length);
+    return res.send(excelBuffer);
+  } catch (err) {
+    console.error("Sales Order Export Excel Error:", err);
+    return res.status(500).json({ success: false, message: "Failed to generate Excel: " + err.message });
+  }
+});
+
 // DELETE Sales Order
 router.delete("/:salesOrderNo", async (req, res) => {
   const pool = req.pool || (await poolPromise);

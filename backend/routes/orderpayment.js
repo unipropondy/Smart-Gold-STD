@@ -652,4 +652,217 @@ router.get("/reprint/:billNo", async (req, res) => {
   }
 });
 
+// ================= EXPORT PDF ENDPOINT =================
+// POST /api/orderpayment/export-pdf
+router.post("/export-pdf", async (req, res) => {
+  try {
+    const { html, filename } = req.body;
+    if (!html) {
+      return res.status(400).json({ success: false, message: "HTML content is required for PDF export." });
+    }
+
+    const { convertHtmlToPdf } = require("../utils/htmlToPdf");
+    const pdfBuffer = await convertHtmlToPdf(html);
+    const downloadName = (filename || "Order_Payment_Receipt.pdf").replace(/[^a-zA-Z0-9_\-\.]/g, "_");
+
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `attachment; filename="${downloadName}"`);
+    res.setHeader("Content-Length", pdfBuffer.length);
+    return res.send(pdfBuffer);
+  } catch (err) {
+    console.error("Order Payment Export PDF Error:", err);
+    return res.status(500).json({ success: false, message: "Failed to generate PDF: " + err.message });
+  }
+});
+
+// ================= EXPORT EXCEL ENDPOINT =================
+// POST /api/orderpayment/export-excel
+router.post("/export-excel", async (req, res) => {
+  try {
+    const { orderPaymentNo, isReprint } = req.body;
+    const rawNo = (orderPaymentNo || "").trim();
+    if (!rawNo) {
+      return res.status(400).json({ success: false, message: "Order Payment Number is required." });
+    }
+
+    const pool = await getPool(req);
+
+    // 1. Company
+    const compResult = await pool.request().query("SELECT TOP 1 * FROM tblCompany");
+    const compRow = compResult.recordset[0] || {};
+    const companyName = (compRow.Name || "SMART").trim();
+    const companyAddress = [compRow.Address1, compRow.Address2, compRow.City, compRow.Country].filter(Boolean).map(s => String(s).trim()).join(" ");
+
+    // 2. Order Payment Detail
+    const payRes = await pool.request()
+      .input("OrderPaymentNo", sql.VarChar(50), rawNo)
+      .query(`
+        SELECT 
+          d.OrderNo,
+          RTRIM(LTRIM(d.OrderPaymentNo)) AS OrderPaymentNo,
+          d.AmountPaid,
+          d.TradeinAmt,
+          d.TradeinGST,
+          d.Remarks,
+          d.CreateDate,
+          d.CreateUser,
+          h.CustomerCode,
+          h.OrderDate,
+          h.DeliveryDate,
+          h.SupplierCode,
+          ISNULL(h.TotalCostEstimated, 0) AS TotalCostEstimated,
+          ISNULL(h.AdvancePaid, 0) AS AdvancePaid,
+          RTRIM(LTRIM(ISNULL(c.CustomerName, ''))) AS CustomerName,
+          RTRIM(LTRIM(ISNULL(c.Address1, ''))) AS CustomerAddress1,
+          RTRIM(LTRIM(ISNULL(c.Address2, ''))) AS CustomerAddress2,
+          RTRIM(LTRIM(ISNULL(c.Address3, ''))) AS CustomerAddress3,
+          RTRIM(LTRIM(ISNULL(c.Phone1, ISNULL(c.Mobile, '')))) AS CustomerPhone,
+          RTRIM(LTRIM(ISNULL(c.CustomerType, ''))) AS CustomerType
+        FROM tblOrderPaymentdetail d
+        JOIN tblInventoryOrderHeader h ON RTRIM(LTRIM(h.OrderNo)) = RTRIM(LTRIM(d.OrderNo))
+        LEFT JOIN tblCustomer c ON RTRIM(LTRIM(c.CustomerCode)) = RTRIM(LTRIM(h.CustomerCode))
+        WHERE RTRIM(LTRIM(d.OrderPaymentNo)) = @OrderPaymentNo
+      `);
+
+    if (payRes.recordset.length === 0) {
+      return res.status(404).json({ success: false, message: `Order payment record "${rawNo}" not found.` });
+    }
+
+    const payment = payRes.recordset[0];
+    const orderNo = payment.OrderNo ? String(payment.OrderNo).trim() : '';
+
+    // 3. History
+    let history = [];
+    if (orderNo) {
+      const histRes = await pool.request()
+        .input("OrderNo", sql.VarChar(50), orderNo)
+        .query(`
+          SELECT 
+            OrderNo,
+            RTRIM(LTRIM(OrderPaymentNo)) AS OrderPaymentNo,
+            AmountPaid,
+            Remarks,
+            CreateDate,
+            CreateUser
+          FROM tblOrderPaymentdetail
+          WHERE RTRIM(LTRIM(OrderNo)) = @OrderNo
+          ORDER BY CreateDate ASC
+        `);
+      history = histRes.recordset || [];
+    }
+
+    // 4. Gold Rates
+    const ratesResult = await pool.request().query("SELECT ClassCode, Rate FROM tblClass WHERE ClassCode IN ('24K', '22K', '835', '999', '916', '18K', 'SIL')");
+    const ratesMap = {};
+    ratesResult.recordset.forEach((r) => {
+      ratesMap[(r.ClassCode || "").trim().toUpperCase()] = r.Rate;
+    });
+    const s999 = ratesMap["24K"] !== undefined ? parseFloat(ratesMap["24K"]).toFixed(2) : (ratesMap["999"] ? parseFloat(ratesMap["999"]).toFixed(2) : "-");
+    const s916 = ratesMap["22K"] !== undefined ? parseFloat(ratesMap["22K"]).toFixed(2) : (ratesMap["916"] ? parseFloat(ratesMap["916"]).toFixed(2) : "-");
+    const s835 = ratesMap["835"] !== undefined ? parseFloat(ratesMap["835"]).toFixed(2) : (ratesMap["18K"] ? parseFloat(ratesMap["18K"]).toFixed(2) : "-");
+
+    // Dates
+    const rawDate = payment.CreateDate;
+    let paymentDateStr = "-";
+    if (rawDate) {
+      const d = new Date(rawDate);
+      if (!isNaN(d.getTime())) {
+        paymentDateStr = `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`;
+      }
+    }
+    const printTimeStr = new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
+
+    const reportTitle = "ORDER PAYMENT";
+
+    const XLSX = require("xlsx");
+    const wb = XLSX.utils.book_new();
+    const rows = [];
+
+    rows.push([companyName]);
+    rows.push([companyAddress]);
+    rows.push([]);
+    rows.push([reportTitle]);
+    rows.push([`Printed: ${paymentDateStr} ${printTimeStr}`]);
+    rows.push([]);
+
+    // Two panels
+    const custName = (payment.CustomerName || "").trim();
+    const custAddress = [payment.CustomerAddress1, payment.CustomerAddress2, payment.CustomerAddress3].filter(Boolean).map(s => String(s).trim()).join(" ");
+
+    rows.push(["CUSTOMER INFORMATION", "", "", "ORDER & VOUCHER DETAILS"]);
+    rows.push(["Customer Code:", (payment.CustomerCode || "-").trim(), "", "Voucher No:", (payment.OrderPaymentNo || rawNo).trim()]);
+    rows.push(["Customer Name:", custName || "CASH CUSTOMER", "", "Order No:", orderNo]);
+    rows.push(["Address:", custAddress || "-", "", "Payment Date:", paymentDateStr]);
+    rows.push(["Contact:", (payment.CustomerPhone || "-").trim(), "", "Salesman:", (payment.CreateUser || "Staff").trim()]);
+    rows.push([]);
+
+    const currentPaid = parseFloat(payment.AmountPaid) || 0;
+    rows.push(["CURRENT AMOUNT PAID:", `$${currentPaid.toFixed(2)}`, "", `ORDER REF: ${orderNo}`]);
+    rows.push([]);
+
+    // History Table
+    rows.push(["#", "PAYMENT VOUCHER NO", "PAYMENT DATE", "REMARKS", "AMOUNT PAID ($)"]);
+    if (history.length > 0) {
+      history.forEach((h, idx) => {
+        let hDate = "-";
+        if (h.CreateDate) {
+          const hd = new Date(h.CreateDate);
+          if (!isNaN(hd.getTime())) {
+            hDate = `${String(hd.getDate()).padStart(2, '0')}/${String(hd.getMonth() + 1).padStart(2, '0')}/${hd.getFullYear()}`;
+          }
+        }
+        rows.push([
+          idx + 1,
+          (h.OrderPaymentNo || "").trim(),
+          hDate,
+          (h.Remarks || "-").trim(),
+          parseFloat(h.AmountPaid || 0)
+        ]);
+      });
+    } else {
+      rows.push([1, (payment.OrderPaymentNo || rawNo).trim(), paymentDateStr, (payment.Remarks || "-").trim(), currentPaid]);
+    }
+    rows.push([]);
+
+    // Financial totals
+    const totalEstCost = parseFloat(payment.TotalCostEstimated) || 0;
+    const initialAdvance = parseFloat(payment.AdvancePaid) || 0;
+    const totalPaidSum = history.length > 0 
+      ? history.reduce((acc, cur) => acc + (parseFloat(cur.AmountPaid) || 0), 0) + initialAdvance
+      : currentPaid + initialAdvance;
+    const balanceDue = Math.max(0, totalEstCost - totalPaidSum);
+
+    rows.push(["", "", "", "Estimated Order Value:", totalEstCost]);
+    rows.push(["", "", "", "Initial Advance Paid:", initialAdvance]);
+    rows.push(["", "", "", "Total Payments Received:", totalPaidSum - initialAdvance]);
+    rows.push(["", "", "", "Total Received To Date:", totalPaidSum]);
+    rows.push(["", "", "", "REMAINING BALANCE DUE:", balanceDue]);
+    rows.push([]);
+
+    // Signatures
+    rows.push(["PREPARED BY (STAFF)", "", "", "SUPPLIER / AUTHORIZED RECEIVER"]);
+    rows.push(["Staff Name:", (payment.CreateUser || "Staff").trim(), "", "Receiver Name:", custName || "CASH CUSTOMER"]);
+    rows.push(["Signature:", "______________________", "", "Signature:", "______________________"]);
+    rows.push(["Date:", "______________________", "", "Date:", "______________________"]);
+    rows.push([]);
+    rows.push(["*** System Generated Report ***"]);
+    rows.push(["Powered by Unipro SG"]);
+
+    const ws = XLSX.utils.aoa_to_sheet(rows);
+    ws["!cols"] = [{ wch: 6 }, { wch: 24 }, { wch: 16 }, { wch: 30 }, { wch: 18 }];
+    XLSX.utils.book_append_sheet(wb, ws, "Order Payment Receipt");
+
+    const excelBuffer = XLSX.write(wb, { type: "buffer", bookType: "xlsx" });
+    const downloadName = `Order_Payment_${rawNo.replace(/[^a-zA-Z0-9_\-]/g, "_")}.xlsx`;
+
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    res.setHeader("Content-Disposition", `attachment; filename="${downloadName}"`);
+    res.setHeader("Content-Length", excelBuffer.length);
+    return res.send(excelBuffer);
+  } catch (err) {
+    console.error("Order Payment Export Excel Error:", err);
+    return res.status(500).json({ success: false, message: "Failed to generate Excel: " + err.message });
+  }
+});
+
 module.exports = router;

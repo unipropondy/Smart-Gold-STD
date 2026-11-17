@@ -1,5 +1,7 @@
 import { ThemedText } from '@/components/themed-text';
+import { PrintReportModal } from '@/components/PrintReportModal';
 import { API_BASE_URL } from '@/constants/api';
+import { getStandardReportCss, renderStandardReportFooter, renderStandardReportHeader } from '@/utils/standardPrintReport';
 import { UNIPRO_LOGO_DATA_URI } from '@/utils/uniproLogo';
 import { Ionicons } from '@expo/vector-icons';
 import { Stack, useRouter } from 'expo-router';
@@ -72,6 +74,10 @@ export default function DepositScreen() {
   const [isCalendarOpen, setIsCalendarOpen] = useState(false);
   const [calendarMonth, setCalendarMonth] = useState(new Date().getMonth());
   const [calendarYear, setCalendarYear] = useState(new Date().getFullYear());
+
+  // Print Report Modal State
+  const [isPrintModalVisible, setIsPrintModalVisible] = useState(false);
+  const [activePrintDepositNo, setActivePrintDepositNo] = useState('');
 
   const monthNames = [
     "January", "February", "March", "April", "May", "June",
@@ -390,12 +396,458 @@ export default function DepositScreen() {
     fetchNextNumbers();
   };
 
+  // Dedicated helper to build standardized HTML for Deposit Receipt
+  const buildDepositReceiptHtml = (trimmedDepositNo: string, isReprint: boolean, printData: any) => {
+    const { company, deposit, history, payModes, sPayModeDetail, rates, inventoryItems } = printData;
+
+    // Company Details
+    const sCompAddress1 = (company.name || 'SMART').trim();
+    const sCompAddress2 = [company.address1, company.address2, company.country].filter(Boolean).join(' ');
+    const sCompAddress3 = [company.phone ? `Tel: ${company.phone}` : '', company.fax ? `Fax: ${company.fax}` : ''].filter(Boolean).join(' | ');
+
+    // Customer Details
+    const sCustomer1 = (deposit.CustomerName || customerName || '').trim();
+    const sCustomer2 = (deposit.Address1 || address1 || '').trim();
+    const sCustomer3 = (deposit.Address2 || address2 || '').trim();
+    const sCustomerCode = (deposit.CustomerCode || customerCode || '').trim();
+
+    // Rates
+    const s999 = rates?.rate999 || '-';
+    const s916 = rates?.rate916 || '-';
+    const s835 = rates?.rate835 || '-';
+
+    // Financial Values
+    const totalVal = parseFloat(deposit.TotalAmount) || 0;
+    const initialDepositVal = parseFloat(deposit.DepositAmount) || 0;
+    const amountPaidVal = parseFloat(deposit.AmountPaid) || 0;
+    const totalPaidToDate = initialDepositVal + amountPaidVal;
+    const balanceDue = totalVal - totalPaidToDate;
+
+    // Date formatting helper
+    const formatDate = (val: any) => {
+      if (!val) return '-';
+      const d = new Date(val);
+      if (isNaN(d.getTime())) return String(val).split('T')[0] || '-';
+      return `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`;
+    };
+
+    const depositDateFormatted = formatDate(deposit.DepositDate || deposit.CreateDate);
+    const sgTimeStr = new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
+
+    // Payment Mode breakdown string
+    let payModeDisplay = '';
+    if (payModes && payModes.length > 0) {
+      payModeDisplay = payModes.map((pm: any) => `${pm.payMode} ${parseFloat(pm.amount || 0).toFixed(2)}`).join(' ');
+    } else {
+      payModeDisplay = `CASH ${initialDepositVal.toFixed(2)}`;
+    }
+
+    const reportTitle = 'DEPOSIT';
+    const docTitle = `Deposit - ${trimmedDepositNo}`;
+
+    return `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <meta charset="utf-8" />
+          <title>${docTitle}</title>
+          <style>
+            @page {
+              size: A4 portrait;
+              margin: 0 !important;
+            }
+            ${getStandardReportCss()}
+
+            @media print {
+              @page {
+                margin: 0 !important;
+              }
+              html, body {
+                width: 210mm !important;
+                height: 100% !important;
+                margin: 0 !important;
+                padding: 0 !important;
+                background: #FFFFFF !important;
+                -webkit-print-color-adjust: exact !important;
+                print-color-adjust: exact !important;
+              }
+              .page-sheet {
+                width: 210mm !important;
+                min-height: 297mm !important;
+                height: 297mm !important;
+                margin: 0 !important;
+                padding: 12mm 14mm !important;
+                box-shadow: none !important;
+                display: flex !important;
+                flex-direction: column !important;
+                justify-content: space-between !important;
+                box-sizing: border-box !important;
+                page-break-after: avoid !important;
+                break-after: avoid !important;
+              }
+            }
+
+            html, body {
+              height: 100%;
+              margin: 0;
+              padding: 0;
+            }
+
+            .page-sheet {
+              width: 210mm;
+              min-height: 297mm;
+              padding: 12mm 14mm;
+              display: flex;
+              flex-direction: column;
+              justify-content: space-between;
+              box-sizing: border-box;
+            }
+
+            .report-main-content {
+              flex-grow: 1;
+            }
+
+            .std-footer-container {
+              margin-top: auto !important;
+              padding-top: 14px !important;
+              page-break-inside: avoid !important;
+              break-inside: avoid !important;
+            }
+
+            /* Cambria Typography across all elements */
+            *, *:before, *:after, body, div, table, tr, th, td, span, p, h1, h2, h3, h4, h5, h6 {
+              font-family: 'Cambria', Georgia, 'Times New Roman', serif !important;
+            }
+
+            body {
+              font-family: 'Cambria', Georgia, 'Times New Roman', serif !important;
+            }
+
+            .std-company-name {
+              font-family: 'Cambria', Georgia, serif !important;
+              font-size: 24px !important;
+              font-weight: 800 !important;
+              letter-spacing: 2px !important;
+              color: #A37416 !important;
+            }
+
+            .std-company-address {
+              font-family: 'Cambria', Georgia, serif !important;
+              font-size: 11px !important;
+              font-weight: 700 !important;
+              color: #1A1A1A !important;
+              letter-spacing: 0.5px !important;
+            }
+
+            .std-report-title {
+              font-family: 'Cambria', Georgia, serif !important;
+              font-size: 22px !important;
+              font-weight: 800 !important;
+              letter-spacing: 1.5px !important;
+              color: #4A3511 !important;
+            }
+
+            .std-printed-time {
+              font-family: 'Cambria', Georgia, serif !important;
+              font-size: 11.5px !important;
+              font-weight: 700 !important;
+              color: #222222 !important;
+            }
+
+            /* GOLD RATES BANNER */
+            .gold-rate-strip {
+              display: flex;
+              justify-content: space-around;
+              background: #FAF8F5;
+              border: 1px solid #C49A45;
+              border-radius: 4px;
+              padding: 6px 12px;
+              margin-top: 6px;
+              margin-bottom: 12px;
+              font-size: 11px;
+              font-weight: 700;
+              color: #222222;
+            }
+            .rate-cell span.rate-lbl {
+              color: #222222;
+              font-weight: 700;
+            }
+            .rate-cell span.rate-val {
+              color: #8C5D08;
+              font-weight: 800;
+              margin-left: 4px;
+            }
+
+            /* INFO GRID: Customer Details & Deposit Specification */
+            .info-grid {
+              display: grid;
+              grid-template-columns: 1fr 1fr;
+              gap: 16px;
+              margin-bottom: 12px;
+            }
+            .info-card {
+              border: 1px solid #C49A45;
+              background: #FAF8F5;
+              border-radius: 4px;
+              padding: 10px 14px;
+            }
+            .card-title {
+              font-size: 11.5px;
+              font-weight: 800;
+              color: #8C5D08;
+              border-bottom: 1px dotted #DDC89A;
+              padding-bottom: 5px;
+              margin-bottom: 8px;
+              text-transform: uppercase;
+              letter-spacing: 0.5px;
+            }
+            .info-row {
+              display: flex;
+              font-size: 11px;
+              margin-bottom: 3.5px;
+              line-height: 1.35;
+            }
+            .info-lbl {
+              width: 120px;
+              font-weight: 700;
+              color: #222222;
+              flex-shrink: 0;
+            }
+            .info-colon {
+              width: 15px;
+              font-weight: 700;
+              color: #222222;
+              text-align: center;
+              flex-shrink: 0;
+            }
+            .info-val {
+              color: #222222;
+              font-weight: 700;
+              flex-grow: 1;
+              word-break: break-word;
+            }
+
+            /* INITIAL DEPOSIT RECEIVED BANNER */
+            .deposit-highlight-card {
+              background: #FAF8F5;
+              border: 1px solid #C49A45;
+              border-radius: 4px;
+              padding: 12px 18px;
+              text-align: center;
+              margin-bottom: 12px;
+            }
+            .deposit-highlight-title {
+              font-size: 11px;
+              font-weight: 800;
+              color: #8C5D08;
+              letter-spacing: 1px;
+              text-transform: uppercase;
+              margin-bottom: 4px;
+            }
+            .deposit-highlight-amount {
+              font-size: 26px;
+              font-weight: 800;
+              color: #8C5D08;
+              margin-bottom: 4px;
+            }
+            .deposit-highlight-sub {
+              font-size: 10.5px;
+              font-weight: 700;
+              color: #555555;
+              letter-spacing: 0.5px;
+            }
+
+            /* SECTION TITLE */
+            .table-section-title {
+              font-size: 11px;
+              font-weight: 800;
+              color: #8C5D08;
+              text-transform: uppercase;
+              letter-spacing: 0.5px;
+              margin-top: 4px;
+              margin-bottom: 6px;
+            }
+
+            /* DETAIL / PAYMENT HISTORY TABLE */
+            .detail-table {
+              width: 100%;
+              border-collapse: collapse;
+              margin-top: 2px;
+              margin-bottom: 12px;
+              font-size: 11px;
+            }
+            .detail-table th {
+              background: #8C5D08;
+              color: #FFFFFF;
+              text-align: left;
+              padding: 6px 8px;
+              font-weight: 800;
+              border: 1px solid #734C06;
+              text-transform: uppercase;
+              font-size: 10px;
+              letter-spacing: 0.5px;
+            }
+            .detail-table td {
+              padding: 6px 8px;
+              border: 1px solid #D9C8A5;
+              background: #FFFFFF;
+              color: #222222;
+            }
+            .detail-table tr:nth-child(even) td {
+              background: #FAF8F5;
+            }
+
+            /* TOTALS SECTION */
+            .totals-section {
+              display: flex;
+              justify-content: flex-end;
+              margin-bottom: 14px;
+            }
+            .totals-box {
+              width: 320px;
+              border: 1px solid #C49A45;
+              background: #FAF8F5;
+              border-radius: 4px;
+              padding: 8px 12px;
+            }
+            .total-row {
+              display: flex;
+              justify-content: space-between;
+              font-size: 11.5px;
+              padding: 2.5px 0;
+              color: #222222;
+              font-weight: 700;
+            }
+            .total-row-grand {
+              border-top: 2px solid #8C5D08;
+              margin-top: 4px;
+              padding-top: 4px;
+              font-weight: 800;
+              font-size: 13.5px;
+              color: #8C5D08;
+            }
+          </style>
+        </head>
+        <body>
+          <div class="page-sheet">
+            <div class="report-main-content">
+              ${renderStandardReportHeader({
+                company: {
+                  name: sCompAddress1,
+                  address: [sCompAddress2, sCompAddress3].filter(Boolean).join(' ')
+                },
+                reportTitle: reportTitle,
+                printedDateTime: `${depositDateFormatted} ${sgTimeStr}`
+              })}
+
+              <!-- TWO-COLUMN INFO: CUSTOMER DETAILS vs DEPOSIT SPECIFICATION -->
+              <div class="info-grid">
+                <!-- Customer Details -->
+                <div class="info-card">
+                  <div class="card-title">CUSTOMER DETAILS</div>
+                  <div class="info-row"><span class="info-lbl">Customer</span><span class="info-colon">:</span><span class="info-val font-bold">${sCustomer1 || 'CASH CUSTOMER'}</span></div>
+                  <div class="info-row"><span class="info-lbl">Cust Code</span><span class="info-colon">:</span><span class="info-val font-bold">${sCustomerCode || '-'}</span></div>
+                  <div class="info-row"><span class="info-lbl">Address 1</span><span class="info-colon">:</span><span class="info-val">${sCustomer2 || '-'}</span></div>
+                  ${sCustomer3 ? `<div class="info-row"><span class="info-lbl">Address 2</span><span class="info-colon">:</span><span class="info-val">${sCustomer3}</span></div>` : ''}
+                </div>
+
+                <!-- Deposit Specification -->
+                <div class="info-card">
+                  <div class="card-title">DEPOSIT SPECIFICATION</div>
+                  <div class="info-row"><span class="info-lbl">Deposit No</span><span class="info-colon">:</span><span class="info-val font-bold">${trimmedDepositNo}</span></div>
+                  <div class="info-row"><span class="info-lbl">Salesman</span><span class="info-colon">:</span><span class="info-val font-bold">${deposit.SalesmanCode || 'sys'}</span></div>
+                  <div class="info-row"><span class="info-lbl">Deposit Used</span><span class="info-colon">:</span><span class="info-val font-bold">${deposit.DepositUsed === 'Y' ? 'YES (SETTLED)' : 'NO (ACTIVE)'}</span></div>
+                  <div class="info-row"><span class="info-lbl">Remarks</span><span class="info-colon">:</span><span class="info-val">${deposit.Remarks || '-'}</span></div>
+                </div>
+              </div>
+
+              <!-- INITIAL DEPOSIT RECEIVED SECTION -->
+              <div class="deposit-highlight-card">
+                <div class="deposit-highlight-title">INITIAL DEPOSIT RECEIVED</div>
+                <div class="deposit-highlight-amount">$ ${initialDepositVal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+                <div class="deposit-highlight-sub">PAYMENT MODE: ${payModeDisplay}</div>
+              </div>
+
+              <!-- PAYMENT TRANSACTIONS / HISTORY TABLE -->
+              <div class="table-section-title">DEPOSIT PAYMENT TRANSACTIONS / HISTORY</div>
+              <table class="detail-table">
+                <thead>
+                  <tr>
+                    <th style="width: 6%; text-align: center;">#</th>
+                    <th style="width: 28%;">PAYMENT VOUCHER</th>
+                    <th style="width: 22%; text-align: center;">DATE</th>
+                    <th style="width: 24%;">REMARKS</th>
+                    <th style="width: 20%; text-align: right;">AMOUNT PAID ($)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${
+                    history && history.length > 0
+                      ? history.map((h: any, idx: number) => `
+                        <tr>
+                          <td style="text-align: center; font-weight: 700;">${idx + 1}</td>
+                          <td style="font-weight: 700;">${h.DepositPaymentNo}</td>
+                          <td style="text-align: center; font-weight: 700;">${formatDate(h.DepositPaymentDate || h.CreateDate)}</td>
+                          <td style="font-weight: 700;">${h.Remarks || '-'}</td>
+                          <td style="text-align: right; font-weight: 800; color: #8C5D08;">$ ${parseFloat(h.AmtPaid || 0).toFixed(2)}</td>
+                        </tr>
+                      `).join('')
+                      : `
+                        <tr>
+                          <td style="text-align: center; font-weight: 700;">1</td>
+                          <td style="font-weight: 700;">${trimmedDepositNo}</td>
+                          <td style="text-align: center; font-weight: 700;">${depositDateFormatted}</td>
+                          <td style="font-weight: 700;">Initial Deposit</td>
+                          <td style="text-align: right; font-weight: 800; color: #8C5D08;">$ ${initialDepositVal.toFixed(2)}</td>
+                        </tr>
+                      `
+                  }
+                </tbody>
+              </table>
+
+              <!-- FINANCIAL SUMMARY -->
+              <div class="totals-section">
+                <div class="totals-box">
+                  <div class="total-row">
+                    <span>Total Agreement Value:</span>
+                    <span>$ ${totalVal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                  </div>
+                  <div class="total-row">
+                    <span>Initial Deposit Paid:</span>
+                    <span>$ ${initialDepositVal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                  </div>
+                  <div class="total-row">
+                    <span>Additional Payments Received:</span>
+                    <span>$ ${amountPaidVal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                  </div>
+                  <div class="total-row">
+                    <span>Total Received To Date:</span>
+                    <span style="font-weight: 800; color: #8C5D08;">$ ${totalPaidToDate.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                  </div>
+                  <div class="total-row total-row-grand">
+                    <span style="color: #8C5D08;">REMAINING BALANCE DUE:</span>
+                    <span style="color: #8C5D08;">$ ${balanceDue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            ${renderStandardReportFooter({
+              staff: {
+                staffLabel: 'PREPARED BY (STAFF)',
+                staffName: (deposit.CreateUser || 'pos').trim(),
+                receiverLabel: 'SUPPLIER / AUTHORIZED RECEIVER',
+                receiverName: (sCustomer1 || '-').trim()
+              }
+            })}
+          </div>
+        </body>
+      </html>
+    `;
+  };
+
   // Original Print Function matching subPrintInstallment(ByVal sInvoiceNo As String) in frmDeposit.vb
-  // Report: Reports/rptDeposit_HN.rpt
-  // Selection: {tblDepositSave.DepositNo} = @DepositNo
-  // Formula Fields: CompAddress1, CompAddress2, CompAddress3, Customer1, Customer2, Customer3, PaymodeDetail
-  // Print Copies: 1 copy (CR.PrintToPrinter(1, True, 0, 0))
-  const subPrintInstallment = async (sInvoiceNo: string) => {
+  const subPrintInstallment = async (sInvoiceNo: string, isReprint: boolean = false) => {
     const trimmedDepositNo = (sInvoiceNo || '').trim();
     if (!trimmedDepositNo) {
       return;
@@ -413,579 +865,69 @@ export default function DepositScreen() {
         return;
       }
 
-      const { company, deposit, history, payModes, sPayModeDetail, rates, inventoryItems } = json.data;
+      const htmlContent = buildDepositReceiptHtml(trimmedDepositNo, isReprint, json.data);
+      const docTitle = isReprint ? `Deposit Receipt (Duplicate) - ${trimmedDepositNo}` : `Deposit Receipt - ${trimmedDepositNo}`;
 
-      // Singapore Date & Time
-      const now = new Date();
-      const sgDateStr = now.toLocaleDateString('en-GB', {
-        timeZone: 'Asia/Singapore',
-        day: '2-digit',
-        month: '2-digit',
-        year: 'numeric',
-      });
-      const sgTimeStr = now.toLocaleTimeString('en-US', {
-        timeZone: 'Asia/Singapore',
-        hour: '2-digit',
-        minute: '2-digit',
-        hour12: true,
-      });
-
-      // Original Formula Field Values:
-      // CompAddress1: CompName
-      // CompAddress2: Address1 & " " & Address2 & " " & Country
-      // CompAddress3: PhoneNo & " " & FaxNo
-      // Customer1: txtCustomerName.Text
-      // Customer2: txtAddress1.Text
-      // Customer3: txtAddress2.Text
-      // PaymodeDetail: sPayModeDetail
-      const sCompAddress1 = (company.name || 'SMART').trim();
-      const sCompAddress2 = [company.address1, company.address2, company.country].filter(Boolean).join(' ');
-      const sCompAddress3 = [company.phone, company.fax].filter(Boolean).join(' ');
-
-      const sCustomer1 = (deposit.CustomerName || customerName || '').trim();
-      const sCustomer2 = (deposit.Address1 || address1 || '').trim();
-      const sCustomer3 = (deposit.Address2 || address2 || '').trim();
-      const sCustomerCode = (deposit.CustomerCode || customerCode || '').trim();
-      const sCustomerPhone = (deposit.Phone || '').trim();
-
-      const s999 = rates?.rate999 || '-';
-      const s916 = rates?.rate916 || '-';
-      const s835 = rates?.rate835 || '-';
-
-      const totalVal = parseFloat(deposit.TotalAmount) || 0;
-      const initialDepositVal = parseFloat(deposit.DepositAmount) || 0;
-      const amountPaidVal = parseFloat(deposit.AmountPaid) || 0;
-      const totalPaidToDate = initialDepositVal + amountPaidVal;
-      const balanceDue = totalVal - totalPaidToDate;
-
-      // Format date helper
-      const formatDate = (val: any) => {
-        if (!val) return '-';
-        const d = new Date(val);
-        if (isNaN(d.getTime())) return String(val).split('T')[0] || '-';
-        return d.toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' });
-      };
-
-      const depositDateFormatted = formatDate(deposit.DepositDate || deposit.CreateDate);
-
-      // Print HTML (1 single copy matching CR.PrintToPrinter(1, True, 0, 0))
-      const printHtml = `
-        <!DOCTYPE html>
-        <html>
-          <head>
-            <meta charset="utf-8" />
-            <title>Deposit Receipt - ${trimmedDepositNo}</title>
-            <style>
-              @page {
-                size: A4 portrait;
-                margin: 0;
-              }
-              *, *:before, *:after {
-                box-sizing: border-box;
-              }
-              body {
-                font-family: 'Segoe UI', Tahoma, Arial, sans-serif;
-                margin: 0;
-                padding: 0;
-                background-color: #525659;
-                color: #222;
-                -webkit-print-color-adjust: exact;
-                print-color-adjust: exact;
-              }
-              .page-sheet {
-                background: #FFFFFF;
-                width: 210mm;
-                min-height: 297mm;
-                margin: 10mm auto;
-                padding: 12mm 15mm;
-                box-shadow: 0 4px 15px rgba(0, 0, 0, 0.35);
-                display: flex;
-                flex-direction: column;
-                justify-content: space-between;
-              }
-              .report-header {
-                display: flex;
-                justify-content: space-between;
-                align-items: flex-start;
-                border-bottom: 2px solid #8D6409;
-                padding-bottom: 8px;
-              }
-              .header-brand {
-                display: flex;
-                align-items: center;
-                gap: 12px;
-                max-width: 58%;
-              }
-              .brand-logo {
-                width: 55px;
-                height: 55px;
-                object-fit: contain;
-              }
-              .company-name {
-                font-size: 18px;
-                font-weight: 800;
-                color: #5C4A28;
-                letter-spacing: 0.5px;
-                text-transform: uppercase;
-              }
-              .company-address {
-                font-size: 10px;
-                color: #555;
-                line-height: 1.35;
-                margin-top: 2px;
-              }
-              .header-meta {
-                text-align: right;
-              }
-              .report-badge {
-                font-size: 13px;
-                font-weight: 800;
-                color: #8D6409;
-                letter-spacing: 0.6px;
-                text-transform: uppercase;
-              }
-              .copy-tag {
-                display: inline-block;
-                background: #FDF4D9;
-                color: #7D5E19;
-                font-size: 9px;
-                font-weight: 700;
-                padding: 2px 8px;
-                border-radius: 4px;
-                margin-top: 3px;
-                border: 1px solid #E6D29F;
-              }
-              .doc-no {
-                font-size: 12px;
-                font-weight: 700;
-                color: #111;
-                margin-top: 4px;
-              }
-              .doc-no span {
-                color: #8D6409;
-                font-family: monospace;
-                font-size: 13px;
-              }
-              .meta-date {
-                font-size: 10px;
-                color: #666;
-                margin-top: 2px;
-              }
-
-              /* GOLD RATE STRIP */
-              .gold-rate-strip {
-                display: flex;
-                justify-content: center;
-                align-items: center;
-                gap: 16px;
-                background: #FAF6EB;
-                border: 1px solid #E6D7AD;
-                padding: 5px 12px;
-                margin: 8px 0;
-                border-radius: 4px;
-                font-size: 10px;
-              }
-              .rate-lbl {
-                font-weight: 600;
-                color: #6E5316;
-              }
-              .rate-val {
-                font-weight: 800;
-                color: #222;
-                margin-left: 4px;
-              }
-              .rate-divider {
-                color: #D4C3A3;
-              }
-
-              /* TWO-COLUMN INFO */
-              .info-grid {
-                display: grid;
-                grid-template-columns: 1fr 1fr;
-                gap: 12px;
-                margin-bottom: 8px;
-              }
-              .info-card {
-                background: #FAF8F4;
-                border: 1px solid #E5DFD4;
-                border-radius: 4px;
-                padding: 8px 10px;
-              }
-              .card-title {
-                font-size: 10px;
-                font-weight: 700;
-                color: #7D5E19;
-                border-bottom: 1px solid #E5DFD4;
-                padding-bottom: 3px;
-                margin-bottom: 4px;
-                text-transform: uppercase;
-              }
-              .info-row {
-                font-size: 10px;
-                line-height: 1.4;
-                display: flex;
-              }
-              .info-lbl {
-                width: 32%;
-                color: #666;
-                font-weight: 500;
-              }
-              .info-val {
-                width: 68%;
-                color: #222;
-              }
-              .font-bold {
-                font-weight: 700;
-              }
-
-              /* CURRENT DEPOSIT CARD */
-              .current-deposit-card {
-                background: #EBF7EE;
-                border: 1.5px solid #A3D9B1;
-                border-radius: 6px;
-                padding: 8px 14px;
-                text-align: center;
-                margin: 6px 0 10px 0;
-              }
-              .deposit-card-title {
-                font-size: 11px;
-                font-weight: 700;
-                color: #0F5132;
-                letter-spacing: 0.5px;
-                text-transform: uppercase;
-              }
-              .deposit-card-amount {
-                font-size: 22px;
-                font-weight: 800;
-                color: #0F5132;
-                margin-top: 2px;
-                font-family: monospace;
-              }
-
-              .paymode-strip {
-                margin-top: 4px;
-                font-size: 10px;
-                color: #2e7d32;
-                font-weight: 600;
-              }
-
-              .section-heading {
-                font-size: 11px;
-                font-weight: 700;
-                color: #5C4A28;
-                text-transform: uppercase;
-                margin: 6px 0 4px 0;
-                border-bottom: 1px solid #D4C3A3;
-                padding-bottom: 2px;
-              }
-
-              /* TABLE */
-              .receipt-table {
-                width: 100%;
-                border-collapse: collapse;
-                margin-bottom: 8px;
-                font-size: 10px;
-              }
-              .receipt-table th {
-                background: #F1ECE0;
-                color: #4A3A1E;
-                font-weight: 700;
-                padding: 5px 6px;
-                border: 1px solid #D8CFC0;
-              }
-              .receipt-table td {
-                padding: 5px 6px;
-                border: 1px solid #E5DFD4;
-                color: #222;
-              }
-
-              /* SUMMARY */
-              .summary-box {
-                margin-left: auto;
-                width: 65%;
-                background: #FAF8F4;
-                border: 1px solid #E5DFD4;
-                border-radius: 4px;
-                padding: 8px 12px;
-                margin-bottom: 10px;
-              }
-              .summary-row {
-                display: flex;
-                justify-content: space-between;
-                font-size: 10px;
-                line-height: 1.5;
-              }
-              .summary-divider {
-                border-top: 1px dashed #C9BC9F;
-                margin: 4px 0;
-              }
-              .grand-total-row {
-                padding-top: 2px;
-              }
-
-              /* SIGNATURE */
-              .signature-section {
-                display: grid;
-                grid-template-columns: 1fr 1fr;
-                gap: 20px;
-                margin-top: 8px;
-              }
-              .sign-card {
-                border: 1px dashed #B8AB91;
-                border-radius: 4px;
-                padding: 8px 10px;
-                font-size: 10px;
-                background: #FFFEFC;
-              }
-              .sign-header {
-                font-weight: 700;
-                color: #5C4A28;
-                border-bottom: 1px solid #EDE6D8;
-                padding-bottom: 3px;
-                margin-bottom: 6px;
-                font-size: 9px;
-              }
-              .sign-row {
-                color: #333;
-                line-height: 1.3;
-              }
-
-              /* FOOTER */
-              .report-footer {
-                margin-top: 8px;
-                text-align: center;
-              }
-              .footer-divider {
-                border-top: 1px solid #E0D7C5;
-                margin-bottom: 4px;
-              }
-              .footer-gen-text {
-                font-size: 9px;
-                color: #777;
-                font-style: italic;
-              }
-              .footer-powered {
-                font-size: 8px;
-                color: #999;
-                margin-top: 1px;
-              }
-
-              @media print {
-                body {
-                  background: none !important;
-                }
-                .page-sheet {
-                  width: 100% !important;
-                  min-height: 297mm !important;
-                  height: 100% !important;
-                  margin: 0 !important;
-                  padding: 10mm 12mm !important;
-                  box-shadow: none !important;
-                  display: flex !important;
-                  flex-direction: column !important;
-                }
-              }
-            </style>
-          </head>
-          <body>
-            <div class="page-sheet">
-              <!-- BRAND / HEADER -->
-              <div class="report-header">
-                <div class="header-brand">
-                  <img src="${UNIPRO_LOGO_DATA_URI}" alt="Logo" class="brand-logo" />
-                  <div class="brand-details">
-                    <div class="company-name">${sCompAddress1}</div>
-                    <div class="company-address">${sCompAddress2}</div>
-                    ${sCompAddress3 ? `<div class="company-address">${sCompAddress3}</div>` : ''}
-                  </div>
-                </div>
-                <div class="header-meta">
-                  <div class="report-badge">DEPOSIT RECEIPT</div>
-                  <div class="copy-tag">OFFICIAL RECEIPT</div>
-                  <div class="doc-no">DEPOSIT NO: <span>${trimmedDepositNo}</span></div>
-                  <div class="meta-date">Date: ${depositDateFormatted} &nbsp;|&nbsp; ${sgTimeStr}</div>
-                </div>
-              </div>
-
-              <!-- GOLD RATES BANNER -->
-              <div class="gold-rate-strip">
-                <div class="rate-cell"><span class="rate-lbl">Gold 999:</span> <span class="rate-val">$${s999}/g</span></div>
-                <div class="rate-divider">|</div>
-                <div class="rate-cell"><span class="rate-lbl">Gold 916 (22K):</span> <span class="rate-val">$${s916}/g</span></div>
-                <div class="rate-divider">|</div>
-                <div class="rate-cell"><span class="rate-lbl">Gold 835 (20K):</span> <span class="rate-val">$${s835}/g</span></div>
-              </div>
-
-              <!-- TWO-COLUMN INFO: CUSTOMER vs DEPOSIT DETAILS -->
-              <div class="info-grid">
-                <!-- Customer Box (Formula Fields: Customer1, Customer2, Customer3) -->
-                <div class="info-card">
-                  <div class="card-title">CUSTOMER DETAILS</div>
-                  <div class="info-row"><span class="info-lbl">Customer:</span> <span class="info-val font-bold">${sCustomer1 || 'CASH CUSTOMER'}</span></div>
-                  <div class="info-row"><span class="info-lbl">Cust Code:</span> <span class="info-val">${sCustomerCode || '-'}</span></div>
-                  <div class="info-row"><span class="info-lbl">Address 1:</span> <span class="info-val">${sCustomer2 || '-'}</span></div>
-                  ${sCustomer3 ? `<div class="info-row"><span class="info-lbl">Address 2:</span> <span class="info-val">${sCustomer3}</span></div>` : ''}
-                  ${sCustomerPhone ? `<div class="info-row"><span class="info-lbl">Contact:</span> <span class="info-val">${sCustomerPhone}</span></div>` : ''}
-                </div>
-
-                <!-- Deposit Specification Box -->
-                <div class="info-card">
-                  <div class="card-title">DEPOSIT SPECIFICATION</div>
-                  <div class="info-row"><span class="info-lbl">Deposit No:</span> <span class="info-val font-bold">${trimmedDepositNo}</span></div>
-                  <div class="info-row"><span class="info-lbl">Salesman:</span> <span class="info-val">${deposit.SalesmanCode || 'sys'}</span></div>
-                  <div class="info-row"><span class="info-lbl">Deposit Used:</span> <span class="info-val font-bold">${deposit.DepositUsed === 'Y' ? 'YES (SETTLED)' : 'NO (ACTIVE)'}</span></div>
-                  <div class="info-row"><span class="info-lbl">Remarks:</span> <span class="info-val">${deposit.Remarks || '-'}</span></div>
-                </div>
-              </div>
-
-              <!-- CURRENT DEPOSIT AMOUNT CARD -->
-              <div class="current-deposit-card">
-                <div class="deposit-card-title">INITIAL DEPOSIT RECEIVED</div>
-                <div class="deposit-card-amount">$ ${initialDepositVal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
-                <div class="paymode-strip">PAYMENT MODE: ${sPayModeDetail || 'CASH'}</div>
-              </div>
-
-              <!-- LINKED INVENTORY ITEMS (IF ANY) -->
-              ${
-                inventoryItems.length > 0
-                  ? `
-                <div class="section-heading">LINKED INVENTORY ITEMS</div>
-                <table class="receipt-table">
-                  <thead>
-                    <tr>
-                      <th style="width: 10%; text-align: center;">#</th>
-                      <th style="width: 25%; text-align: left;">Inventory Code</th>
-                      <th style="width: 45%; text-align: left;">Description</th>
-                      <th style="width: 20%; text-align: right;">Weight (g)</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    ${inventoryItems
-                      .map(
-                        (inv: any, idx: number) => `
-                      <tr>
-                        <td style="text-align: center;">${idx + 1}</td>
-                        <td style="text-align: left; font-weight: 600;">${inv.inventoryCode}</td>
-                        <td style="text-align: left;">${inv.description || '-'}</td>
-                        <td style="text-align: right;">${inv.totalWeight > 0 ? inv.totalWeight.toFixed(3) : '-'}</td>
-                      </tr>
-                    `
-                      )
-                      .join('')}
-                  </tbody>
-                </table>
-              `
-                  : ''
-              }
-
-              <!-- PAYMENT HISTORY / ACCUMULATED LEDGER -->
-              <div class="section-heading">DEPOSIT PAYMENT TRANSACTIONS / HISTORY</div>
-              <table class="receipt-table">
-                <thead>
-                  <tr>
-                    <th style="width: 8%; text-align: center;">#</th>
-                    <th style="width: 28%; text-align: left;">Payment Voucher</th>
-                    <th style="width: 24%; text-align: center;">Date</th>
-                    <th style="width: 22%; text-align: left;">Remarks</th>
-                    <th style="width: 18%; text-align: right;">Amount Paid ($)</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  ${
-                    history.length > 0
-                      ? history
-                          .map(
-                            (h: any, idx: number) => `
-                          <tr>
-                            <td style="text-align: center;">${idx + 1}</td>
-                            <td style="text-align: left; font-weight: 600;">${h.DepositPaymentNo}</td>
-                            <td style="text-align: center;">${formatDate(h.DepositPaymentDate || h.CreateDate)}</td>
-                            <td style="text-align: left;">${h.Remarks || '-'}</td>
-                            <td style="text-align: right; font-weight: 700;">$${parseFloat(h.AmtPaid || 0).toFixed(2)}</td>
-                          </tr>
-                        `
-                          )
-                          .join('')
-                      : `<tr><td colspan="5" style="text-align: center; color: #888; padding: 10px;">Initial Deposit Voucher: $${initialDepositVal.toFixed(2)}</td></tr>`
-                  }
-                </tbody>
-              </table>
-
-              <!-- SUMMARY FINANCIAL BALANCES -->
-              <div class="summary-box">
-                <div class="summary-row">
-                  <span class="sum-lbl">Total Agreement Value:</span>
-                  <span class="sum-val font-bold">$ ${totalVal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                </div>
-                <div class="summary-row">
-                  <span class="sum-lbl">Initial Deposit Paid:</span>
-                  <span class="sum-val">$ ${initialDepositVal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                </div>
-                <div class="summary-row">
-                  <span class="sum-lbl">Additional Payments Received:</span>
-                  <span class="sum-val">$ ${amountPaidVal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                </div>
-                <div class="summary-row">
-                  <span class="sum-lbl">Total Received To Date:</span>
-                  <span class="sum-val font-bold" style="color: #0F5132;">$ ${totalPaidToDate.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                </div>
-                <div class="summary-divider"></div>
-                <div class="summary-row grand-total-row">
-                  <span class="sum-lbl font-bold" style="font-size: 13px;">REMAINING BALANCE DUE:</span>
-                  <span class="sum-val font-bold" style="font-size: 15px; color: ${balanceDue <= 0.01 ? '#0F5132' : '#842029'};">
-                    $ ${balanceDue > 0 ? balanceDue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '0.00 (FULLY SETTLED)'}
-                  </span>
-                </div>
-              </div>
-
-              <!-- SIGNATURE SECTION -->
-              <div class="signature-section">
-                <div class="sign-card">
-                  <div class="sign-header">CUSTOMER ACKNOWLEDGEMENT</div>
-                  <div class="sign-row">Customer Name: ${sCustomer1 || '...............................'}</div>
-                  <div class="sign-row" style="margin-top: 14px;">Signature: ....................................................</div>
-                </div>
-                <div class="sign-card">
-                  <div class="sign-header">AUTHORIZED STORE OFFICER</div>
-                  <div class="sign-row">Received By: ${deposit.CreateUser || 'Staff'}</div>
-                  <div class="sign-row" style="margin-top: 14px;">Signature: ....................................................</div>
-                </div>
-              </div>
-
-              <!-- FOOTER -->
-              <div class="report-footer">
-                <div class="footer-divider"></div>
-                <div class="footer-gen-text">*** System Generated Deposit Receipt ***</div>
-                <div class="footer-powered">Powered by Unipro SG</div>
-              </div>
-            </div>
-
-            <script>
-              window.onload = function() {
-                setTimeout(function() {
-                  window.print();
-                }, 300);
-              };
-            </script>
-          </body>
-        </html>
+      const printScript = `
+        <script>
+          window.onload = function() {
+            setTimeout(function() {
+              window.print();
+            }, 300);
+          };
+        </script>
       `;
+      const printHtml = htmlContent.replace('</body>', `${printScript}</body>`);
 
       if (Platform.OS === 'web' && typeof window !== 'undefined') {
-        const printWindow = window.open('', '_blank', 'width=900,height=750');
-        if (printWindow) {
-          printWindow.document.open();
-          printWindow.document.write(printHtml);
-          printWindow.document.close();
-          showToast('Deposit receipt preview opened', 'success');
+        const frameId = '__deposit_receipt_print_frame__';
+        let iframe = document.getElementById(frameId) as HTMLIFrameElement;
+        if (!iframe) {
+          iframe = document.createElement('iframe');
+          iframe.id = frameId;
+          iframe.style.position = 'fixed';
+          iframe.style.right = '0';
+          iframe.style.bottom = '0';
+          iframe.style.width = '0';
+          iframe.style.height = '0';
+          iframe.style.border = '0';
+          iframe.style.visibility = 'hidden';
+          document.body.appendChild(iframe);
+        }
+
+        const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
+        if (iframeDoc && iframe.contentWindow) {
+          iframeDoc.open();
+          iframeDoc.write(htmlContent);
+          iframeDoc.title = docTitle;
+          iframeDoc.close();
+
+          setTimeout(() => {
+            try {
+              iframe.contentWindow?.focus();
+              iframe.contentWindow?.print();
+              showToast(`Deposit receipt ${trimmedDepositNo} print dialog opened`, 'success');
+            } catch (printErr) {
+              console.error('Iframe print error:', printErr);
+              const printWindow = window.open('', '_blank', 'width=900,height=750');
+              if (printWindow) {
+                printWindow.document.open();
+                printWindow.document.write(printHtml);
+                printWindow.document.title = docTitle;
+                printWindow.document.close();
+              }
+            }
+          }, 350);
         } else {
-          const blob = new Blob([printHtml], { type: 'text/html;charset=utf-8;' });
-          const url = URL.createObjectURL(blob);
-          const win = window.open(url, '_blank');
-          if (!win) {
-            showToast('Popup blocker prevented opening print preview. Please allow popups.', 'error');
+          const printWindow = window.open('', '_blank', 'width=900,height=750');
+          if (printWindow) {
+            printWindow.document.open();
+            printWindow.document.write(printHtml);
+            printWindow.document.title = docTitle;
+            printWindow.document.close();
+            showToast(`Deposit receipt ${trimmedDepositNo} preview opened`, 'success');
           } else {
-            showToast('Deposit receipt preview opened', 'success');
+            showToast('Popup blocker prevented opening print preview. Please allow popups.', 'error');
           }
         }
       } else {
@@ -1000,13 +942,118 @@ export default function DepositScreen() {
     }
   };
 
-  // Original VB.NET btnPrint_Click:
-  // If txtInvoiceNo.Text.Trim <> "" Then
-  //     subPrintInstallment(txtInvoiceNo.Text.Trim)
-  // End If
+  // Dedicated PDF Download Functionality
+  const handleDownloadPdf = async (sInvoiceNo?: string, isReprint: boolean = false) => {
+    const trimmedDepositNo = (sInvoiceNo || depositNo || '').trim();
+    if (!trimmedDepositNo) {
+      showToast('Validation Error: Deposit No is required to download PDF', 'error');
+      return;
+    }
+
+    try {
+      setLoading(true);
+      const res = await fetch(`${API_URL}/print-data?depositNo=${encodeURIComponent(trimmedDepositNo)}`);
+      const json = await res.json();
+
+      if (!json.success || !json.data) {
+        showToast(json.message || `Deposit record "${trimmedDepositNo}" not found`, 'error');
+        return;
+      }
+
+      const htmlContent = buildDepositReceiptHtml(trimmedDepositNo, isReprint, json.data);
+      const downloadFilename = `Deposit_Receipt_${trimmedDepositNo.replace(/[^a-zA-Z0-9_-]/g, '_')}.pdf`;
+
+      const pdfRes = await fetch(`${API_URL}/export-pdf`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          html: htmlContent,
+          filename: downloadFilename
+        })
+      });
+
+      if (!pdfRes.ok) {
+        throw new Error('Server returned error while generating PDF');
+      }
+
+      const pdfBlob = await pdfRes.blob();
+
+      if (Platform.OS === 'web' && typeof window !== 'undefined') {
+        const url = URL.createObjectURL(pdfBlob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = downloadFilename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+        showToast(`Deposit Receipt PDF downloaded: ${downloadFilename}`, 'success');
+      } else {
+        showToast('PDF generated successfully.', 'success');
+      }
+    } catch (err: any) {
+      console.error('PDF Export Error:', err);
+      showToast('Failed to download PDF: ' + (err.message || 'Error'), 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Dedicated Excel Download Functionality
+  const handleDownloadExcel = async (sInvoiceNo?: string, isReprint: boolean = false) => {
+    const trimmedDepositNo = (sInvoiceNo || depositNo || '').trim();
+    if (!trimmedDepositNo) {
+      showToast('Validation Error: Deposit No is required to download Excel', 'error');
+      return;
+    }
+
+    try {
+      setLoading(true);
+      const excelRes = await fetch(`${API_URL}/export-excel`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          depositNo: trimmedDepositNo,
+          isReprint: isReprint
+        })
+      });
+
+      if (!excelRes.ok) {
+        const errJson = await excelRes.json().catch(() => ({}));
+        throw new Error(errJson.message || 'Server error generating Excel file');
+      }
+
+      const excelBlob = await excelRes.blob();
+      const downloadFilename = `Deposit_Receipt_${trimmedDepositNo.replace(/[^a-zA-Z0-9_-]/g, '_')}.xlsx`;
+
+      if (Platform.OS === 'web' && typeof window !== 'undefined') {
+        const url = URL.createObjectURL(excelBlob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = downloadFilename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+        showToast(`Deposit Receipt Excel downloaded: ${downloadFilename}`, 'success');
+      } else {
+        showToast('Excel file generated successfully.', 'success');
+      }
+    } catch (err: any) {
+      console.error('Excel Export Error:', err);
+      showToast('Failed to download Excel: ' + (err.message || 'Error'), 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Original VB.NET btnPrint_Click / Reprint handler
   const handlePrint = () => {
     if (depositNo.trim() !== '') {
-      subPrintInstallment(depositNo.trim());
+      setActivePrintDepositNo(depositNo.trim());
+      setIsPrintModalVisible(true);
+    } else {
+      showToast('Please enter or select a Deposit No', 'error');
     }
   };
 
@@ -1690,6 +1737,42 @@ export default function DepositScreen() {
           </TouchableWithoutFeedback>
         </TouchableOpacity>
       </Modal>
+
+      {/* STANDARDIZED PRINT REPORT POPUP */}
+      <PrintReportModal
+        visible={isPrintModalVisible}
+        title="Print Report"
+        message="Do you want to print ?"
+        loading={loading}
+        onCancel={() => {
+          setIsPrintModalVisible(false);
+          setActivePrintDepositNo('');
+        }}
+        onPdf={() => {
+          const depNo = activePrintDepositNo || depositNo;
+          setIsPrintModalVisible(false);
+          setActivePrintDepositNo('');
+          if (depNo) {
+            handleDownloadPdf(depNo, true);
+          }
+        }}
+        onExcel={() => {
+          const depNo = activePrintDepositNo || depositNo;
+          setIsPrintModalVisible(false);
+          setActivePrintDepositNo('');
+          if (depNo) {
+            handleDownloadExcel(depNo, true);
+          }
+        }}
+        onPrint={() => {
+          const depNo = activePrintDepositNo || depositNo;
+          setIsPrintModalVisible(false);
+          setActivePrintDepositNo('');
+          if (depNo) {
+            subPrintInstallment(depNo, true);
+          }
+        }}
+      />
 
       {/* TOAST ALERT */}
       {toast && (

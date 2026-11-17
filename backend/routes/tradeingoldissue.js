@@ -1,6 +1,13 @@
 const express = require("express");
 const router = express.Router();
-const { sql } = require("../db");
+const { sql, poolPromise } = require("../db");
+
+// Helper to acquire database connection pool reliably
+const getPool = async (req) => {
+  if (req && req.pool) return req.pool;
+  if (poolPromise) return await poolPromise;
+  throw new Error("Database pool is not available.");
+};
 
 // GET /api/tradeingoldissue/customers
 // LOV for Customers
@@ -317,6 +324,200 @@ router.get("/print-data", async (req, res) => {
   } catch (error) {
     console.error("Fetch Trade In Print Data Error:", error);
     res.status(500).json({ success: false, message: "Error fetching trade-in print data: " + error.message });
+  }
+});
+
+// ================= EXPORT PDF ENDPOINT =================
+// POST /api/tradeingoldissue/export-pdf
+router.post("/export-pdf", async (req, res) => {
+  try {
+    const { html, filename } = req.body;
+    if (!html) {
+      return res.status(400).json({ success: false, message: "HTML content is required for PDF export." });
+    }
+
+    const { convertHtmlToPdf } = require("../utils/htmlToPdf");
+    const pdfBuffer = await convertHtmlToPdf(html);
+    const downloadName = (filename || "Trade_In_Gold_Issue_Voucher.pdf").replace(/[^a-zA-Z0-9_\-\.]/g, "_");
+
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `attachment; filename="${downloadName}"`);
+    res.setHeader("Content-Length", pdfBuffer.length);
+    return res.send(pdfBuffer);
+  } catch (err) {
+    console.error("Trade In Gold Issue Export PDF Error:", err);
+    return res.status(500).json({ success: false, message: "Failed to generate PDF: " + err.message });
+  }
+});
+
+// ================= EXPORT EXCEL ENDPOINT =================
+// POST /api/tradeingoldissue/export-excel
+router.post("/export-excel", async (req, res) => {
+  try {
+    const { invoiceNo, isReprint } = req.body;
+    const cleanNo = (invoiceNo || "").trim();
+    if (!cleanNo) {
+      return res.status(400).json({ success: false, message: "Voucher / Invoice Number is required." });
+    }
+
+    const pool = await getPool(req);
+
+    // 1. Company
+    const compResult = await pool.request().query("SELECT TOP 1 * FROM tblCompany");
+    const compRow = compResult.recordset[0] || {};
+    const companyName = String(compRow.Name || compRow.CompanyName || "SMART").trim();
+    const companyAddress = [compRow.Address1, compRow.Address2, compRow.City, compRow.Country].filter(Boolean).map(s => String(s).trim()).join(" ");
+
+    // 2. Header
+    let headerQuery = `
+      SELECT TOP 1 *
+      FROM tblTradeInHeader
+      WHERE RTRIM(LTRIM(CAST(InvoiceNo AS VARCHAR(50)))) = @InvoiceNo
+         OR RTRIM(LTRIM(CAST(InventoryCode AS VARCHAR(50)))) = @InvoiceNo
+         OR RTRIM(LTRIM(CAST(InventoryCode AS VARCHAR(50)))) = 'TI-' + @InvoiceNo
+    `;
+    let headerRes = await pool.request()
+      .input("InvoiceNo", sql.VarChar(50), cleanNo)
+      .query(headerQuery);
+
+    if (headerRes.recordset.length === 0) {
+      return res.status(404).json({ success: false, message: `Trade In Gold Issue record "${cleanNo}" not found.` });
+    }
+
+    const header = headerRes.recordset[0];
+    const targetInvCode = String(header.InventoryCode || cleanNo).trim();
+
+    // 3. Details
+    let detailQuery = `
+      SELECT *
+      FROM tblTradeInDetail
+      WHERE RTRIM(LTRIM(CAST(InventoryCode AS VARCHAR(50)))) = @InventoryCode
+         OR RTRIM(LTRIM(CAST(InvoiceNo AS VARCHAR(50)))) = @InvoiceNo
+    `;
+    let detailRes = await pool.request()
+      .input("InventoryCode", sql.VarChar(50), targetInvCode)
+      .input("InvoiceNo", sql.VarChar(50), String(header.InvoiceNo || cleanNo).trim())
+      .query(detailQuery);
+    const details = detailRes.recordset || [];
+
+    // 4. Gold Rates
+    const ratesResult = await pool.request().query("SELECT ClassCode, Rate FROM tblClass WHERE ClassCode IN ('24K', '22K', '835', '999', '916', '18K', 'SIL')");
+    const ratesMap = {};
+    ratesResult.recordset.forEach((r) => {
+      ratesMap[(r.ClassCode || "").trim().toUpperCase()] = r.Rate;
+    });
+    const s999 = ratesMap["24K"] !== undefined ? parseFloat(ratesMap["24K"]).toFixed(2) : (ratesMap["999"] ? parseFloat(ratesMap["999"]).toFixed(2) : "-");
+    const s916 = ratesMap["22K"] !== undefined ? parseFloat(ratesMap["22K"]).toFixed(2) : (ratesMap["916"] ? parseFloat(ratesMap["916"]).toFixed(2) : "-");
+    const s835 = ratesMap["835"] !== undefined ? parseFloat(ratesMap["835"]).toFixed(2) : (ratesMap["18K"] ? parseFloat(ratesMap["18K"]).toFixed(2) : "-");
+
+    // Dates
+    const rawDate = header.Date || header.CreateDate;
+    let voucherDateStr = "-";
+    if (rawDate) {
+      const d = new Date(rawDate);
+      if (!isNaN(d.getTime())) {
+        voucherDateStr = `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`;
+      }
+    }
+    const printTimeStr = new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
+
+    const reportTitle = "TRADE-IN GOLD ISSUE";
+
+    const XLSX = require("xlsx");
+    const wb = XLSX.utils.book_new();
+    const rows = [];
+
+    rows.push([companyName]);
+    rows.push([companyAddress]);
+    rows.push([]);
+    rows.push([reportTitle]);
+    rows.push([`Printed: ${voucherDateStr} ${printTimeStr}`]);
+    rows.push([]);
+
+    // Two panels
+    const custName = (header.CustomerName || "").trim();
+    const custAddress = [header.Address1, header.Address2, header.Address3].filter(Boolean).map(s => String(s).trim()).join(" ");
+
+    rows.push(["CUSTOMER INFORMATION", "", "", "TRADE-IN VOUCHER DETAILS"]);
+    rows.push(["Customer Code:", (header.CustomerCode || "-").trim(), "", "Voucher / Invoice No:", String(header.InvoiceNo || header.InventoryCode || cleanNo).trim()]);
+    rows.push(["Customer Name:", custName || "CASH CUSTOMER", "", "Voucher Date:", voucherDateStr]);
+    rows.push(["Address:", custAddress || "-", "", "Status:", "ISSUED"]);
+    rows.push(["Remarks:", (header.Remarks || "-").trim(), "", "Purity / Class:", (details[0]?.Class || "22K")]);
+    rows.push([]);
+
+    // Items table
+    rows.push(["#", "ITEM DESCRIPTION", "PURITY / CLASS", "GROSS WT (G)", "STONE WT (G)", "LOSS (G)", "RATE / G ($)", "TOTAL COST ($)"]);
+    let sumGross = 0;
+    let sumStone = 0;
+    let sumLoss = 0;
+    let sumCost = 0;
+
+    if (details.length > 0) {
+      details.forEach((item, idx) => {
+        const wt = parseFloat(item.Weight) || 0;
+        const st = parseFloat(item.StoneWeight) || 0;
+        const loss = parseFloat(item.GoldLoss) || 0;
+        const cost = parseFloat(item.TotalCost) || 0;
+        sumGross += wt;
+        sumStone += st;
+        sumLoss += loss;
+        sumCost += cost;
+
+        rows.push([
+          idx + 1,
+          (item.Description || "Trade-In Item").trim(),
+          (item.Class || "22K").trim(),
+          wt.toFixed(3),
+          st.toFixed(3),
+          loss.toFixed(3),
+          parseFloat(item.CostPerGram || 0),
+          cost
+        ]);
+      });
+    } else {
+      const hWt = parseFloat(header.Weight || header.TotalWeight || 0);
+      const hLoss = parseFloat(header.GoldLoss || header.TotalGoldLoss || 0);
+      const hSt = parseFloat(header.StoneWeight || header.TotalStoneWeight || 0);
+      const hCost = parseFloat(header.TotalCost || header.TradeInAmount || 0);
+      sumGross = hWt;
+      sumStone = hSt;
+      sumLoss = hLoss;
+      sumCost = hCost;
+
+      rows.push([1, "TRADE-IN GOLD ITEMS", "22K", hWt.toFixed(3), hSt.toFixed(3), hLoss.toFixed(3), parseFloat(header.CostPerGram || 0), hCost]);
+    }
+    rows.push([]);
+
+    // Summary totals
+    rows.push(["", "", "", "Total Gross Weight:", `${sumGross.toFixed(3)} g`]);
+    rows.push(["", "", "", "Total Stone Weight:", `${sumStone.toFixed(3)} g`]);
+    rows.push(["", "", "", "Total Gold Loss:", `${sumLoss.toFixed(3)} g`]);
+    rows.push(["", "", "", "TOTAL SETTLEMENT VALUE:", sumCost]);
+    rows.push([]);
+
+    // Signatures
+    rows.push(["PREPARED BY (STAFF)", "", "", "SUPPLIER / AUTHORIZED RECEIVER"]);
+    rows.push(["Staff Name:", "Staff", "", "Receiver Name:", custName || "CASH CUSTOMER"]);
+    rows.push(["Signature:", "______________________", "", "Signature:", "______________________"]);
+    rows.push(["Date:", "______________________", "", "Date:", "______________________"]);
+    rows.push([]);
+    rows.push(["*** System Generated Report ***"]);
+    rows.push(["Powered by Unipro SG"]);
+
+    const ws = XLSX.utils.aoa_to_sheet(rows);
+    ws["!cols"] = [{ wch: 6 }, { wch: 28 }, { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 18 }];
+    XLSX.utils.book_append_sheet(wb, ws, "Trade In Gold Issue");
+
+    const excelBuffer = XLSX.write(wb, { type: "buffer", bookType: "xlsx" });
+    const downloadName = `Trade_In_Gold_Issue_${cleanNo.replace(/[^a-zA-Z0-9_\-]/g, "_")}.xlsx`;
+
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    res.setHeader("Content-Disposition", `attachment; filename="${downloadName}"`);
+    res.setHeader("Content-Length", excelBuffer.length);
+    return res.send(excelBuffer);
+  } catch (err) {
+    console.error("Trade In Gold Issue Export Excel Error:", err);
+    return res.status(500).json({ success: false, message: "Failed to generate Excel: " + err.message });
   }
 });
 

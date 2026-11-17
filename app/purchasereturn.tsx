@@ -2,6 +2,7 @@ import { ThemedText } from '@/components/themed-text';
 import { API_BASE_URL } from '@/constants/api';
 import { useThemeContext } from '@/contexts/ThemeContext';
 import { useThemeColors } from '@/hooks/useThemeColors';
+import { getStandardReportCss, renderStandardReportFooter, renderStandardReportHeader } from '@/utils/standardPrintReport';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Stack, useRouter } from 'expo-router';
@@ -453,6 +454,413 @@ export default function PurchaseReturnScreen() {
     setQtyOnHand(0);
   };
 
+  // Helper to build the exact Purchase Return HTML for Print preview and PDF download
+  const buildPurchaseReturnHtml = (targetNo: string, printData: any) => {
+    const { company, formulas, header, details: itemsList } = printData;
+
+    const compAddress1 = formulas?.CompAddress1 || company?.name || 'SMART';
+    const compAddress2 = formulas?.CompAddress2 || [company?.address1, company?.address2, company?.city].filter(Boolean).join(' ');
+    const compAddress3 = formulas?.CompAddress3 || company?.phone || '';
+    const compAddress4 = formulas?.CompAddress4 || company?.fax || '';
+
+    const rawRetDate = header.ReturnDate || header.CreateDate;
+    let returnDateFormatted = '';
+    if (rawRetDate) {
+      const d = new Date(rawRetDate);
+      if (!isNaN(d.getTime())) {
+        returnDateFormatted = `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`;
+      } else {
+        returnDateFormatted = String(rawRetDate);
+      }
+    }
+
+    const now = new Date();
+    const printTimeStr = `${String(now.getDate()).padStart(2, '0')}/${String(now.getMonth() + 1).padStart(2, '0')}/${now.getFullYear()} ${now.toLocaleTimeString()}`;
+
+    const totalWt = parseFloat(header.TotalWeight) || (itemsList || []).reduce((acc: number, it: any) => acc + (parseFloat(it.Weight) || 0), 0);
+    const totalPcsCount = parseFloat(header.TotalPCS) || (itemsList || []).reduce((acc: number, it: any) => acc + (parseFloat(it.PCS) || 0), 0);
+    const totalVal = parseFloat(header.TotalValue) || (itemsList || []).reduce((acc: number, it: any) => acc + (parseFloat(it.TotalValue) || 0), 0);
+    const totalGstVal = parseFloat(header.TotalGst) || 0;
+    const netAmountVal = parseFloat(header.NetAmount) || (totalVal + totalGstVal);
+
+    return `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <meta charset="utf-8" />
+          <title>Purchase Return - ${targetNo}</title>
+          <style>
+            @page {
+              size: A4 portrait;
+              margin: 0 !important;
+            }
+            ${getStandardReportCss()}
+
+            @media print {
+              @page {
+                margin: 0 !important;
+              }
+              html, body {
+                width: 210mm !important;
+                height: 100% !important;
+                margin: 0 !important;
+                padding: 0 !important;
+                background: #FFFFFF !important;
+                -webkit-print-color-adjust: exact !important;
+                print-color-adjust: exact !important;
+              }
+              .page-sheet {
+                width: 210mm !important;
+                min-height: 297mm !important;
+                height: 297mm !important;
+                margin: 0 !important;
+                padding: 12mm 14mm !important;
+                box-shadow: none !important;
+                display: flex !important;
+                flex-direction: column !important;
+                justify-content: space-between !important;
+                box-sizing: border-box !important;
+                page-break-after: avoid !important;
+                break-after: avoid !important;
+              }
+            }
+
+            html, body {
+              height: 100%;
+              margin: 0;
+              padding: 0;
+            }
+
+            .page-sheet {
+              width: 210mm;
+              min-height: 297mm;
+              padding: 12mm 14mm;
+              display: flex;
+              flex-direction: column;
+              justify-content: space-between;
+              box-sizing: border-box;
+            }
+
+            .report-main-content {
+              flex-grow: 1;
+            }
+
+            .std-footer-container {
+              margin-top: auto !important;
+              padding-top: 16px !important;
+              page-break-inside: avoid !important;
+              break-inside: avoid !important;
+            }
+
+            /* Cambria Typography across all elements */
+            *, *:before, *:after, body, div, table, tr, th, td, span, p, h1, h2, h3, h4, h5, h6 {
+              font-family: 'Cambria', Georgia, 'Times New Roman', serif !important;
+            }
+
+            body {
+              font-family: 'Cambria', Georgia, 'Times New Roman', serif !important;
+            }
+
+            .std-company-name {
+              font-family: 'Cambria', Georgia, serif !important;
+              font-size: 24px !important;
+              font-weight: 800 !important;
+              letter-spacing: 2px !important;
+              color: #A37416 !important;
+            }
+
+            .std-company-address {
+              font-family: 'Cambria', Georgia, serif !important;
+              font-size: 11px !important;
+              font-weight: 700 !important;
+              color: #1A1A1A !important;
+              letter-spacing: 0.5px !important;
+            }
+
+            .std-report-title {
+              font-family: 'Cambria', Georgia, serif !important;
+              font-size: 22px !important;
+              font-weight: 800 !important;
+              letter-spacing: 1.5px !important;
+              color: #4A3511 !important;
+            }
+
+            .std-printed-time {
+              font-family: 'Cambria', Georgia, serif !important;
+              font-size: 11.5px !important;
+              font-weight: 700 !important;
+              color: #222222 !important;
+            }
+
+            /* Custom overrides for Purchase Return layout */
+            .info-grid {
+              display: grid;
+              grid-template-columns: 1fr 1fr;
+              gap: 16px;
+              margin-bottom: 12px;
+            }
+            .info-card {
+              border: 1px solid #C49A45;
+              background: #FAF8F5;
+              border-radius: 4px;
+              padding: 10px 14px;
+            }
+            .card-title {
+              font-size: 11.5px;
+              font-weight: 800;
+              color: #8C5D08;
+              border-bottom: 1px dotted #DDC89A;
+              padding-bottom: 5px;
+              margin-bottom: 8px;
+              text-transform: uppercase;
+              letter-spacing: 0.5px;
+            }
+            .info-table {
+              width: 100%;
+              border-collapse: collapse;
+              font-size: 11px;
+            }
+            .info-table td {
+              padding: 2.5px 0;
+              vertical-align: top;
+              line-height: 1.35;
+            }
+            .info-table .lbl {
+              width: 130px;
+              font-weight: 700;
+              color: #222222;
+            }
+            .info-table .colon {
+              width: 15px;
+              font-weight: 700;
+              color: #222222;
+              text-align: center;
+            }
+            .info-table .val {
+              color: #222222;
+              font-weight: 700;
+              word-break: break-word;
+            }
+
+            /* DETAIL ITEMS TABLE */
+            .detail-table {
+              width: 100%;
+              border-collapse: collapse;
+              margin-top: 4px;
+              margin-bottom: 12px;
+              font-size: 11px;
+            }
+            .detail-table th {
+              background-color: #8C5D08;
+              color: #FFFFFF;
+              text-align: left;
+              padding: 6px 8px;
+              font-weight: 800;
+              border: 1px solid #734C06;
+              text-transform: uppercase;
+              font-size: 10px;
+              letter-spacing: 0.5px;
+            }
+            .detail-table td {
+              padding: 6px 8px;
+              border: 1px solid #D9C8A5;
+              background-color: #FFFFFF;
+              color: #222222;
+            }
+            .detail-table tr:nth-child(even) td {
+              background-color: #FAF8F5;
+            }
+
+            /* TOTALS SECTION */
+            .totals-section {
+              display: flex;
+              justify-content: flex-end;
+              margin-bottom: 14px;
+            }
+            .totals-box {
+              width: 290px;
+              border: 1px solid #C49A45;
+              background-color: #FFFFFF;
+              border-radius: 4px;
+              padding: 8px 12px;
+            }
+            .total-row {
+              display: flex;
+              justify-content: space-between;
+              font-size: 11.5px;
+              padding: 3px 0;
+              color: #222222;
+              font-weight: 700;
+            }
+            .total-row-grand {
+              border-top: 2px solid #8C5D08;
+              margin-top: 4px;
+              padding-top: 4px;
+              font-weight: 800;
+              font-size: 13.5px;
+              color: #8C5D08;
+            }
+          </style>
+        </head>
+        <body>
+          <div class="page-sheet">
+            <div class="report-main-content">
+              ${renderStandardReportHeader({
+                company: {
+                  name: compAddress1,
+                  address: compAddress2,
+                  phone: compAddress3,
+                  fax: compAddress4
+                },
+                reportTitle: 'PURCHASE RETURN',
+                printedDateTime: printTimeStr
+              })}
+
+              <!-- INFO GRID -->
+              <div class="info-grid">
+                <!-- RETURN REFERENCE DETAILS -->
+                <div class="info-card">
+                  <div class="card-title">RETURN REFERENCE DETAILS</div>
+                  <table class="info-table">
+                    <tr>
+                      <td class="lbl">Return Reference<br/>Number</td>
+                      <td class="colon">:</td>
+                      <td class="val">${targetNo}</td>
+                    </tr>
+                    <tr>
+                      <td class="lbl">Return Date</td>
+                      <td class="colon">:</td>
+                      <td class="val">${returnDateFormatted || '-'}</td>
+                    </tr>
+                    <tr>
+                      <td class="lbl">Location Code</td>
+                      <td class="colon">:</td>
+                      <td class="val">${(header.LocationCode || '').trim() || '-'}</td>
+                    </tr>
+                    <tr>
+                      <td class="lbl">Created By</td>
+                      <td class="colon">:</td>
+                      <td class="val">${(header.CreateUser || 'sys').trim()}</td>
+                    </tr>
+                  </table>
+                </div>
+
+                <!-- SUPPLIER DETAILS -->
+                <div class="info-card">
+                  <div class="card-title">SUPPLIER DETAILS</div>
+                  <table class="info-table">
+                    <tr>
+                      <td class="lbl">Supplier Code</td>
+                      <td class="colon">:</td>
+                      <td class="val">${(header.SupplierCode || '').trim() || '-'}</td>
+                    </tr>
+                    <tr>
+                      <td class="lbl">Supplier Name</td>
+                      <td class="colon">:</td>
+                      <td class="val">${(header.SupplierName || '-').trim()}</td>
+                    </tr>
+                    <tr>
+                      <td class="lbl">Supplier Address</td>
+                      <td class="colon">:</td>
+                      <td class="val">${[header.SupplierAddress1, header.SupplierAddress2].filter(Boolean).map((s: string) => s.trim()).join(', ') || '-'}</td>
+                    </tr>
+                    <tr>
+                      <td class="lbl">Remarks</td>
+                      <td class="colon">:</td>
+                      <td class="val">${(header.Remarks || '').trim() || '-'}</td>
+                    </tr>
+                  </table>
+                </div>
+              </div>
+
+              <!-- DETAIL ITEMS TABLE -->
+              <table class="detail-table">
+                <thead>
+                  <tr>
+                    <th style="width: 4%; text-align: center;">#</th>
+                    <th style="width: 17%;">INVENTORY CODE</th>
+                    <th style="width: 25%;">DESCRIPTION</th>
+                    <th style="width: 12%; text-align: right;">WEIGHT (G)</th>
+                    <th style="width: 11%; text-align: right;">GOLD LOSS</th>
+                    <th style="width: 10%; text-align: right;">MC</th>
+                    <th style="width: 6%; text-align: center;">PCS</th>
+                    <th style="width: 15%; text-align: right;">VALUE ($)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${(itemsList || []).length > 0 ? (itemsList || []).map((row: any, idx: number) => {
+                    const invCode = (row.InventoryCode || '').trim();
+                    const desc = (row.Description || '').trim();
+                    const wt = parseFloat(row.Weight) || 0;
+                    const gloss = parseFloat(row.GoldLoss) || 0;
+                    const costPerGm = parseFloat(row.CostPerGram) || parseFloat(row.MC) || 0;
+                    const pces = parseInt(row.PCS) || 0;
+                    const val = parseFloat(row.TotalValue) || 0;
+
+                    return `
+                      <tr>
+                        <td style="text-align: center; font-weight: 700;">${idx + 1}</td>
+                        <td style="font-weight: 700;">${invCode}</td>
+                        <td style="font-weight: 700; text-transform: uppercase;">${desc || '-'}</td>
+                        <td style="text-align: right; font-weight: 700;">${wt.toFixed(3)}</td>
+                        <td style="text-align: right;">${gloss.toFixed(3)}</td>
+                        <td style="text-align: right;">$ ${costPerGm.toFixed(2)}</td>
+                        <td style="text-align: center; font-weight: 700;">${pces}</td>
+                        <td style="text-align: right; font-weight: 800; color: #8C5D08;">$ ${val.toFixed(2)}</td>
+                      </tr>
+                    `;
+                  }).join('') : `
+                    <tr>
+                      <td colspan="8" style="text-align: center; padding: 14px; color: #777;">
+                        No detail records in this Purchase Return
+                      </td>
+                    </tr>
+                  `}
+                </tbody>
+              </table>
+
+              <!-- TOTALS SECTION -->
+              <div class="totals-section">
+                <div class="totals-box">
+                  <div class="total-row">
+                    <span>Total Weight:</span>
+                    <span style="font-weight: 800;">${totalWt.toFixed(3)} G</span>
+                  </div>
+                  <div class="total-row">
+                    <span>Total PCS:</span>
+                    <span style="font-weight: 800;">${totalPcsCount}</span>
+                  </div>
+                  <div class="total-row">
+                    <span>Total Cost:</span>
+                    <span style="font-weight: 800;">$ ${totalVal.toFixed(2)}</span>
+                  </div>
+                  ${totalGstVal > 0 ? `
+                  <div class="total-row">
+                    <span>GST Amount:</span>
+                    <span style="font-weight: 800;">$ ${totalGstVal.toFixed(2)}</span>
+                  </div>` : ''}
+                  <div class="total-row total-row-grand">
+                    <span>NET TOTAL:</span>
+                    <span>$ ${netAmountVal.toFixed(2)}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            ${renderStandardReportFooter({
+              staff: {
+                staffLabel: 'PREPARED BY (STAFF)',
+                staffName: (header.CreateUser || 'UPS').trim(),
+                receiverLabel: 'SUPPLIER / AUTHORIZED RECEIVER',
+                receiverName: (header.SupplierName || '-').trim()
+              }
+            })}
+          </div>
+        </body>
+      </html>
+    `;
+  };
+
   // subPrintPurchaseReturn migrated from btnReport_Click in frmPurchaseReturn.vb
   const subPrintPurchaseReturn = async (returnNoToPrint?: string) => {
     const targetNo = (returnNoToPrint || refNo || '').trim();
@@ -471,439 +879,68 @@ export default function PurchaseReturnScreen() {
         return;
       }
 
-      const { company, formulas, header, details: itemsList } = result.data;
+      const htmlContent = buildPurchaseReturnHtml(targetNo, result.data);
 
-      // Extract Company and Formula values matching Crystal Report:
-      // CompAddress1: strCompanyname
-      // CompAddress2: strAddress (Address1 + Address2 + City)
-      // CompAddress3: sTelephone
-      // CompAddress4: sFax
-      const compAddress1 = formulas?.CompAddress1 || company?.name || 'SMART';
-      const compAddress2 = formulas?.CompAddress2 || [company?.address1, company?.address2, company?.city].filter(Boolean).join(' ');
-      const compAddress3 = formulas?.CompAddress3 || company?.phone || '';
-      const compAddress4 = formulas?.CompAddress4 || company?.fax || '';
-
-      // Format Date strings
-      const rawRetDate = header.ReturnDate || header.CreateDate;
-      let returnDateFormatted = '';
-      if (rawRetDate) {
-        const d = new Date(rawRetDate);
-        if (!isNaN(d.getTime())) {
-          returnDateFormatted = `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`;
-        } else {
-          returnDateFormatted = String(rawRetDate);
-        }
-      }
-
-      const now = new Date();
-      const printTimeStr = `${String(now.getDate()).padStart(2, '0')}/${String(now.getMonth() + 1).padStart(2, '0')}/${now.getFullYear()} ${now.toLocaleTimeString()}`;
-
-      const totalWt = parseFloat(header.TotalWeight) || (itemsList || []).reduce((acc: number, it: any) => acc + (parseFloat(it.Weight) || 0), 0);
-      const totalPcsCount = parseFloat(header.TotalPCS) || (itemsList || []).reduce((acc: number, it: any) => acc + (parseFloat(it.PCS) || 0), 0);
-      const totalVal = parseFloat(header.TotalValue) || (itemsList || []).reduce((acc: number, it: any) => acc + (parseFloat(it.TotalValue) || 0), 0);
-      const totalGstVal = parseFloat(header.TotalGst) || 0;
-      const netAmountVal = parseFloat(header.NetAmount) || (totalVal + totalGstVal);
-
-      const printHtml = `
-        <!DOCTYPE html>
-        <html>
-          <head>
-            <meta charset="utf-8" />
-            <title>Purchase Return - ${targetNo}</title>
-            <style>
-              @page {
-                size: A4 portrait;
-                margin: 0;
-              }
-              *, *:before, *:after {
-                box-sizing: border-box;
-              }
-              body {
-                font-family: 'Segoe UI', Tahoma, Arial, sans-serif;
-                margin: 0;
-                padding: 0;
-                background-color: #525659;
-                color: #222;
-                -webkit-print-color-adjust: exact;
-                print-color-adjust: exact;
-              }
-              .page-sheet {
-                background: #FFFFFF;
-                width: 210mm;
-                min-height: 297mm;
-                margin: 10mm auto;
-                padding: 12mm 15mm;
-                box-shadow: 0 0 14px rgba(0,0,0,0.4);
-                display: flex;
-                flex-direction: column;
-                justify-content: space-between;
-              }
-              @media print {
-                body {
-                  background: #FFFFFF;
-                }
-                .page-sheet {
-                  margin: 0;
-                  padding: 10mm 12mm;
-                  width: 100%;
-                  min-height: 100%;
-                  box-shadow: none;
-                }
-              }
-
-              /* HEADER SECTION (clsCompany.getCompanyName formulas) */
-              .comp-header {
-                text-align: center;
-                border-bottom: 2px solid #9E741D;
-                padding-bottom: 8px;
-                margin-bottom: 10px;
-              }
-              .comp-name {
-                font-size: 20px;
-                font-weight: 800;
-                letter-spacing: 1.5px;
-                color: #5A3F0C;
-                text-transform: uppercase;
-                margin-bottom: 3px;
-              }
-              .comp-details {
-                font-size: 11px;
-                color: #444;
-                line-height: 1.4;
-              }
-
-              /* TITLE BADGE */
-              .doc-badge-container {
-                display: flex;
-                justify-content: space-between;
-                align-items: center;
-                background: #FBF6EC;
-                border: 1px solid #E2D3B3;
-                border-radius: 6px;
-                padding: 8px 14px;
-                margin-bottom: 12px;
-              }
-              .doc-title {
-                font-size: 15px;
-                font-weight: 800;
-                color: #8C5D08;
-                letter-spacing: 1px;
-                text-transform: uppercase;
-              }
-              .doc-print-time {
-                font-size: 10px;
-                color: #77664B;
-              }
-
-              /* INFO GRID */
-              .info-grid {
-                display: grid;
-                grid-template-columns: 1fr 1fr;
-                gap: 12px;
-                margin-bottom: 14px;
-              }
-              .info-card {
-                border: 1px solid #E6DAC5;
-                background: #FAF8F5;
-                border-radius: 5px;
-                padding: 8px 12px;
-              }
-              .card-title {
-                font-size: 11px;
-                font-weight: 700;
-                color: #7A5716;
-                border-bottom: 1px solid #ECE1CD;
-                padding-bottom: 3px;
-                margin-bottom: 6px;
-                text-transform: uppercase;
-                letter-spacing: 0.5px;
-              }
-              .info-row {
-                display: flex;
-                font-size: 11px;
-                margin-bottom: 3px;
-                line-height: 1.35;
-              }
-              .info-lbl {
-                width: 110px;
-                font-weight: 600;
-                color: #665235;
-                flex-shrink: 0;
-              }
-              .info-val {
-                color: #1A1A1A;
-                flex-grow: 1;
-                word-break: break-word;
-              }
-
-              /* DETAIL TABLE (rptPurchaseReturn.rpt) */
-              .detail-table {
-                width: 100%;
-                border-collapse: collapse;
-                margin-bottom: 12px;
-                font-size: 11px;
-              }
-              .detail-table th {
-                background: #8C5D08;
-                color: #FFFFFF;
-                text-align: left;
-                padding: 6px 8px;
-                font-weight: 700;
-                border: 1px solid #734C06;
-                text-transform: uppercase;
-                font-size: 10px;
-                letter-spacing: 0.5px;
-              }
-              .detail-table td {
-                padding: 6px 8px;
-                border: 1px solid #E8DECC;
-                background: #FFFFFF;
-              }
-              .detail-table tr:nth-child(even) td {
-                background: #FAF8F5;
-              }
-
-              /* TOTALS SECTION */
-              .totals-section {
-                display: flex;
-                justify-content: flex-end;
-                margin-bottom: 14px;
-              }
-              .totals-box {
-                width: 270px;
-                border: 1px solid #E6DAC5;
-                background: #FAF8F5;
-                border-radius: 5px;
-                padding: 8px 12px;
-              }
-              .total-row {
-                display: flex;
-                justify-content: space-between;
-                font-size: 11px;
-                padding: 3px 0;
-                color: #444;
-              }
-              .total-row-grand {
-                border-top: 2px solid #8C5D08;
-                margin-top: 4px;
-                padding-top: 4px;
-                font-weight: 800;
-                font-size: 13px;
-                color: #8C5D08;
-              }
-
-              /* SIGNATURES */
-              .sign-grid {
-                display: grid;
-                grid-template-columns: 1fr 1fr;
-                gap: 25px;
-                margin-top: 15px;
-              }
-              .sign-card {
-                padding: 6px 10px;
-                border: 1px solid #EFE4D0;
-                background: #FAF8F5;
-                border-radius: 4px;
-              }
-              .sign-title {
-                font-size: 10px;
-                font-weight: 700;
-                color: #7A5716;
-                text-transform: uppercase;
-                margin-bottom: 30px;
-              }
-              .sign-line {
-                border-bottom: 1px solid #444;
-                margin-bottom: 4px;
-              }
-              .sign-sub {
-                font-size: 10px;
-                color: #555;
-                display: flex;
-                justify-content: space-between;
-              }
-
-              /* FOOTER */
-              .footer-bar {
-                margin-top: 14px;
-                text-align: center;
-                border-top: 1px solid #E2D3B3;
-                padding-top: 8px;
-                font-size: 10px;
-                color: #7C694F;
-              }
-            </style>
-          </head>
-          <body>
-            <div class="page-sheet">
-              <div>
-                <!-- COMPANY HEADER (clsCompany.getCompanyName) -->
-                <div class="comp-header">
-                  <div class="comp-name">${compAddress1}</div>
-                  <div class="comp-details">
-                    ${compAddress2 ? `<div>${compAddress2}</div>` : ''}
-                    ${compAddress3 || compAddress4 ? `<div>${compAddress3 ? 'Tel: ' + compAddress3 : ''} ${compAddress4 ? ' | Fax: ' + compAddress4 : ''}</div>` : ''}
-                  </div>
-                </div>
-
-                <!-- TITLE BADGE -->
-                <div class="doc-badge-container">
-                  <div class="doc-title">PURCHASE RETURN</div>
-                  <div class="doc-print-time">Printed: ${printTimeStr} (1 Copy)</div>
-                </div>
-
-                <!-- INFO GRID -->
-                <div class="info-grid">
-                  <!-- RETURN IDENTIFICATION -->
-                  <div class="info-card">
-                    <div class="card-title">RETURN REFERENCE DETAILS</div>
-                    <div class="info-row"><span class="info-lbl">Return Ref No:</span><span class="info-val font-bold">${targetNo}</span></div>
-                    <div class="info-row"><span class="info-lbl">Return Date:</span><span class="info-val">${returnDateFormatted || '-'}</span></div>
-                    <div class="info-row"><span class="info-lbl">Location Code:</span><span class="info-val">${(header.LocationCode || '').trim() || '-'}</span></div>
-                    <div class="info-row"><span class="info-lbl">Created By:</span><span class="info-val">${(header.CreateUser || 'sys').trim()}</span></div>
-                  </div>
-
-                  <!-- SUPPLIER & PARTICULARS -->
-                  <div class="info-card">
-                    <div class="card-title">SUPPLIER DETAILS</div>
-                    <div class="info-row"><span class="info-lbl">Supplier Code:</span><span class="info-val font-bold">${(header.SupplierCode || '').trim() || '-'}</span></div>
-                    ${header.SupplierName ? `<div class="info-row"><span class="info-lbl">Supplier Name:</span><span class="info-val font-bold">${(header.SupplierName || '').trim()}</span></div>` : ''}
-                    ${header.SupplierAddress1 || header.SupplierAddress2 ? `<div class="info-row"><span class="info-lbl">Address:</span><span class="info-val">${[header.SupplierAddress1, header.SupplierAddress2].filter(Boolean).map((s: string) => s.trim()).join(', ')}</span></div>` : ''}
-                    <div class="info-row"><span class="info-lbl">Remarks:</span><span class="info-val">${(header.Remarks || '').trim() || '-'}</span></div>
-                  </div>
-                </div>
-
-                <!-- DETAIL ITEMS TABLE (rptPurchaseReturn.rpt) -->
-                <table class="detail-table">
-                  <thead>
-                    <tr>
-                      <th style="width: 5%; text-align: center;">#</th>
-                      <th style="width: 18%;">Inventory Code</th>
-                      <th style="width: 25%;">Description</th>
-                      <th style="width: 10%; text-align: right;">Weight (g)</th>
-                      <th style="width: 9%; text-align: right;">Gold Loss</th>
-                      <th style="width: 11%; text-align: right;">Cost/Gram ($)</th>
-                      <th style="width: 7%; text-align: center;">PCS</th>
-                      <th style="width: 15%; text-align: right;">Value ($)</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    ${(itemsList || []).length > 0 ? (itemsList || []).map((row: any, idx: number) => {
-                      const invCode = (row.InventoryCode || '').trim();
-                      const desc = (row.Description || '').trim();
-                      const wt = parseFloat(row.Weight) || 0;
-                      const gloss = parseFloat(row.GoldLoss) || 0;
-                      const costPerGm = parseFloat(row.CostPerGram) || 0;
-                      const pces = parseInt(row.PCS) || 0;
-                      const val = parseFloat(row.TotalValue) || 0;
-
-                      return `
-                        <tr>
-                          <td style="text-align: center;">${idx + 1}</td>
-                          <td><strong>${invCode}</strong></td>
-                          <td>${desc || '-'}</td>
-                          <td style="text-align: right;">${wt.toFixed(3)}</td>
-                          <td style="text-align: right;">${gloss.toFixed(3)}</td>
-                          <td style="text-align: right;">$ ${costPerGm.toFixed(2)}</td>
-                          <td style="text-align: center;">${pces}</td>
-                          <td style="text-align: right; font-weight: 700; color: #8C5D08;">$ ${val.toFixed(2)}</td>
-                        </tr>
-                      `;
-                    }).join('') : `
-                      <tr>
-                        <td colspan="8" style="text-align: center; padding: 14px; color: #777;">
-                          No detail records in this Purchase Return
-                        </td>
-                      </tr>
-                    `}
-                  </tbody>
-                </table>
-
-                <!-- TOTALS SECTION -->
-                <div class="totals-section">
-                  <div class="totals-box">
-                    <div class="total-row">
-                      <span>Total Weight:</span>
-                      <span style="font-weight: 600;">${totalWt.toFixed(3)} g</span>
-                    </div>
-                    <div class="total-row">
-                      <span>Total PCS:</span>
-                      <span style="font-weight: 600;">${totalPcsCount}</span>
-                    </div>
-                    <div class="total-row">
-                      <span>Total Cost:</span>
-                      <span>$ ${totalVal.toFixed(2)}</span>
-                    </div>
-                    ${totalGstVal > 0 ? `
-                    <div class="total-row">
-                      <span>GST Amount:</span>
-                      <span>$ ${totalGstVal.toFixed(2)}</span>
-                    </div>` : ''}
-                    <div class="total-row total-row-grand">
-                      <span>NET TOTAL:</span>
-                      <span>$ ${netAmountVal.toFixed(2)}</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <div>
-                <!-- SIGNATURES -->
-                <div class="sign-grid">
-                  <div class="sign-card">
-                    <div class="sign-title">Prepared By (Staff)</div>
-                    <div class="sign-line"></div>
-                    <div class="sign-sub">
-                      <span>Staff: ${(header.CreateUser || 'sys').trim()}</span>
-                      <span>Date: ........................</span>
-                    </div>
-                  </div>
-                  <div class="sign-card">
-                    <div class="sign-title">Supplier / Authorized Receiver</div>
-                    <div class="sign-line"></div>
-                    <div class="sign-sub">
-                      <span>Signature</span>
-                      <span>Date: ........................</span>
-                    </div>
-                  </div>
-                </div>
-
-                <!-- FOOTER -->
-                <div class="footer-bar">
-                  *** Official Purchase Return Document - System Generated by SmartGold POS ***
-                </div>
-              </div>
-            </div>
-
-            <script>
-              window.onload = function() {
-                setTimeout(function() {
-                  window.print();
-                }, 300);
-              };
-            </script>
-          </body>
-        </html>
+      const printScript = `
+        <script>
+          window.onload = function() {
+            setTimeout(function() {
+              window.print();
+            }, 300);
+          };
+        </script>
       `;
+      const printHtml = htmlContent.replace('</body>', `${printScript}</body>`);
 
       if (Platform.OS === 'web' && typeof window !== 'undefined') {
-        const printWindow = window.open('', '_blank', 'width=900,height=750');
-        if (printWindow) {
-          printWindow.document.open();
-          printWindow.document.write(printHtml);
-          printWindow.document.close();
-          showToast(`Purchase Return ${targetNo} print preview opened`);
+        const frameId = '__purchase_return_print_frame__';
+        let iframe = document.getElementById(frameId) as HTMLIFrameElement;
+        if (!iframe) {
+          iframe = document.createElement('iframe');
+          iframe.id = frameId;
+          iframe.style.position = 'fixed';
+          iframe.style.right = '0';
+          iframe.style.bottom = '0';
+          iframe.style.width = '0';
+          iframe.style.height = '0';
+          iframe.style.border = '0';
+          iframe.style.visibility = 'hidden';
+          document.body.appendChild(iframe);
+        }
+
+        const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
+        if (iframeDoc && iframe.contentWindow) {
+          iframeDoc.open();
+          iframeDoc.write(htmlContent);
+          iframeDoc.title = `Purchase Return - ${targetNo}`;
+          iframeDoc.close();
+
+          setTimeout(() => {
+            try {
+              iframe.contentWindow?.focus();
+              iframe.contentWindow?.print();
+              showToast(`Purchase Return ${targetNo} print dialog opened`);
+            } catch (printErr) {
+              console.error('Iframe print error:', printErr);
+              // Fallback to window.open if iframe printing is blocked
+              const printWindow = window.open('', '_blank', 'width=900,height=750');
+              if (printWindow) {
+                printWindow.document.open();
+                printWindow.document.write(printHtml);
+                printWindow.document.title = `Purchase Return - ${targetNo}`;
+                printWindow.document.close();
+              }
+            }
+          }, 350);
         } else {
-          const blob = new Blob([printHtml], { type: 'text/html;charset=utf-8;' });
-          const url = URL.createObjectURL(blob);
-          const a = document.createElement('a');
-          a.href = url;
-          a.target = '_blank';
-          document.body.appendChild(a);
-          a.click();
-          document.body.removeChild(a);
-          URL.revokeObjectURL(url);
-          showToast(`Purchase Return ${targetNo} print preview opened`);
+          const printWindow = window.open('', '_blank', 'width=900,height=750');
+          if (printWindow) {
+            printWindow.document.open();
+            printWindow.document.write(printHtml);
+            printWindow.document.title = `Purchase Return - ${targetNo}`;
+            printWindow.document.close();
+            showToast(`Purchase Return ${targetNo} print preview opened`);
+          }
         }
       } else {
         showToast(`Purchase Return ${targetNo} sent to printer.`, 'success');
@@ -911,6 +948,111 @@ export default function PurchaseReturnScreen() {
     } catch (err: any) {
       console.error(err);
       showToast('Failed to load Purchase Return print data', 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Direct PDF Download functionality
+  const handleDownloadPdf = async (returnNoToExport?: string) => {
+    const targetNo = (returnNoToExport || refNo || '').trim();
+    if (!targetNo) {
+      showToast('Return Reference Number is required', 'error');
+      return;
+    }
+
+    try {
+      setLoading(true);
+      const res = await fetch(`${API_URL}/purchasereturn/print-data/${encodeURIComponent(targetNo)}`);
+      const result = await res.json();
+
+      if (!result.success || !result.data) {
+        showToast(result.message || `No Purchase Return records found for: ${targetNo}`, 'error');
+        return;
+      }
+
+      const htmlContent = buildPurchaseReturnHtml(targetNo, result.data);
+      const downloadFilename = `Purchase_Return_${targetNo}.pdf`;
+
+      // Request PDF conversion from backend headless browser
+      const pdfRes = await fetch(`${API_URL}/purchasereturn/export-pdf`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          html: htmlContent,
+          filename: downloadFilename
+        })
+      });
+
+      if (!pdfRes.ok) {
+        throw new Error('Server returned error while generating PDF');
+      }
+
+      const pdfBlob = await pdfRes.blob();
+
+      if (Platform.OS === 'web' && typeof window !== 'undefined') {
+        const url = URL.createObjectURL(pdfBlob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = downloadFilename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+        showToast(`Purchase Return PDF downloaded: ${downloadFilename}`, 'success');
+      } else {
+        showToast('PDF generated successfully.', 'success');
+      }
+    } catch (err: any) {
+      console.error('PDF Export Error:', err);
+      showToast('Failed to download PDF: ' + (err.message || 'Error'), 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Direct Excel Download functionality
+  const handleDownloadExcel = async (returnNoToExport?: string) => {
+    const targetNo = (returnNoToExport || refNo || '').trim();
+    if (!targetNo) {
+      showToast('Return Reference Number is required', 'error');
+      return;
+    }
+
+    try {
+      setLoading(true);
+      const excelRes = await fetch(`${API_URL}/purchasereturn/export-excel`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          returnNo: targetNo
+        })
+      });
+
+      if (!excelRes.ok) {
+        const errJson = await excelRes.json().catch(() => ({}));
+        throw new Error(errJson.message || 'Server error generating Excel file');
+      }
+
+      const excelBlob = await excelRes.blob();
+      const downloadFilename = `Purchase_Return_${targetNo}.xlsx`;
+
+      if (Platform.OS === 'web' && typeof window !== 'undefined') {
+        const url = URL.createObjectURL(excelBlob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = downloadFilename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+        showToast(`Purchase Return Excel downloaded: ${downloadFilename}`, 'success');
+      } else {
+        showToast('Excel file generated successfully.', 'success');
+      }
+    } catch (err: any) {
+      console.error('Excel Export Error:', err);
+      showToast('Failed to download Excel: ' + (err.message || 'Error'), 'error');
     } finally {
       setLoading(false);
     }
@@ -1033,7 +1175,26 @@ export default function PurchaseReturnScreen() {
             onPress={() => subPrintPurchaseReturn(refNo)}
             disabled={!refNo}
           >
+            <Ionicons name="print-outline" size={14} color="#5C4A28" />
             <ThemedText style={styles.printBtnText}>Print</ThemedText>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.printBtn, !refNo && { opacity: 0.5 }]}
+            onPress={() => handleDownloadPdf(refNo)}
+            disabled={!refNo}
+          >
+            <Ionicons name="download-outline" size={14} color="#B3261E" />
+            <ThemedText style={[styles.printBtnText, { color: '#B3261E' }]}>PDF</ThemedText>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.printBtn, !refNo && { opacity: 0.5 }]}
+            onPress={() => handleDownloadExcel(refNo)}
+            disabled={!refNo}
+          >
+            <Ionicons name="grid-outline" size={14} color="#2E7D32" />
+            <ThemedText style={[styles.printBtnText, { color: '#2E7D32' }]}>Excel</ThemedText>
           </TouchableOpacity>
         </View>
       </View>
@@ -1475,25 +1636,19 @@ export default function PurchaseReturnScreen() {
       <Modal visible={printConfirmReturnNo !== null} transparent animationType="fade">
         <TouchableOpacity style={styles.modalOverlay} activeOpacity={1}>
           <TouchableWithoutFeedback>
-            <View style={[styles.modalContainer, { maxWidth: 360 }]}>
+            <View style={[styles.modalContainer, { maxWidth: 390 }]}>
               <View style={styles.modalHeader}>
-                <ThemedText style={styles.modalTitle}>Print Option</ThemedText>
+                <ThemedText style={styles.modalTitle}>Purchase Return Saved</ThemedText>
               </View>
               <View style={{ padding: 18, alignItems: 'center' }}>
-                <Ionicons name="print-outline" size={36} color="#8D6409" style={{ marginBottom: 12 }} />
+                <Ionicons name="document-text-outline" size={36} color="#8D6409" style={{ marginBottom: 12 }} />
                 <ThemedText style={{ fontSize: 13, color: '#3B2D17', textAlign: 'center', marginBottom: 16 }}>
-                  Do you want to print ?
+                  Reference No: <ThemedText style={{ fontWeight: 'bold' }}>{printConfirmReturnNo}</ThemedText>
+                  {'\n'}Choose an option below:
                 </ThemedText>
-                <View style={{ flexDirection: 'row', gap: 12, width: '100%' }}>
+                <View style={{ flexDirection: 'row', gap: 8, width: '100%', marginBottom: 10 }}>
                   <TouchableOpacity
-                    style={[styles.modalActionBtn, styles.modalBtnCancel]}
-                    onPress={() => setPrintConfirmReturnNo(null)}
-                    activeOpacity={0.7}
-                  >
-                    <ThemedText style={styles.modalBtnCancelText}>No</ThemedText>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[styles.modalActionBtn, styles.modalBtnPrimary]}
+                    style={[styles.modalActionBtn, styles.modalBtnPrimary, { flex: 1, paddingVertical: 8 }]}
                     onPress={() => {
                       const returnNo = printConfirmReturnNo;
                       setPrintConfirmReturnNo(null);
@@ -1503,9 +1658,48 @@ export default function PurchaseReturnScreen() {
                     }}
                     activeOpacity={0.7}
                   >
-                    <ThemedText style={styles.modalBtnPrimaryText}>Yes</ThemedText>
+                    <Ionicons name="print-outline" size={13} color="#FFFFFF" style={{ marginRight: 4 }} />
+                    <ThemedText style={styles.modalBtnPrimaryText}>Print</ThemedText>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={[styles.modalActionBtn, { flex: 1, backgroundColor: '#B3261E', paddingVertical: 8 }]}
+                    onPress={() => {
+                      const returnNo = printConfirmReturnNo;
+                      setPrintConfirmReturnNo(null);
+                      if (returnNo) {
+                        handleDownloadPdf(returnNo);
+                      }
+                    }}
+                    activeOpacity={0.7}
+                  >
+                    <Ionicons name="download-outline" size={13} color="#FFFFFF" style={{ marginRight: 4 }} />
+                    <ThemedText style={[styles.modalBtnPrimaryText, { color: '#FFFFFF' }]}>PDF</ThemedText>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={[styles.modalActionBtn, { flex: 1, backgroundColor: '#2E7D32', paddingVertical: 8 }]}
+                    onPress={() => {
+                      const returnNo = printConfirmReturnNo;
+                      setPrintConfirmReturnNo(null);
+                      if (returnNo) {
+                        handleDownloadExcel(returnNo);
+                      }
+                    }}
+                    activeOpacity={0.7}
+                  >
+                    <Ionicons name="grid-outline" size={13} color="#FFFFFF" style={{ marginRight: 4 }} />
+                    <ThemedText style={[styles.modalBtnPrimaryText, { color: '#FFFFFF' }]}>Excel</ThemedText>
                   </TouchableOpacity>
                 </View>
+
+                <TouchableOpacity
+                  style={[styles.modalActionBtn, styles.modalBtnCancel, { width: '100%', paddingVertical: 8 }]}
+                  onPress={() => setPrintConfirmReturnNo(null)}
+                  activeOpacity={0.7}
+                >
+                  <ThemedText style={styles.modalBtnCancelText}>Close</ThemedText>
+                </TouchableOpacity>
               </View>
             </View>
           </TouchableWithoutFeedback>
@@ -1558,12 +1752,16 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   clearBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
     backgroundColor: '#FFFFFF',
     borderWidth: 1,
     borderColor: '#DFD5C3',
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    borderRadius: 5,
+    width: 68,
+    height: 34,
+    borderRadius: 6,
+    gap: 4,
   },
   clearBtnText: {
     color: '#5C4A28',
@@ -1571,12 +1769,16 @@ const styles = StyleSheet.create({
     fontSize: 12,
   },
   saveBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
     backgroundColor: '#F9F2E2',
     borderWidth: 1,
     borderColor: '#B8903B',
-    paddingVertical: 6,
-    paddingHorizontal: 16,
-    borderRadius: 5,
+    width: 68,
+    height: 34,
+    borderRadius: 6,
+    gap: 4,
   },
   saveBtnText: {
     color: '#9E6D08',
@@ -1584,12 +1786,16 @@ const styles = StyleSheet.create({
     fontSize: 12,
   },
   printBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
     backgroundColor: '#FFFFFF',
     borderWidth: 1,
     borderColor: '#DFD5C3',
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    borderRadius: 5,
+    width: 68,
+    height: 34,
+    borderRadius: 6,
+    gap: 4,
   },
   printBtnText: {
     color: '#5C4A28',

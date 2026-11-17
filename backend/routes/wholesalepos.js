@@ -891,4 +891,284 @@ router.get("/audit/stats", async (req, res) => {
   }
 });
 
+// ================= EXPORT PDF ENDPOINT =================
+// POST /api/wholesalepos/export-pdf
+router.post("/export-pdf", async (req, res) => {
+  try {
+    const { html, filename } = req.body;
+    if (!html) {
+      return res.status(400).json({ success: false, message: "HTML content is required for PDF export." });
+    }
+
+    const { convertHtmlToPdf } = require("../utils/htmlToPdf");
+    const pdfBuffer = await convertHtmlToPdf(html);
+    const downloadName = (filename || "Wholesale_Tax_Invoice.pdf").replace(/[^a-zA-Z0-9_\-\.]/g, "_");
+
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `attachment; filename="${downloadName}"`);
+    res.setHeader("Content-Length", pdfBuffer.length);
+    return res.send(pdfBuffer);
+  } catch (err) {
+    console.error("Wholesale POS Export PDF Error:", err);
+    return res.status(500).json({ success: false, message: "Failed to generate PDF: " + err.message });
+  }
+});
+
+// ================= EXPORT EXCEL ENDPOINT =================
+// POST /api/wholesalepos/export-excel
+router.post("/export-excel", async (req, res) => {
+  try {
+    const { invoiceNo, isReprint } = req.body;
+    const rawInvoiceNo = (invoiceNo || "").trim();
+    if (!rawInvoiceNo) {
+      return res.status(400).json({ success: false, message: "Invoice Number is required." });
+    }
+
+    const pool = await getPool(req);
+
+    // Fetch Company Info
+    const compRes = await pool.request().query("SELECT TOP 1 * FROM tblCompany");
+    const compRow = compRes.recordset[0] || {};
+    const companyName = (compRow.Name || "SMART").trim();
+    const companyAddress = [compRow.Address1, compRow.Address2, compRow.City, compRow.Country].filter(Boolean).map(s => String(s).trim()).join(" ");
+
+    // Fetch Header
+    let headerRes = await pool.request()
+      .input("InvoiceNo", sql.VarChar, rawInvoiceNo)
+      .query(`
+        SELECT TOP 1 
+          h.*,
+          c.CustomerName AS CustMasterName,
+          c.Address1 AS CustAddress1,
+          c.Address2 AS CustAddress2,
+          c.Address3 AS CustAddress3,
+          c.CustomerType AS CustType,
+          c.NricNo AS CustNricNo,
+          sm.SalesManName
+        FROM tblSalesHeader h
+        LEFT JOIN tblCustomer c ON RTRIM(h.CustomerCode) = RTRIM(c.CustomerCode)
+        LEFT JOIN tblSalesMan sm ON RTRIM(h.SalesManCode) = RTRIM(sm.SalesManCode)
+        WHERE RTRIM(h.InvoiceNo) = RTRIM(@InvoiceNo)
+      `);
+
+    if (!headerRes.recordset || headerRes.recordset.length === 0) {
+      headerRes = await pool.request()
+        .input("InvoiceNo", sql.VarChar, rawInvoiceNo)
+        .query(`
+          SELECT TOP 1 
+            h.*,
+            c.CustomerName AS CustMasterName,
+            c.Address1 AS CustAddress1,
+            c.Address2 AS CustAddress2,
+            c.Address3 AS CustAddress3,
+            c.CustomerType AS CustType,
+            c.NricNo AS CustNricNo,
+            sm.SalesManName
+          FROM tblCreditSalesHeader h
+          LEFT JOIN tblCustomer c ON RTRIM(h.CustomerCode) = RTRIM(c.CustomerCode)
+          LEFT JOIN tblSalesMan sm ON RTRIM(h.SalesManCode) = RTRIM(sm.SalesManCode)
+          WHERE RTRIM(h.InvoiceNo) = RTRIM(@InvoiceNo)
+        `);
+    }
+
+    if (!headerRes.recordset || headerRes.recordset.length === 0) {
+      return res.status(404).json({ success: false, message: `Wholesale Invoice No "${rawInvoiceNo}" not found.` });
+    }
+
+    const header = headerRes.recordset[0];
+
+    let finalCustName = "";
+    if (header.CustMasterName) {
+      finalCustName = Array.isArray(header.CustMasterName) ? header.CustMasterName[0] : header.CustMasterName;
+    } else if (header.CustomerName) {
+      finalCustName = Array.isArray(header.CustomerName) ? header.CustomerName[0] : header.CustomerName;
+    } else {
+      finalCustName = header.CustomerCode || "CASH CUSTOMER";
+    }
+
+    const custAddress = [header.CustAddress1 || header.Address1, header.CustAddress2 || header.Address2, header.CustAddress3 || header.Address3].filter(Boolean).map(s => String(s).trim()).join(", ") || "-";
+
+    // Fetch Items
+    let itemsRes = await pool.request()
+      .input("InvoiceNo", sql.VarChar, rawInvoiceNo)
+      .query(`
+        SELECT d.*
+        FROM tblSalesDetail d
+        WHERE RTRIM(d.InvoiceNo) = RTRIM(@InvoiceNo)
+        ORDER BY d.SortCode ASC, d.InventoryCode ASC
+      `);
+
+    if (!itemsRes.recordset || itemsRes.recordset.length === 0) {
+      itemsRes = await pool.request()
+        .input("InvoiceNo", sql.VarChar, rawInvoiceNo)
+        .query(`
+          SELECT d.*
+          FROM tblCreditSalesDetail d
+          WHERE RTRIM(d.InvoiceNo) = RTRIM(@InvoiceNo)
+          ORDER BY d.SortCode ASC, d.InventoryCode ASC
+        `);
+    }
+    const items = itemsRes.recordset || [];
+
+    // Daily Rates
+    let rate999 = "-";
+    let rate916 = "-";
+    let rate835 = "-";
+    try {
+      const salesDate = header.InvoiceDate ? new Date(header.InvoiceDate) : new Date();
+      const rateRes = await pool.request()
+        .input("SalesDate", sql.DateTime, salesDate)
+        .query(`
+          SELECT ClassCode, ISNULL(Rate, 0.00) AS Rate
+          FROM tblClassRate
+          WHERE @SalesDate BETWEEN FromDate AND ToDate
+          ORDER BY ClassCode
+        `);
+      for (const row of rateRes.recordset) {
+        const code = (row.ClassCode || "").trim().toUpperCase();
+        const rVal = parseFloat(row.Rate) || 0;
+        const formatted = rVal.toFixed(2);
+        if (code === "916" || code === "22K") rate916 = formatted;
+        if (code === "999" || code === "24K" || code === "24K-999") rate999 = formatted;
+        if (code === "SILVER" || code === "835") rate835 = formatted;
+      }
+    } catch (_) {}
+
+    // Format Dates
+    const rawDate = header.InvoiceDate || header.CreateDate;
+    let invDateStr = "-";
+    if (rawDate) {
+      const d = new Date(rawDate);
+      if (!isNaN(d.getTime())) {
+        invDateStr = `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`;
+      }
+    }
+    const printTimeStr = new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
+
+    // Build Excel Workbook
+    const XLSX = require("xlsx");
+    const wb = XLSX.utils.book_new();
+
+    const reportTitle = "WHOLESALE POS";
+
+    const rows = [];
+    rows.push([companyName]);
+    rows.push([companyAddress]);
+    rows.push([]);
+    rows.push([reportTitle]);
+    rows.push([`Printed: ${invDateStr} ${printTimeStr}`]);
+    rows.push([]);
+
+    // Invoice & Customer Information
+    rows.push(["INVOICE INFORMATION", "", "", "CUSTOMER & TRANSACTION DETAILS"]);
+    rows.push(["Invoice No:", rawInvoiceNo, "", "Customer:", finalCustName]);
+    rows.push(["Invoice Date:", invDateStr, "", "NRIC / ID:", (header.CustNricNo || header.CustomerNricNo || "-").trim()]);
+    rows.push(["Location Code:", (header.LocationCode || "HQ").trim(), "", "Address:", custAddress]);
+    rows.push(["Salesman:", (header.SalesManName || header.SalesManCode || "-").trim(), "", "Sales Type:", "Wholesale"]);
+    rows.push([]);
+
+    // Item Table
+    rows.push([
+      "#",
+      "ITEM CODE",
+      "DESCRIPTION",
+      "PCS",
+      "WEIGHT (G)",
+      "RATE / G ($)",
+      "SMC ($)",
+      "AMOUNT ($)"
+    ]);
+
+    let sumPCS = 0;
+    let sumWeight = 0;
+    let sumSMC = 0;
+    let sumAmount = 0;
+
+    items.forEach((item, idx) => {
+      const pcs = parseInt(item.PCS) || 1;
+      const wt = parseFloat(item.Weight) || 0;
+      const rate = parseFloat(item.Rate || item.DailyRate) || 0;
+      const smc = parseFloat(item.SMC) || 0;
+      const amt = parseFloat(item.NetAmount || item.TotalValue) || 0;
+
+      sumPCS += pcs;
+      sumWeight += wt;
+      sumSMC += smc;
+      sumAmount += amt;
+
+      rows.push([
+        idx + 1,
+        (item.InventoryCode || "").trim(),
+        (item.Description || "").trim(),
+        pcs,
+        Number(wt.toFixed(2)),
+        Number(rate.toFixed(2)),
+        Number(smc.toFixed(2)),
+        Number(amt.toFixed(2))
+      ]);
+    });
+
+    rows.push([]);
+
+    // Terms & Totals
+    const totalWeightVal = parseFloat(header.TotalWeight) || sumWeight;
+    const totalPCSVal = parseInt(header.TotalPCS) || sumPCS;
+    const totalSMCVal = parseFloat(header.TotalSMC) || sumSMC;
+    const netDiscountVal = parseFloat(header.NetDiscount) || 0;
+    const gstVal = parseFloat(header.GST) || 0;
+    const netTotalVal = parseFloat(header.NetTotal) || parseFloat(header.TotalValue) || sumAmount;
+
+    rows.push(["TERMS & REMARKS", "", "", "", "INVOICE TOTALS", ""]);
+    rows.push(["Payment Type:", "Wholesale Credit Settlement", "", "", "Total PCS:", totalPCSVal]);
+    if (header.Remarks && header.Remarks.trim()) {
+      rows.push(["Remarks:", header.Remarks.trim(), "", "", "Total Weight (g):", Number(totalWeightVal.toFixed(2))]);
+    } else {
+      rows.push(["", "", "", "", "Total Weight (g):", Number(totalWeightVal.toFixed(2))]);
+    }
+    rows.push(["", "", "", "", "Total SMC:", Number(totalSMCVal.toFixed(2))]);
+    if (netDiscountVal > 0) {
+      rows.push(["", "", "", "", "Net Discount:", -Number(netDiscountVal.toFixed(2))]);
+    }
+    rows.push(["", "", "", "", "GST:", Number(gstVal.toFixed(2))]);
+    rows.push(["", "", "", "", "NET TOTAL:", Number(netTotalVal.toFixed(2))]);
+    rows.push([]);
+
+    // Signatures
+    rows.push(["PREPARED BY (STAFF)", "", "", "", "SUPPLIER / AUTHORIZED RECEIVER", ""]);
+    rows.push(["Staff Name:", (header.SalesManName || header.SalesManCode || "SALES").trim(), "", "", "Receiver Name:", finalCustName]);
+    rows.push(["Signature:", "______________________", "", "", "Signature:", "______________________"]);
+    rows.push(["Date:", "______________________", "", "", "Date:", "______________________"]);
+    rows.push([]);
+    rows.push(["*** System Generated Report ***"]);
+    rows.push(["Powered by Unipro SG"]);
+
+    const ws = XLSX.utils.aoa_to_sheet(rows);
+
+    // Set Column Widths
+    ws["!cols"] = [
+      { wch: 6 },
+      { wch: 18 },
+      { wch: 32 },
+      { wch: 8 },
+      { wch: 14 },
+      { wch: 14 },
+      { wch: 14 },
+      { wch: 16 }
+    ];
+
+    XLSX.utils.book_append_sheet(wb, ws, "Wholesale Tax Invoice");
+
+    const excelBuffer = XLSX.write(wb, { type: "buffer", bookType: "xlsx" });
+    const downloadName = `Wholesale_Tax_Invoice_${rawInvoiceNo.replace(/[^a-zA-Z0-9_\-]/g, "_")}.xlsx`;
+
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    res.setHeader("Content-Disposition", `attachment; filename="${downloadName}"`);
+    res.setHeader("Content-Length", excelBuffer.length);
+    return res.send(excelBuffer);
+  } catch (err) {
+    console.error("Wholesale POS Export Excel Error:", err);
+    return res.status(500).json({ success: false, message: "Failed to generate Excel: " + err.message });
+  }
+});
+
 module.exports = router;

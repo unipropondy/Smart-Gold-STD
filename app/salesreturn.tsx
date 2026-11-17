@@ -1,6 +1,8 @@
 /** Developer: durairaj */
 import { ThemedText } from '@/components/themed-text';
+import { PrintReportModal } from '@/components/PrintReportModal';
 import { API_BASE_URL } from '@/constants/api';
+import { getStandardReportCss, renderStandardReportFooter, renderStandardReportHeader } from '@/utils/standardPrintReport';
 import { Ionicons } from '@expo/vector-icons';
 import { Stack, useFocusEffect, useRouter } from 'expo-router';
 import React, { useCallback, useMemo, useState } from 'react';
@@ -73,6 +75,10 @@ export default function SalesReturnScreen() {
   const [reprintModalVisible, setReprintModalVisible] = useState(false);
   const [reprintReturnNo, setReprintReturnNo] = useState('');
   const returnPrintInputRef = React.useRef<TextInput>(null);
+
+  // Print Invoice Confirmation Modal State ("Do you want to print ?")
+  const [isPrintModalVisible, setIsPrintModalVisible] = useState(false);
+  const [activePrintReturnNo, setActivePrintReturnNo] = useState('');
 
   // SubGetSalesReturnPrint matching VB:
   // Ds = ObjSalesReturn.GetSalesReturnHeaderByRefNo(txtReturnPrintNo.Text.Trim)
@@ -431,10 +437,478 @@ export default function SalesReturnScreen() {
     }
   };
 
-  // Original subPrintSalesReturn function matching frmSalesReturn.vb
-  // Report: Reports/rptSalesReturn.rpt
-  // Formula Field: CustomerName = txtCustomerName.Text
-  // Copies: 1 (CR.PrintToPrinter(1, True, 0, 0))
+  // Build standardized A4 portrait Sales Return Voucher HTML matching master reports
+  const buildSalesReturnHtml = (trimmedReturnNo: string, printData: any) => {
+    const { company, header, items } = printData;
+
+    // Singapore Date & Time
+    const now = new Date();
+    const sgDateStr = now.toLocaleDateString('en-GB', {
+      timeZone: 'Asia/Singapore',
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+    });
+    const sgTimeStr = now.toLocaleTimeString('en-US', {
+      timeZone: 'Asia/Singapore',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: true,
+    });
+
+    const formatDate = (val: any) => {
+      if (!val) return '-';
+      const d = new Date(val);
+      if (isNaN(d.getTime())) return String(val).split('T')[0] || '-';
+      return d.toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' });
+    };
+
+    const returnDateFormatted = formatDate(header.ModifyDate || header.InvoiceDate);
+    const invoiceDateFormatted = formatDate(header.InvoiceDate);
+
+    // Company info
+    const compName = (company?.name || 'SMART').trim();
+    const compAddr1 = (company?.address1 || '').trim();
+    const compAddr2 = [company?.address2, company?.city, company?.country].filter(Boolean).join(' ');
+    const compContact = [
+      company?.phone ? `Tel: ${company.phone}` : '',
+      company?.fax ? `Fax: ${company.fax}` : ''
+    ].filter(Boolean).join(' | ');
+
+    // Customer info
+    const dispCustName = (header.CustomerName || customerName || header.CustomerCode || 'CASH CUSTOMER').trim();
+    const dispCustCode = (header.CustomerCode || customerCode || '-').trim();
+    const dispCustType = (header.CustomerType || customerType || '-').trim();
+    const dispCustAddr = [header.CustomerAddress1, header.CustomerAddress2, header.CustomerAddress3].filter(Boolean).join(', ');
+
+    const totalItemsQty = parseFloat(header.TotalPCS) || (items || []).reduce((acc: number, it: any) => acc + (parseFloat(it.PCS) || 0), 0) || 0;
+    const totalWeight = parseFloat(header.TotalWeight) || (items || []).reduce((acc: number, it: any) => acc + (parseFloat(it.Weight) || 0), 0) || 0;
+    const totalAmt = parseFloat(header.TotalValue) || parseFloat(header.NetTotal) || 0;
+    const gstAmt = parseFloat(header.GST) || 0;
+    const netTotal = parseFloat(header.NetTotal) || totalAmt;
+
+    return `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <meta charset="utf-8" />
+          <title>Sales Return Voucher - ${trimmedReturnNo}</title>
+          <style>
+            @page {
+              size: A4 portrait;
+              margin: 0 !important;
+            }
+            ${getStandardReportCss()}
+
+            @media print {
+              @page {
+                margin: 0 !important;
+              }
+              html, body {
+                width: 210mm !important;
+                height: 100% !important;
+                margin: 0 !important;
+                padding: 0 !important;
+                background: #FFFFFF !important;
+                -webkit-print-color-adjust: exact !important;
+                print-color-adjust: exact !important;
+              }
+              .page-sheet {
+                width: 210mm !important;
+                min-height: 297mm !important;
+                height: 297mm !important;
+                margin: 0 !important;
+                padding: 12mm 14mm !important;
+                box-shadow: none !important;
+                display: flex !important;
+                flex-direction: column !important;
+                justify-content: space-between !important;
+                box-sizing: border-box !important;
+                page-break-after: avoid !important;
+                break-after: avoid !important;
+              }
+            }
+
+            html, body {
+              height: 100%;
+              margin: 0;
+              padding: 0;
+            }
+
+            .page-sheet {
+              width: 210mm;
+              min-height: 297mm;
+              padding: 12mm 14mm;
+              display: flex;
+              flex-direction: column;
+              justify-content: space-between;
+              box-sizing: border-box;
+            }
+
+            .report-main-content {
+              flex-grow: 1;
+            }
+
+            .std-footer-container {
+              margin-top: auto !important;
+              padding-top: 16px !important;
+              page-break-inside: avoid !important;
+              break-inside: avoid !important;
+            }
+
+            /* Cambria Typography across all elements */
+            *, *:before, *:after, body, div, table, tr, th, td, span, p, h1, h2, h3, h4, h5, h6 {
+              font-family: 'Cambria', Georgia, 'Times New Roman', serif !important;
+            }
+
+            body {
+              font-family: 'Cambria', Georgia, 'Times New Roman', serif !important;
+            }
+
+            .std-company-name {
+              font-family: 'Cambria', Georgia, serif !important;
+              font-size: 24px !important;
+              font-weight: 800 !important;
+              letter-spacing: 2px !important;
+              color: #A37416 !important;
+            }
+
+            .std-company-address {
+              font-family: 'Cambria', Georgia, serif !important;
+              font-size: 11px !important;
+              font-weight: 700 !important;
+              color: #1A1A1A !important;
+              letter-spacing: 0.5px !important;
+            }
+
+            .std-report-title {
+              font-family: 'Cambria', Georgia, serif !important;
+              font-size: 22px !important;
+              font-weight: 800 !important;
+              letter-spacing: 1.5px !important;
+              color: #4A3511 !important;
+            }
+
+            .std-printed-time {
+              font-family: 'Cambria', Georgia, serif !important;
+              font-size: 11.5px !important;
+              font-weight: 700 !important;
+              color: #222222 !important;
+            }
+
+            /* INFO GRID */
+            .info-grid {
+              display: grid;
+              grid-template-columns: 1fr 1fr;
+              gap: 16px;
+              margin-bottom: 12px;
+            }
+            .info-card {
+              border: 1px solid #C49A45;
+              background: #FAF8F5;
+              border-radius: 4px;
+              padding: 10px 14px;
+            }
+            .card-title {
+              font-size: 11.5px;
+              font-weight: 800;
+              color: #8C5D08;
+              border-bottom: 1px dotted #DDC89A;
+              padding-bottom: 5px;
+              margin-bottom: 8px;
+              text-transform: uppercase;
+              letter-spacing: 0.5px;
+            }
+            .info-table {
+              width: 100%;
+              border-collapse: collapse;
+              font-size: 11px;
+            }
+            .info-table td {
+              padding: 2.5px 0;
+              vertical-align: top;
+              line-height: 1.35;
+            }
+            .info-table .lbl {
+              width: 130px;
+              font-weight: 700;
+              color: #222222;
+            }
+            .info-table .colon {
+              width: 15px;
+              font-weight: 700;
+              color: #222222;
+              text-align: center;
+            }
+            .info-table .val {
+              color: #222222;
+              font-weight: 700;
+              word-break: break-word;
+            }
+
+            /* SUMMARY BANNER */
+            .return-banner {
+              background: #FFF9ED;
+              border: 1px solid #C49A45;
+              border-radius: 4px;
+              padding: 8px 14px;
+              display: flex;
+              justify-content: space-between;
+              align-items: center;
+              margin-bottom: 12px;
+            }
+            .banner-metric {
+              text-align: center;
+            }
+            .banner-lbl {
+              font-size: 10px;
+              color: #8C5D08;
+              font-weight: 700;
+              text-transform: uppercase;
+              margin-bottom: 2px;
+            }
+            .banner-val {
+              font-size: 14px;
+              font-weight: 800;
+              color: #4A3511;
+            }
+            .banner-net {
+              color: #A31212;
+              font-size: 16px;
+            }
+
+            /* DETAIL ITEMS TABLE */
+            .detail-table {
+              width: 100%;
+              border-collapse: collapse;
+              margin-top: 4px;
+              margin-bottom: 12px;
+              font-size: 11px;
+            }
+            .detail-table th {
+              background-color: #8C5D08;
+              color: #FFFFFF;
+              text-align: left;
+              padding: 6px 8px;
+              font-weight: 800;
+              border: 1px solid #734C06;
+              text-transform: uppercase;
+              font-size: 10px;
+              letter-spacing: 0.5px;
+            }
+            .detail-table td {
+              padding: 6px 8px;
+              border: 1px solid #D9C8A5;
+              background-color: #FFFFFF;
+              color: #222222;
+            }
+            .detail-table tr:nth-child(even) td {
+              background-color: #FAF8F5;
+            }
+
+            /* TOTALS SECTION */
+            .totals-section {
+              display: flex;
+              justify-content: flex-end;
+              margin-bottom: 14px;
+            }
+            .totals-box {
+              width: 290px;
+              border: 1px solid #C49A45;
+              background-color: #FFFFFF;
+              border-radius: 4px;
+              padding: 8px 12px;
+            }
+            .total-row {
+              display: flex;
+              justify-content: space-between;
+              font-size: 11.5px;
+              padding: 3px 0;
+              color: #222222;
+              font-weight: 700;
+            }
+            .total-row-grand {
+              border-top: 2px solid #8C5D08;
+              margin-top: 4px;
+              padding-top: 4px;
+              font-weight: 800;
+              font-size: 13.5px;
+              color: #8C5D08;
+            }
+          </style>
+        </head>
+        <body>
+          <div class="page-sheet">
+            <div class="report-main-content">
+              ${renderStandardReportHeader({
+                company: {
+                  name: compName,
+                  address: [compAddr1, compAddr2, compContact].filter(Boolean).join(' ')
+                },
+                reportTitle: 'SALES RETURN VOUCHER',
+                printedDateTime: `${sgDateStr} ${sgTimeStr}`
+              })}
+
+              <!-- INFO GRID -->
+              <div class="info-grid">
+                <!-- RETURN VOUCHER & AUDIT DETAILS -->
+                <div class="info-card">
+                  <div class="card-title">VOUCHER & AUDIT DETAILS</div>
+                  <table class="info-table">
+                    <tr>
+                      <td class="lbl">Return Voucher No</td>
+                      <td class="colon">:</td>
+                      <td class="val">${trimmedReturnNo}</td>
+                    </tr>
+                    <tr>
+                      <td class="lbl">Return Date</td>
+                      <td class="colon">:</td>
+                      <td class="val">${returnDateFormatted}</td>
+                    </tr>
+                    <tr>
+                      <td class="lbl">Original Bill No</td>
+                      <td class="colon">:</td>
+                      <td class="val">${header.InvoiceNo || '-'}</td>
+                    </tr>
+                    <tr>
+                      <td class="lbl">Original Bill Date</td>
+                      <td class="colon">:</td>
+                      <td class="val">${invoiceDateFormatted}</td>
+                    </tr>
+                    <tr>
+                      <td class="lbl">Terminal / Cashier</td>
+                      <td class="colon">:</td>
+                      <td class="val">${header.TerminalCode || '-'} / ${header.ModifyUser || header.SalesManCode || 'SYS'}</td>
+                    </tr>
+                  </table>
+                </div>
+
+                <!-- CUSTOMER INFORMATION -->
+                <div class="info-card">
+                  <div class="card-title">CUSTOMER INFORMATION</div>
+                  <table class="info-table">
+                    <tr>
+                      <td class="lbl">Customer Name</td>
+                      <td class="colon">:</td>
+                      <td class="val">${dispCustName}</td>
+                    </tr>
+                    <tr>
+                      <td class="lbl">Customer Code</td>
+                      <td class="colon">:</td>
+                      <td class="val">${dispCustCode}</td>
+                    </tr>
+                    <tr>
+                      <td class="lbl">Customer Type</td>
+                      <td class="colon">:</td>
+                      <td class="val">${dispCustType}</td>
+                    </tr>
+                    <tr>
+                      <td class="lbl">Address</td>
+                      <td class="colon">:</td>
+                      <td class="val">${dispCustAddr || '-'}</td>
+                    </tr>
+                    ${header.Remarks ? `
+                    <tr>
+                      <td class="lbl">Remarks</td>
+                      <td class="colon">:</td>
+                      <td class="val">${header.Remarks}</td>
+                    </tr>` : ''}
+                  </table>
+                </div>
+              </div>
+
+              <!-- RETURN SUMMARY BANNER -->
+              <div class="return-banner">
+                <div class="banner-metric">
+                  <div class="banner-lbl">Total Items</div>
+                  <div class="banner-val">${totalItemsQty}</div>
+                </div>
+                <div class="banner-metric">
+                  <div class="banner-lbl">Total Weight</div>
+                  <div class="banner-val">${totalWeight.toFixed(3)} g</div>
+                </div>
+                <div class="banner-metric">
+                  <div class="banner-lbl">Gross Return Amount</div>
+                  <div class="banner-val">$ ${totalAmt.toFixed(2)}</div>
+                </div>
+                <div class="banner-metric">
+                  <div class="banner-lbl">Net Refund / Credit</div>
+                  <div class="banner-val banner-net">$ ${netTotal.toFixed(2)}</div>
+                </div>
+              </div>
+
+              <!-- RETURN ITEM DETAILS TABLE -->
+              <table class="detail-table">
+                <thead>
+                  <tr>
+                    <th style="width: 5%; text-align: center;">#</th>
+                    <th style="width: 20%;">INVENTORY CODE</th>
+                    <th style="width: 33%;">DESCRIPTION</th>
+                    <th style="width: 12%; text-align: right;">WEIGHT (G)</th>
+                    <th style="width: 8%; text-align: center;">PCS</th>
+                    <th style="width: 10%; text-align: right;">RATE ($)</th>
+                    <th style="width: 12%; text-align: right;">RETURN AMT ($)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${
+                    items && items.length > 0
+                      ? items.map((it: any, idx: number) => `
+                          <tr>
+                            <td style="text-align: center; font-weight: 700;">${idx + 1}</td>
+                            <td style="font-weight: 700;">${it.InventoryCode}</td>
+                            <td style="font-weight: 700; text-transform: uppercase;">${it.Description || '-'}</td>
+                            <td style="text-align: right; font-weight: 700;">${(parseFloat(it.Weight) || 0).toFixed(3)}</td>
+                            <td style="text-align: center; font-weight: 700;">${it.PCS || 1}</td>
+                            <td style="text-align: right;">$ ${(parseFloat(it.Rate) || 0).toFixed(2)}</td>
+                            <td style="text-align: right; font-weight: 800; color: #8C5D08;">$ ${(parseFloat(it.NetAmount || it.ActualSales || it.TotalValue) || 0).toFixed(2)}</td>
+                          </tr>
+                        `).join('')
+                      : `
+                          <tr>
+                            <td colspan="7" style="text-align: center; color: #777; padding: 12px;">No itemized return details recorded.</td>
+                          </tr>
+                        `
+                  }
+                </tbody>
+              </table>
+
+              <!-- TOTALS SECTION -->
+              <div class="totals-section">
+                <div class="totals-box">
+                  <div class="total-row">
+                    <span>Total Return Amount:</span>
+                    <span style="font-weight: 800;">$ ${totalAmt.toFixed(2)}</span>
+                  </div>
+                  ${gstAmt > 0 ? `
+                    <div class="total-row">
+                      <span>GST Amount:</span>
+                      <span style="font-weight: 800;">$ ${gstAmt.toFixed(2)}</span>
+                    </div>
+                  ` : ''}
+                  <div class="total-row total-row-grand">
+                    <span>NET REFUND / CREDIT:</span>
+                    <span>$ ${netTotal.toFixed(2)}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            ${renderStandardReportFooter({
+              staff: {
+                staffLabel: 'PREPARED BY (STAFF)',
+                staffName: (header.ModifyUser || header.SalesManCode || 'SYS').trim(),
+                receiverLabel: 'SUPPLIER / AUTHORIZED RECEIVER',
+                receiverName: (dispCustName || '-').trim()
+              }
+            })}
+          </div>
+        </body>
+      </html>
+    `;
+  };
+
+  // Standardized subPrintSalesReturn function using hidden iframe to eliminate browser URLs/about:blank
   const subPrintSalesReturn = async (sReturnNo: string) => {
     const trimmedReturnNo = (sReturnNo || '').trim();
     if (!trimmedReturnNo) return;
@@ -446,496 +920,68 @@ export default function SalesReturnScreen() {
 
       if (!json.success || !json.data) {
         showToast('Error', json.message || `Sales Return "${trimmedReturnNo}" not found for print.`);
-        setLoading(false);
         return;
       }
 
-      const { company, header, items } = json.data;
+      const htmlContent = buildSalesReturnHtml(trimmedReturnNo, json.data);
 
-      // Singapore Date & Time
-      const now = new Date();
-      const sgDateStr = now.toLocaleDateString('en-GB', {
-        timeZone: 'Asia/Singapore',
-        day: '2-digit',
-        month: '2-digit',
-        year: 'numeric',
-      });
-      const sgTimeStr = now.toLocaleTimeString('en-US', {
-        timeZone: 'Asia/Singapore',
-        hour: '2-digit',
-        minute: '2-digit',
-        hour12: true,
-      });
-
-      // Format date helper
-      const formatDate = (val: any) => {
-        if (!val) return '-';
-        const d = new Date(val);
-        if (isNaN(d.getTime())) return String(val).split('T')[0] || '-';
-        return d.toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' });
-      };
-
-      const returnDateFormatted = formatDate(header.ModifyDate || header.InvoiceDate);
-      const invoiceDateFormatted = formatDate(header.InvoiceDate);
-
-      // Company info
-      const compName = (company.name || 'SMART').trim();
-      const compAddr1 = (company.address1 || '').trim();
-      const compAddr2 = [company.address2, company.city, company.country].filter(Boolean).join(' ');
-      const compContact = [
-        company.phone ? `Tel: ${company.phone}` : '',
-        company.fax ? `Fax: ${company.fax}` : ''
-      ].filter(Boolean).join(' | ');
-
-      // Customer info (from header or formula field)
-      const dispCustName = (header.CustomerName || customerName || header.CustomerCode || 'CASH CUSTOMER').trim();
-      const dispCustCode = (header.CustomerCode || customerCode || '-').trim();
-      const dispCustType = (header.CustomerType || customerType || '-').trim();
-      const dispCustAddr = [header.CustomerAddress1, header.CustomerAddress2, header.CustomerAddress3].filter(Boolean).join(', ');
-
-      const totalItemsQty = parseFloat(header.TotalPCS) || items.reduce((acc: number, it: any) => acc + (parseFloat(it.PCS) || 0), 0) || 0;
-      const totalWeight = parseFloat(header.TotalWeight) || items.reduce((acc: number, it: any) => acc + (parseFloat(it.Weight) || 0), 0) || 0;
-      const totalAmt = parseFloat(header.TotalValue) || parseFloat(header.NetTotal) || 0;
-      const gstAmt = parseFloat(header.GST) || 0;
-      const netTotal = parseFloat(header.NetTotal) || totalAmt;
-
-      const printHtml = `
-        <!DOCTYPE html>
-        <html>
-          <head>
-            <meta charset="utf-8" />
-            <title>Sales Return Voucher - ${trimmedReturnNo}</title>
-            <style>
-              @page {
-                size: A4 portrait;
-                margin: 0;
-              }
-              *, *:before, *:after {
-                box-sizing: border-box;
-              }
-              body {
-                font-family: 'Segoe UI', Tahoma, Arial, sans-serif;
-                margin: 0;
-                padding: 0;
-                background-color: #525659;
-                color: #222;
-                -webkit-print-color-adjust: exact;
-                print-color-adjust: exact;
-              }
-              .page-sheet {
-                background: #FFFFFF;
-                width: 210mm;
-                min-height: 297mm;
-                margin: 10mm auto;
-                padding: 12mm 15mm;
-                box-shadow: 0 0 14px rgba(0,0,0,0.4);
-                display: flex;
-                flex-direction: column;
-                justify-content: space-between;
-              }
-              @media print {
-                body {
-                  background: #FFFFFF;
-                }
-                .page-sheet {
-                  margin: 0;
-                  padding: 10mm 12mm;
-                  width: 100%;
-                  min-height: 100%;
-                  box-shadow: none;
-                }
-              }
-
-              /* HEADER SECTION */
-              .comp-header {
-                text-align: center;
-                border-bottom: 2px solid #9E741D;
-                padding-bottom: 8px;
-                margin-bottom: 12px;
-              }
-              .comp-name {
-                font-size: 20px;
-                font-weight: 800;
-                letter-spacing: 1.5px;
-                color: #5A3F0C;
-                text-transform: uppercase;
-                margin-bottom: 3px;
-              }
-              .comp-details {
-                font-size: 11px;
-                color: #444;
-                line-height: 1.4;
-              }
-
-              /* TITLE BADGE */
-              .doc-badge-container {
-                display: flex;
-                justify-content: space-between;
-                align-items: center;
-                background: #FBF6EC;
-                border: 1px solid #E2D3B3;
-                border-radius: 6px;
-                padding: 8px 14px;
-                margin-bottom: 14px;
-              }
-              .doc-title {
-                font-size: 15px;
-                font-weight: 800;
-                color: #8C5D08;
-                letter-spacing: 1px;
-                text-transform: uppercase;
-              }
-              .doc-print-time {
-                font-size: 10px;
-                color: #77664B;
-              }
-
-              /* INFO GRID */
-              .info-grid {
-                display: grid;
-                grid-template-columns: 1fr 1fr;
-                gap: 12px;
-                margin-bottom: 14px;
-              }
-              .info-card {
-                border: 1px solid #E6DAC5;
-                background: #FAF8F5;
-                border-radius: 5px;
-                padding: 9px 12px;
-              }
-              .card-title {
-                font-size: 11px;
-                font-weight: 700;
-                color: #7A5716;
-                border-bottom: 1px solid #ECE1CD;
-                padding-bottom: 4px;
-                margin-bottom: 6px;
-                text-transform: uppercase;
-                letter-spacing: 0.5px;
-              }
-              .info-row {
-                display: flex;
-                font-size: 11px;
-                margin-bottom: 4px;
-                line-height: 1.35;
-              }
-              .info-lbl {
-                width: 110px;
-                font-weight: 600;
-                color: #665235;
-                flex-shrink: 0;
-              }
-              .info-val {
-                color: #1A1A1A;
-                flex-grow: 1;
-                word-break: break-word;
-              }
-              .font-bold {
-                font-weight: 700;
-              }
-
-              /* RETURN SUMMARY BANNER */
-              .return-banner {
-                background: #FFF9ED;
-                border: 1px solid #E5C37A;
-                border-radius: 6px;
-                padding: 10px 16px;
-                display: flex;
-                justify-content: space-between;
-                align-items: center;
-                margin-bottom: 14px;
-              }
-              .banner-metric {
-                text-align: center;
-              }
-              .banner-lbl {
-                font-size: 10px;
-                color: #7A5C22;
-                font-weight: 600;
-                text-transform: uppercase;
-                margin-bottom: 2px;
-              }
-              .banner-val {
-                font-size: 15px;
-                font-weight: 800;
-                color: #4A330B;
-              }
-              .banner-net {
-                color: #A31212;
-                font-size: 18px;
-              }
-
-              /* DETAIL TABLE */
-              .items-table {
-                width: 100%;
-                border-collapse: collapse;
-                margin-bottom: 12px;
-                font-size: 11px;
-              }
-              .items-table th {
-                background-color: #F3E7CF;
-                color: #4C350E;
-                font-weight: 700;
-                padding: 7px 6px;
-                text-align: left;
-                border: 1px solid #D9C8A8;
-                font-size: 10.5px;
-                text-transform: uppercase;
-              }
-              .items-table td {
-                padding: 6px;
-                border: 1px solid #EFE4D0;
-                vertical-align: middle;
-              }
-              .items-table tr:nth-child(even) td {
-                background-color: #FDFAF5;
-              }
-
-              /* TOTALS BOX */
-              .totals-section {
-                display: flex;
-                justify-content: flex-end;
-                margin-bottom: 16px;
-              }
-              .totals-box {
-                width: 280px;
-                border: 1px solid #E2D3B3;
-                background: #FAF8F5;
-                border-radius: 5px;
-                padding: 8px 12px;
-              }
-              .total-row {
-                display: flex;
-                justify-content: space-between;
-                font-size: 11px;
-                margin-bottom: 4px;
-                color: #443522;
-              }
-              .total-row-grand {
-                border-top: 1px solid #D9C8A8;
-                padding-top: 5px;
-                margin-top: 4px;
-                font-size: 13px;
-                font-weight: 800;
-                color: #A31212;
-              }
-
-              /* SIGNATURES */
-              .sign-grid {
-                display: grid;
-                grid-template-columns: 1fr 1fr;
-                gap: 20px;
-                margin-top: 18px;
-                padding-top: 10px;
-                border-top: 1px dashed #D6C29E;
-              }
-              .sign-card {
-                padding: 6px 10px;
-                border: 1px solid #EFE4D0;
-                background: #FAF8F5;
-                border-radius: 4px;
-              }
-              .sign-title {
-                font-size: 10px;
-                font-weight: 700;
-                color: #7A5716;
-                text-transform: uppercase;
-                margin-bottom: 30px;
-              }
-              .sign-line {
-                border-bottom: 1px solid #444;
-                margin-bottom: 4px;
-              }
-              .sign-sub {
-                font-size: 10px;
-                color: #555;
-                display: flex;
-                justify-content: space-between;
-              }
-
-              /* FOOTER */
-              .footer-bar {
-                margin-top: 14px;
-                text-align: center;
-                border-top: 1px solid #E2D3B3;
-                padding-top: 8px;
-                font-size: 10px;
-                color: #7C694F;
-              }
-            </style>
-          </head>
-          <body>
-            <div class="page-sheet">
-              <div>
-                <!-- COMPANY HEADER -->
-                <div class="comp-header">
-                  <div class="comp-name">${compName}</div>
-                  <div class="comp-details">
-                    ${compAddr1 ? `<div>${compAddr1}</div>` : ''}
-                    ${compAddr2 ? `<div>${compAddr2}</div>` : ''}
-                    ${compContact ? `<div>${compContact}</div>` : ''}
-                  </div>
-                </div>
-
-                <!-- TITLE BADGE -->
-                <div class="doc-badge-container">
-                  <div class="doc-title">Sales Return Voucher</div>
-                  <div class="doc-print-time">Printed: ${sgDateStr} ${sgTimeStr} (1 Copy)</div>
-                </div>
-
-                <!-- INFO GRID -->
-                <div class="info-grid">
-                  <!-- RETURN INFO -->
-                  <div class="info-card">
-                    <div class="card-title">VOUCHER & AUDIT DETAILS</div>
-                    <div class="info-row"><span class="info-lbl">Return Voucher No:</span><span class="info-val font-bold">${trimmedReturnNo}</span></div>
-                    <div class="info-row"><span class="info-lbl">Return Date:</span><span class="info-val">${returnDateFormatted}</span></div>
-                    <div class="info-row"><span class="info-lbl">Original Bill No:</span><span class="info-val font-bold">${header.InvoiceNo || '-'}</span></div>
-                    <div class="info-row"><span class="info-lbl">Original Bill Date:</span><span class="info-val">${invoiceDateFormatted}</span></div>
-                    <div class="info-row"><span class="info-lbl">Terminal / Cashier:</span><span class="info-val">${header.TerminalCode || '-'} / ${header.ModifyUser || header.SalesManCode || 'SYS'}</span></div>
-                  </div>
-
-                  <!-- CUSTOMER INFO -->
-                  <div class="info-card">
-                    <div class="card-title">CUSTOMER INFORMATION</div>
-                    <div class="info-row"><span class="info-lbl">Customer Name:</span><span class="info-val font-bold">${dispCustName}</span></div>
-                    <div class="info-row"><span class="info-lbl">Customer Code:</span><span class="info-val">${dispCustCode}</span></div>
-                    <div class="info-row"><span class="info-lbl">Customer Type:</span><span class="info-val">${dispCustType}</span></div>
-                    ${dispCustAddr ? `<div class="info-row"><span class="info-lbl">Address:</span><span class="info-val">${dispCustAddr}</span></div>` : ''}
-                    ${header.Remarks ? `<div class="info-row"><span class="info-lbl">Remarks:</span><span class="info-val">${header.Remarks}</span></div>` : ''}
-                  </div>
-                </div>
-
-                <!-- SUMMARY BANNER -->
-                <div class="return-banner">
-                  <div class="banner-metric">
-                    <div class="banner-lbl">Total Items</div>
-                    <div class="banner-val">${totalItemsQty}</div>
-                  </div>
-                  <div class="banner-metric">
-                    <div class="banner-lbl">Total Weight</div>
-                    <div class="banner-val">${totalWeight.toFixed(3)} g</div>
-                  </div>
-                  <div class="banner-metric">
-                    <div class="banner-lbl">Gross Return Amount</div>
-                    <div class="banner-val">$ ${totalAmt.toFixed(2)}</div>
-                  </div>
-                  <div class="banner-metric">
-                    <div class="banner-lbl">Net Refund / Credit</div>
-                    <div class="banner-val banner-net">$ ${netTotal.toFixed(2)}</div>
-                  </div>
-                </div>
-
-                <!-- RETURN ITEM DETAILS TABLE -->
-                <table class="items-table">
-                  <thead>
-                    <tr>
-                      <th style="width: 5%; text-align: center;">#</th>
-                      <th style="width: 22%;">Inventory Code</th>
-                      <th style="width: 33%;">Description</th>
-                      <th style="width: 12%; text-align: right;">Weight (g)</th>
-                      <th style="width: 8%; text-align: center;">PCS</th>
-                      <th style="width: 10%; text-align: right;">Rate ($)</th>
-                      <th style="width: 10%; text-align: right;">Return Amt ($)</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    ${
-                      items && items.length > 0
-                        ? items.map((it: any, idx: number) => `
-                            <tr>
-                              <td style="text-align: center;">${idx + 1}</td>
-                              <td style="font-weight: 600;">${it.InventoryCode}</td>
-                              <td>${it.Description || '-'}</td>
-                              <td style="text-align: right;">${(parseFloat(it.Weight) || 0).toFixed(3)}</td>
-                              <td style="text-align: center;">${it.PCS || 1}</td>
-                              <td style="text-align: right;">${(parseFloat(it.Rate) || 0).toFixed(2)}</td>
-                              <td style="text-align: right; font-weight: 600;">$ ${(parseFloat(it.NetAmount || it.ActualSales || it.TotalValue) || 0).toFixed(2)}</td>
-                            </tr>
-                          `).join('')
-                        : `
-                            <tr>
-                              <td colspan="7" style="text-align: center; color: #777; padding: 12px;">No itemized return details recorded.</td>
-                            </tr>
-                          `
-                    }
-                  </tbody>
-                </table>
-
-                <!-- TOTALS SECTION -->
-                <div class="totals-section">
-                  <div class="totals-box">
-                    <div class="total-row">
-                      <span>Total Return Amount:</span>
-                      <span>$ ${totalAmt.toFixed(2)}</span>
-                    </div>
-                    ${gstAmt > 0 ? `
-                      <div class="total-row">
-                        <span>GST Amount:</span>
-                        <span>$ ${gstAmt.toFixed(2)}</span>
-                      </div>
-                    ` : ''}
-                    <div class="total-row total-row-grand">
-                      <span>NET REFUND / CREDIT:</span>
-                      <span>$ ${netTotal.toFixed(2)}</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <div>
-                <!-- SIGNATURES -->
-                <div class="sign-grid">
-                  <div class="sign-card">
-                    <div class="sign-title">Customer Acknowledgement</div>
-                    <div class="sign-line"></div>
-                    <div class="sign-sub">
-                      <span>Customer Signature</span>
-                      <span>Date: ........................</span>
-                    </div>
-                  </div>
-                  <div class="sign-card">
-                    <div class="sign-title">Authorized Staff / Cashier</div>
-                    <div class="sign-line"></div>
-                    <div class="sign-sub">
-                      <span>Staff: ${header.ModifyUser || header.SalesManCode || 'SYS'}</span>
-                      <span>Date: ........................</span>
-                    </div>
-                  </div>
-                </div>
-
-                <!-- FOOTER -->
-                <div class="footer-bar">
-                  *** Official Sales Return Voucher - System Generated by SmartGold POS ***
-                </div>
-              </div>
-            </div>
-
-            <script>
-              window.onload = function() {
-                setTimeout(function() {
-                  window.print();
-                }, 300);
-              };
-            </script>
-          </body>
-        </html>
+      const printScript = `
+        <script>
+          window.onload = function() {
+            setTimeout(function() {
+              window.print();
+            }, 300);
+          };
+        </script>
       `;
+      const printHtml = htmlContent.replace('</body>', `${printScript}</body>`);
 
       if (Platform.OS === 'web' && typeof window !== 'undefined') {
-        const printWindow = window.open('', '_blank', 'width=900,height=750');
-        if (printWindow) {
-          printWindow.document.open();
-          printWindow.document.write(printHtml);
-          printWindow.document.close();
-          showToast('Success', `Sales Return print preview opened: ${trimmedReturnNo}`);
+        const frameId = '__sales_return_print_frame__';
+        let iframe = document.getElementById(frameId) as HTMLIFrameElement;
+        if (!iframe) {
+          iframe = document.createElement('iframe');
+          iframe.id = frameId;
+          iframe.style.position = 'fixed';
+          iframe.style.right = '0';
+          iframe.style.bottom = '0';
+          iframe.style.width = '0';
+          iframe.style.height = '0';
+          iframe.style.border = '0';
+          iframe.style.visibility = 'hidden';
+          document.body.appendChild(iframe);
+        }
+
+        const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
+        if (iframeDoc && iframe.contentWindow) {
+          iframeDoc.open();
+          iframeDoc.write(htmlContent);
+          iframeDoc.title = `Sales Return Voucher - ${trimmedReturnNo}`;
+          iframeDoc.close();
+
+          setTimeout(() => {
+            try {
+              iframe.contentWindow?.focus();
+              iframe.contentWindow?.print();
+              showToast('Success', `Sales Return print dialog opened: ${trimmedReturnNo}`);
+            } catch (printErr) {
+              console.error('Iframe print error:', printErr);
+              const printWindow = window.open('', '_blank', 'width=900,height=750');
+              if (printWindow) {
+                printWindow.document.open();
+                printWindow.document.write(printHtml);
+                printWindow.document.title = `Sales Return Voucher - ${trimmedReturnNo}`;
+                printWindow.document.close();
+              }
+            }
+          }, 350);
         } else {
-          const blob = new Blob([printHtml], { type: 'text/html;charset=utf-8;' });
-          const url = URL.createObjectURL(blob);
-          const win = window.open(url, '_blank');
-          if (!win) {
-            showToast('Error', 'Popup blocker prevented opening print preview. Please allow popups.');
-          } else {
+          const printWindow = window.open('', '_blank', 'width=900,height=750');
+          if (printWindow) {
+            printWindow.document.open();
+            printWindow.document.write(printHtml);
+            printWindow.document.title = `Sales Return Voucher - ${trimmedReturnNo}`;
+            printWindow.document.close();
             showToast('Success', `Sales Return print preview opened: ${trimmedReturnNo}`);
           }
         }
@@ -945,6 +991,110 @@ export default function SalesReturnScreen() {
     } catch (err: any) {
       console.error('Print Error:', err);
       showToast('Error', 'Failed to generate Sales Return print preview');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Direct PDF Download functionality
+  const handleDownloadPdf = async (sReturnNo: string) => {
+    const trimmedReturnNo = (sReturnNo || '').trim();
+    if (!trimmedReturnNo) {
+      showToast('Error', 'Return Number is required');
+      return;
+    }
+
+    try {
+      setLoading(true);
+      const res = await fetch(`${API_BASE_URL}/salesreturn/print-data?returnNo=${encodeURIComponent(trimmedReturnNo)}`);
+      const json = await res.json();
+
+      if (!json.success || !json.data) {
+        showToast('Error', json.message || `Sales Return "${trimmedReturnNo}" not found.`);
+        return;
+      }
+
+      const htmlContent = buildSalesReturnHtml(trimmedReturnNo, json.data);
+      const downloadFilename = `Sales_Return_${trimmedReturnNo}.pdf`;
+
+      const pdfRes = await fetch(`${API_BASE_URL}/salesreturn/export-pdf`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          html: htmlContent,
+          filename: downloadFilename
+        })
+      });
+
+      if (!pdfRes.ok) {
+        throw new Error('Server returned error while generating PDF');
+      }
+
+      const pdfBlob = await pdfRes.blob();
+
+      if (Platform.OS === 'web' && typeof window !== 'undefined') {
+        const url = URL.createObjectURL(pdfBlob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = downloadFilename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+        showToast('Success', `Sales Return PDF downloaded: ${downloadFilename}`);
+      } else {
+        showToast('Success', 'PDF generated successfully.');
+      }
+    } catch (err: any) {
+      console.error('PDF Export Error:', err);
+      showToast('Error', 'Failed to download PDF: ' + (err.message || 'Error'));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Direct Excel Download functionality
+  const handleDownloadExcel = async (sReturnNo: string) => {
+    const trimmedReturnNo = (sReturnNo || '').trim();
+    if (!trimmedReturnNo) {
+      showToast('Error', 'Return Number is required');
+      return;
+    }
+
+    try {
+      setLoading(true);
+      const excelRes = await fetch(`${API_BASE_URL}/salesreturn/export-excel`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          returnNo: trimmedReturnNo
+        })
+      });
+
+      if (!excelRes.ok) {
+        const errJson = await excelRes.json().catch(() => ({}));
+        throw new Error(errJson.message || 'Server error generating Excel file');
+      }
+
+      const excelBlob = await excelRes.blob();
+      const downloadFilename = `Sales_Return_${trimmedReturnNo}.xlsx`;
+
+      if (Platform.OS === 'web' && typeof window !== 'undefined') {
+        const url = URL.createObjectURL(excelBlob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = downloadFilename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+        showToast('Success', `Sales Return Excel downloaded: ${downloadFilename}`);
+      } else {
+        showToast('Success', 'Excel generated successfully.');
+      }
+    } catch (err: any) {
+      console.error('Excel Export Error:', err);
+      showToast('Error', 'Failed to download Excel: ' + (err.message || 'Error'));
     } finally {
       setLoading(false);
     }
@@ -991,12 +1141,11 @@ export default function SalesReturnScreen() {
       if (data.success) {
         showToast('Success', `Sales Return generated: ${data.returnNo}`);
         const generatedReturnNo = (data.returnNo || '').trim();
-        // Automatic Print condition matching VB:
-        // If Trim(sCompanyShortCode) = "AJ" Then subPrintSalesReturn(sNextRetNo)
-        if (generatedReturnNo && data.companyShortCode === 'AJ') {
-          subPrintSalesReturn(generatedReturnNo);
-        }
         clearForm();
+        if (generatedReturnNo) {
+          setActivePrintReturnNo(generatedReturnNo);
+          setIsPrintModalVisible(true);
+        }
       } else {
         showToast('Error', data.message || 'Save failed');
       }
@@ -1747,33 +1896,103 @@ export default function SalesReturnScreen() {
                   autoFocus
                   onSubmitEditing={subGetSalesReturnPrint}
                 />
-                <View style={{ flexDirection: 'row', gap: 10 }}>
+                <View style={{ flexDirection: 'row', gap: 6, marginBottom: 8 }}>
                   <TouchableOpacity
-                    style={[styles.actionBtn, styles.clearBtn, { flex: 1, justifyContent: 'center' }]}
+                    style={[styles.actionBtn, styles.saveBtn, { flex: 1, justifyContent: 'center', height: 32 }]}
                     onPress={() => {
-                      setReprintModalVisible(false);
-                      setReprintReturnNo('');
+                      const trimmed = reprintReturnNo.trim();
+                      if (trimmed) {
+                        subPrintSalesReturn(trimmed);
+                        setReprintModalVisible(false);
+                      } else {
+                        showToast('Error', 'Please enter a Return No');
+                      }
                     }}
-                  >
-                    <ThemedText style={styles.clearBtnText}>Cancel</ThemedText>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[styles.actionBtn, styles.saveBtn, { flex: 1, justifyContent: 'center' }]}
-                    onPress={subGetSalesReturnPrint}
                     disabled={loading}
                   >
-                    {loading ? (
-                      <ActivityIndicator size="small" color="#9E6D08" />
-                    ) : (
-                      <ThemedText style={styles.saveBtnText}>Print</ThemedText>
-                    )}
+                    <Ionicons name="print-outline" size={13} color="#9E6D08" />
+                    <ThemedText style={styles.saveBtnText}>Print</ThemedText>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={[styles.actionBtn, { flex: 1, backgroundColor: '#FFFFFF', borderColor: '#E0A8A0', justifyContent: 'center', height: 32 }]}
+                    onPress={() => {
+                      const trimmed = reprintReturnNo.trim();
+                      if (trimmed) {
+                        handleDownloadPdf(trimmed);
+                        setReprintModalVisible(false);
+                      } else {
+                        showToast('Error', 'Please enter a Return No');
+                      }
+                    }}
+                    disabled={loading}
+                  >
+                    <Ionicons name="download-outline" size={13} color="#C23934" />
+                    <ThemedText style={[styles.clearBtnText, { color: '#C23934' }]}>PDF</ThemedText>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={[styles.actionBtn, { flex: 1, backgroundColor: '#FFFFFF', borderColor: '#A5D6A7', justifyContent: 'center', height: 32 }]}
+                    onPress={() => {
+                      const trimmed = reprintReturnNo.trim();
+                      if (trimmed) {
+                        handleDownloadExcel(trimmed);
+                        setReprintModalVisible(false);
+                      } else {
+                        showToast('Error', 'Please enter a Return No');
+                      }
+                    }}
+                    disabled={loading}
+                  >
+                    <Ionicons name="grid-outline" size={13} color="#2E7D32" />
+                    <ThemedText style={[styles.clearBtnText, { color: '#2E7D32' }]}>Excel</ThemedText>
                   </TouchableOpacity>
                 </View>
+
+                <TouchableOpacity
+                  style={[styles.actionBtn, styles.clearBtn, { width: '100%', justifyContent: 'center', height: 30 }]}
+                  onPress={() => {
+                    setReprintModalVisible(false);
+                    setReprintReturnNo('');
+                  }}
+                >
+                  <ThemedText style={styles.clearBtnText}>Cancel</ThemedText>
+                </TouchableOpacity>
               </View>
             </View>
           </TouchableWithoutFeedback>
         </TouchableOpacity>
       </Modal>
+
+      {/* PRINT REPORT CONFIRMATION MODAL ("Do you want to print ?") */}
+      <PrintReportModal
+        visible={isPrintModalVisible}
+        title="Print Invoice"
+        message="Do you want to print ?"
+        loading={loading}
+        onCancel={() => {
+          setIsPrintModalVisible(false);
+          setActivePrintReturnNo('');
+        }}
+        onPdf={() => {
+          if (activePrintReturnNo) {
+            handleDownloadPdf(activePrintReturnNo);
+          }
+          setIsPrintModalVisible(false);
+        }}
+        onExcel={() => {
+          if (activePrintReturnNo) {
+            handleDownloadExcel(activePrintReturnNo);
+          }
+          setIsPrintModalVisible(false);
+        }}
+        onPrint={() => {
+          if (activePrintReturnNo) {
+            subPrintSalesReturn(activePrintReturnNo);
+          }
+          setIsPrintModalVisible(false);
+        }}
+      />
 
       {/* TOAST ALERT */}
       {toast && (
@@ -1856,12 +2075,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 5,
+    width: 68,
+    height: 34,
     borderRadius: 6,
     borderWidth: 1,
     gap: 4,
-    minHeight: 28,
   },
   saveBtn: {
     backgroundColor: '#F9F2E2',

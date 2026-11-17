@@ -1,6 +1,7 @@
 /** Developer: durairaj */
 import { ThemedText } from '@/components/themed-text';
 import { API_BASE_URL } from '@/constants/api';
+import { getStandardReportCss, renderStandardReportFooter, renderStandardReportHeader } from '@/utils/standardPrintReport';
 import { Ionicons } from '@expo/vector-icons';
 import { Stack, useFocusEffect, useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useState } from 'react';
@@ -642,6 +643,398 @@ export default function WholeSalePOSScreen() {
   // Reports: rptCreditSalesInvoice_MJ.rpt, rptCreditSalesExportInvoice_MJ.rpt, rptCreditSalesInvoice_MD.rpt, rptCreditSalesInvoice_HN.rpt
   // Selection Formula: {tblCreditSalesHeader.InvoiceNo} = sInvoiceNo or {tblSalesHeader.InvoiceNo} = sInvoiceNo
   // Formula Fields: CompAddress1, CompAddress2, CompAddress3, Customer1, Customer2, Customer3, Rate1, Rate2, Rate3
+  // Helper to build standardized HTML for Wholesale Tax Invoice (consistent with Purchase Return & POS Invoice)
+  const buildWholesaleInvoiceHtml = (trimmedNo: string, isReprint: boolean, printData: any) => {
+    const { company, rates, header, items, payments } = printData;
+
+    // Company Details
+    const compName = (company?.name || 'SMART').trim();
+    const compAddr1 = (company?.address1 || '').trim();
+    const compAddr2 = [company?.address2, company?.city, company?.country].filter(Boolean).join(' ');
+    const compContact = [
+      company?.phone ? `Tel: ${company?.phone}` : '',
+      company?.fax ? `Fax: ${company?.fax}` : ''
+    ].filter(Boolean).join(' | ');
+
+    // Customer & Bill Details
+    const custName = (header?.CustomerName || 'CASH CUSTOMER').trim();
+    const custAddr1 = (header?.CustomerAddress1 || '').trim();
+    const custAddr2 = (header?.CustomerAddress2 || '').trim();
+    const custAddr3 = (header?.CustomerAddress3 || '').trim();
+    const custNric = (header?.CustomerNricNo || '').trim();
+    const salesman = (header?.SalesManName || header?.SalesManCode || '').trim();
+    const location = (header?.LocationCode || 'HQ').trim();
+
+    // Format Dates
+    const rawDate = header?.InvoiceDate || header?.CreateDate;
+    let invoiceDateFormatted = '';
+    if (rawDate) {
+      const d = new Date(rawDate);
+      if (!isNaN(d.getTime())) {
+        invoiceDateFormatted = `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`;
+      }
+    }
+    const printTimeStr = new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
+
+    // Financials
+    const totalWeight = (parseFloat(header?.TotalWeight) || (items || []).reduce((acc: number, it: any) => acc + (parseFloat(it.Weight) || 0), 0)).toFixed(2);
+    const totalPCS = parseInt(header?.TotalPCS) || (items || []).reduce((acc: number, it: any) => acc + (parseInt(it.PCS) || 0), 0);
+    const totalSMC = (parseFloat(header?.TotalSMC) || (items || []).reduce((acc: number, it: any) => acc + (parseFloat(it.SMC) || 0), 0)).toFixed(2);
+    const netTotalVal = (parseFloat(header?.NetTotal) || parseFloat(header?.TotalValue) || 0).toFixed(2);
+    const gstAmtVal = (parseFloat(header?.GST) || 0).toFixed(2);
+    const netDiscountVal = (parseFloat(header?.NetDiscount) || 0).toFixed(2);
+
+    // Report Title
+    const reportTitle = 'WHOLESALE POS';
+    const docTitle = `Wholesale POS - ${trimmedNo}`;
+
+    // Item Table Rows
+    const itemsHtml = (items || []).map((it: any, idx: number) => {
+      const desc = (it.Description || '').trim();
+      const code = (it.InventoryCode || '').trim();
+      const wt = parseFloat(it.Weight) || 0;
+      const rate = parseFloat(it.Rate || it.DailyRate) || 0;
+      const smc = parseFloat(it.SMC) || 0;
+      const pcs = parseInt(it.PCS) || 1;
+      const amount = parseFloat(it.NetAmount || it.TotalValue) || 0;
+
+      return `
+        <tr>
+          <td style="text-align: center; font-weight: 700;">${idx + 1}</td>
+          <td style="font-weight: 700; font-family: monospace;">${code}</td>
+          <td style="font-weight: 700;">${desc}</td>
+          <td style="text-align: center; font-weight: 700;">${pcs}</td>
+          <td style="text-align: right; font-weight: 700;">${wt.toFixed(2)}</td>
+          <td style="text-align: right; font-weight: 700;">$${rate.toFixed(2)}</td>
+          <td style="text-align: right; font-weight: 700;">$${smc.toFixed(2)}</td>
+          <td style="text-align: right; font-weight: 800; color: #8C5D08;">$${amount.toFixed(2)}</td>
+        </tr>
+      `;
+    }).join('');
+
+    return `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <meta charset="utf-8" />
+          <title>${docTitle}</title>
+          <style>
+            @page {
+              size: A4 portrait;
+              margin: 0 !important;
+            }
+            ${getStandardReportCss()}
+
+            @media print {
+              @page {
+                margin: 0 !important;
+              }
+              html, body {
+                width: 210mm !important;
+                height: 100% !important;
+                margin: 0 !important;
+                padding: 0 !important;
+                background: #FFFFFF !important;
+                -webkit-print-color-adjust: exact !important;
+                print-color-adjust: exact !important;
+              }
+              .page-sheet {
+                width: 210mm !important;
+                min-height: 297mm !important;
+                height: 297mm !important;
+                margin: 0 !important;
+                padding: 12mm 14mm !important;
+                box-shadow: none !important;
+                display: flex !important;
+                flex-direction: column !important;
+                justify-content: space-between !important;
+                box-sizing: border-box !important;
+                page-break-after: avoid !important;
+                break-after: avoid !important;
+              }
+            }
+
+            html, body {
+              height: 100%;
+              margin: 0;
+              padding: 0;
+            }
+
+            .page-sheet {
+              width: 210mm;
+              min-height: 297mm;
+              padding: 12mm 14mm;
+              display: flex;
+              flex-direction: column;
+              justify-content: space-between;
+              box-sizing: border-box;
+            }
+
+            .report-main-content {
+              flex-grow: 1;
+            }
+
+            .std-footer-container {
+              margin-top: auto !important;
+              padding-top: 14px !important;
+              page-break-inside: avoid !important;
+              break-inside: avoid !important;
+            }
+
+            /* Cambria Typography across all elements */
+            *, *:before, *:after, body, div, table, tr, th, td, span, p, h1, h2, h3, h4, h5, h6 {
+              font-family: 'Cambria', Georgia, 'Times New Roman', serif !important;
+            }
+
+            body {
+              font-family: 'Cambria', Georgia, 'Times New Roman', serif !important;
+            }
+
+            .std-company-name {
+              font-family: 'Cambria', Georgia, serif !important;
+              font-size: 24px !important;
+              font-weight: 800 !important;
+              letter-spacing: 2px !important;
+              color: #A37416 !important;
+            }
+
+            .std-company-address {
+              font-family: 'Cambria', Georgia, serif !important;
+              font-size: 11px !important;
+              font-weight: 700 !important;
+              color: #1A1A1A !important;
+              letter-spacing: 0.5px !important;
+            }
+
+            .std-report-title {
+              font-family: 'Cambria', Georgia, serif !important;
+              font-size: 22px !important;
+              font-weight: 800 !important;
+              letter-spacing: 1.5px !important;
+              color: #4A3511 !important;
+            }
+
+            .std-printed-time {
+              font-family: 'Cambria', Georgia, serif !important;
+              font-size: 11.5px !important;
+              font-weight: 700 !important;
+              color: #222222 !important;
+            }
+
+            .rates-box {
+              background: #FAF8F5;
+              border: 1px solid #C49A45;
+              border-radius: 4px;
+              padding: 6px 12px;
+              display: flex;
+              gap: 16px;
+              font-size: 11px;
+              margin-top: 6px;
+              margin-bottom: 10px;
+              font-weight: 700;
+            }
+            .rates-box span {
+              color: #222;
+            }
+            .rates-box b {
+              color: #8C5D08;
+            }
+
+            .info-panel {
+              display: flex;
+              justify-content: space-between;
+              background: #FAF8F5;
+              border: 1px solid #C49A45;
+              border-radius: 4px;
+              padding: 9px 12px;
+              margin-bottom: 12px;
+              font-size: 11px;
+            }
+            .info-col {
+              flex: 1;
+              line-height: 1.5;
+            }
+            .info-col b {
+              color: #222;
+            }
+
+            .data-table {
+              width: 100%;
+              border-collapse: collapse;
+              margin-top: 4px;
+              margin-bottom: 12px;
+              font-size: 11px;
+            }
+            .data-table th {
+              background: #8C5D08;
+              color: #FFFFFF;
+              font-weight: 800;
+              text-transform: uppercase;
+              font-size: 10px;
+              letter-spacing: 0.5px;
+              padding: 6px 8px;
+              border: 1px solid #734C06;
+            }
+            .data-table td {
+              padding: 6px 8px;
+              border: 1px solid #D9C8A5;
+              background-color: #FFFFFF;
+              color: #222222;
+            }
+            .data-table tr:nth-child(even) td {
+              background-color: #FAF8F5;
+            }
+
+            .summary-container {
+              display: flex;
+              justify-content: space-between;
+              gap: 16px;
+              margin-top: 4px;
+              margin-bottom: 10px;
+            }
+            .pay-box {
+              flex: 1.1;
+              background: #FAF8F5;
+              border: 1px solid #C49A45;
+              border-radius: 4px;
+              padding: 8px 12px;
+            }
+            .totals-box {
+              flex: 1;
+              background: #FAF8F5;
+              border: 1px solid #C49A45;
+              border-radius: 4px;
+              padding: 8px 12px;
+            }
+            .total-row {
+              display: flex;
+              justify-content: space-between;
+              padding: 2.5px 0;
+              font-size: 11.5px;
+              color: #222222;
+              font-weight: 700;
+            }
+            .total-row.grand {
+              border-top: 2px solid #8C5D08;
+              margin-top: 4px;
+              padding-top: 4px;
+              font-size: 13.5px;
+              font-weight: 800;
+              color: #8C5D08;
+            }
+            .terms-box {
+              font-size: 9.5px;
+              color: #555;
+              line-height: 1.4;
+              border-top: 1px solid #D9C8A5;
+              padding-top: 8px;
+              margin-top: 10px;
+            }
+          </style>
+        </head>
+        <body>
+          <div class="page-sheet">
+            <div class="report-main-content">
+              ${renderStandardReportHeader({
+                company: {
+                  name: compName,
+                  address: [compAddr1, compAddr2, compContact].filter(Boolean).join(' ')
+                },
+                reportTitle: reportTitle,
+                printedDateTime: `${invoiceDateFormatted || ''} ${printTimeStr}`
+              })}
+
+              <!-- Customer & Bill Info Panel -->
+              <div class="info-panel">
+                <div class="info-col">
+                  <div><b>Customer:</b> ${custName}</div>
+                  ${custNric ? `<div><b>NRIC / ID:</b> ${custNric}</div>` : ''}
+                  <div><b>Address:</b> ${[custAddr1, custAddr2, custAddr3].filter(Boolean).join(', ') || '-'}</div>
+                </div>
+                <div class="info-col" style="text-align: right;">
+                  <div><b>Salesman:</b> ${salesman || '-'}</div>
+                  <div><b>Location:</b> ${location}</div>
+                  <div><b>Sales Type:</b> Wholesale</div>
+                </div>
+              </div>
+
+              <!-- Items Table -->
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th style="width: 32px; text-align: center;">#</th>
+                    <th style="width: 110px; text-align: left;">Item Code</th>
+                    <th style="text-align: left;">Description</th>
+                    <th style="width: 45px; text-align: center;">PCS</th>
+                    <th style="width: 70px; text-align: right;">Weight (g)</th>
+                    <th style="width: 80px; text-align: right;">Rate /g</th>
+                    <th style="width: 75px; text-align: right;">SMC</th>
+                    <th style="width: 90px; text-align: right;">Amount ($)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${itemsHtml || '<tr><td colspan="8" style="text-align: center; padding: 14px; color: #777;">No items found</td></tr>'}
+                </tbody>
+              </table>
+
+              <!-- Summary -->
+              <div class="summary-container">
+                <div class="pay-box">
+                  <div style="font-size: 11px; font-weight: 800; color: #8C5D08; text-transform: uppercase; margin-bottom: 6px; border-bottom: 1px solid #DDC89A; padding-bottom: 4px;">Terms & Remarks</div>
+                  <div style="font-size: 11px; color: #444; font-weight: 700;">Payment Type: Wholesale Credit Settlement</div>
+                  ${header?.Remarks && header.Remarks.trim() ? `
+                    <div style="margin-top: 8px; font-size: 10.5px; color: #555; border-top: 1px dashed #DDD; padding-top: 4px;">
+                      <b>Remarks:</b> ${header.Remarks.trim()}
+                    </div>
+                  ` : ''}
+                </div>
+
+                <!-- Financial Totals -->
+                <div class="totals-box">
+                  <div class="total-row">
+                    <span>Total PCS:</span>
+                    <b>${totalPCS}</b>
+                  </div>
+                  <div class="total-row">
+                    <span>Total Weight (g):</span>
+                    <b>${totalWeight} g</b>
+                  </div>
+                  <div class="total-row">
+                    <span>Total SMC:</span>
+                    <span>$${totalSMC}</span>
+                  </div>
+                  ${parseFloat(netDiscountVal) > 0 ? `
+                    <div class="total-row">
+                      <span>Net Discount:</span>
+                      <span style="color: #C62828;">-$${netDiscountVal}</span>
+                    </div>
+                  ` : ''}
+                  <div class="total-row">
+                    <span>GST:</span>
+                    <span>$${gstAmtVal}</span>
+                  </div>
+                  <div class="total-row grand">
+                    <span>Net Total:</span>
+                    <span>$${netTotalVal}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            ${renderStandardReportFooter({
+              staff: {
+                staffLabel: 'PREPARED BY (STAFF)',
+                staffName: (salesman || 'Staff').trim(),
+                receiverLabel: 'SUPPLIER / AUTHORIZED RECEIVER',
+                receiverName: (custName || '-').trim()
+              }
+            })}
+          </div>
+        </body>
+      </html>
+    `;
+  };
+
   const subPrintBill = async (sInvoiceNo: string, isReprint: boolean = false) => {
     const trimmedNo = (sInvoiceNo || '').trim();
     if (!trimmedNo) {
@@ -659,411 +1052,55 @@ export default function WholeSalePOSScreen() {
         return;
       }
 
-      const { company, rates, header, items, payments } = json.data;
+      const htmlContent = buildWholesaleInvoiceHtml(trimmedNo, isReprint, json.data);
+      const docTitle = `Wholesale POS - ${trimmedNo}`;
 
-      // Extract Company and formulas
-      const compName = (company?.name || 'SMART').trim();
-      const compAddr1 = (company?.address1 || '').trim();
-      const compAddr2 = [company?.address2, company?.city, company?.country].filter(Boolean).join(' ');
-      const compContact = [
-        company?.phone ? `Tel: ${company?.phone}` : '',
-        company?.fax ? `Fax: ${company?.fax}` : ''
-      ].filter(Boolean).join(' | ');
-
-      const custName = (header.CustomerName || 'CASH CUSTOMER').trim();
-      const custAddr1 = (header.CustomerAddress1 || '').trim();
-      const custAddr2 = (header.CustomerAddress2 || '').trim();
-      const custAddr3 = (header.CustomerAddress3 || '').trim();
-      const custNric = (header.CustomerNricNo || '').trim();
-      const salesman = (header.SalesManName || header.SalesManCode || '').trim();
-      const location = (header.LocationCode || 'HQ').trim();
-
-      // Format Dates
-      const rawDate = header.InvoiceDate || header.CreateDate;
-      let invoiceDateFormatted = '';
-      if (rawDate) {
-        const d = new Date(rawDate);
-        if (!isNaN(d.getTime())) {
-          invoiceDateFormatted = `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`;
-        }
-      }
-      const printTimeStr = new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
-
-      // Financials
-      const totalWeight = (parseFloat(header.TotalWeight) || (items || []).reduce((acc: number, it: any) => acc + (parseFloat(it.Weight) || 0), 0)).toFixed(2);
-      const totalPCS = parseInt(header.TotalPCS) || (items || []).reduce((acc: number, it: any) => acc + (parseInt(it.PCS) || 0), 0);
-      const totalSMC = (parseFloat(header.TotalSMC) || (items || []).reduce((acc: number, it: any) => acc + (parseFloat(it.SMC) || 0), 0)).toFixed(2);
-      const netTotalVal = (parseFloat(header.NetTotal) || parseFloat(header.TotalValue) || 0).toFixed(2);
-      const gstAmtVal = (parseFloat(header.GST) || 0).toFixed(2);
-      const netDiscountVal = (parseFloat(header.NetDiscount) || 0).toFixed(2);
-
-      // Report Title (Duplicate Copy on reprint as per frmGPOSWholeSale.vb)
-      const reportTitle = isReprint ? 'WHOLESALE TAX INVOICE (DUPLICATE COPY)' : 'WHOLESALE TAX INVOICE';
-
-      // Items Rows HTML
-      const itemsHtml = (items || []).map((it: any, idx: number) => {
-        const desc = (it.Description || '').trim();
-        const code = (it.InventoryCode || '').trim();
-        const wt = parseFloat(it.Weight) || 0;
-        const rate = parseFloat(it.Rate || it.DailyRate) || 0;
-        const smc = parseFloat(it.SMC) || 0;
-        const pcs = parseInt(it.PCS) || 1;
-        const amount = parseFloat(it.NetAmount || it.TotalValue) || 0;
-
-        return `
-          <tr>
-            <td style="text-align: center; padding: 7px 4px; border-bottom: 1px solid #ECECEC;">${idx + 1}</td>
-            <td style="padding: 7px 6px; border-bottom: 1px solid #ECECEC; font-family: monospace;">${code}</td>
-            <td style="padding: 7px 6px; border-bottom: 1px solid #ECECEC;">${desc}</td>
-            <td style="text-align: center; padding: 7px 4px; border-bottom: 1px solid #ECECEC;">${pcs}</td>
-            <td style="text-align: right; padding: 7px 6px; border-bottom: 1px solid #ECECEC;">${wt.toFixed(2)}</td>
-            <td style="text-align: right; padding: 7px 6px; border-bottom: 1px solid #ECECEC;">$${rate.toFixed(2)}</td>
-            <td style="text-align: right; padding: 7px 6px; border-bottom: 1px solid #ECECEC;">$${smc.toFixed(2)}</td>
-            <td style="text-align: right; padding: 7px 6px; border-bottom: 1px solid #ECECEC; font-weight: 600;">$${amount.toFixed(2)}</td>
-          </tr>
-        `;
-      }).join('');
-
-      // Build Print HTML Document
-      const printHtml = `
-        <!DOCTYPE html>
-        <html>
-          <head>
-            <meta charset="utf-8" />
-            <title>Wholesale POS Invoice - ${trimmedNo}</title>
-            <style>
-              @page {
-                size: A4 portrait;
-                margin: 0;
-              }
-              *, *:before, *:after {
-                box-sizing: border-box;
-              }
-              body {
-                font-family: 'Segoe UI', Tahoma, Arial, sans-serif;
-                margin: 0;
-                padding: 0;
-                background-color: #525659;
-                color: #222;
-                -webkit-print-color-adjust: exact;
-                print-color-adjust: exact;
-              }
-              .page-sheet {
-                background: #FFFFFF;
-                width: 210mm;
-                min-height: 297mm;
-                margin: 10mm auto;
-                padding: 14mm 16mm;
-                box-shadow: 0 0 14px rgba(0,0,0,0.4);
-                display: flex;
-                flex-direction: column;
-                justify-content: space-between;
-              }
-              @media print {
-                body {
-                  background: #FFFFFF;
-                }
-                .page-sheet {
-                  margin: 0;
-                  padding: 10mm 14mm;
-                  box-shadow: none;
-                  width: 100%;
-                  min-height: 100%;
-                }
-              }
-              .company-title {
-                font-size: 20px;
-                font-weight: 800;
-                color: #8D6409;
-                letter-spacing: 0.5px;
-                text-transform: uppercase;
-                margin-bottom: 2px;
-              }
-              .company-sub {
-                font-size: 11px;
-                color: #555;
-                line-height: 1.4;
-              }
-              .report-badge {
-                display: inline-block;
-                background: #FAF5EA;
-                border: 1px solid #D8C593;
-                color: #8D6409;
-                font-weight: 800;
-                font-size: 13px;
-                padding: 5px 14px;
-                border-radius: 4px;
-                letter-spacing: 1px;
-                text-transform: uppercase;
-              }
-              .rates-box {
-                background: #FDFCF9;
-                border: 1px solid #EADBBA;
-                border-radius: 4px;
-                padding: 6px 12px;
-                display: flex;
-                gap: 16px;
-                font-size: 10.5px;
-                margin-top: 8px;
-              }
-              .rates-box span {
-                color: #444;
-              }
-              .rates-box b {
-                color: #8D6409;
-              }
-              .info-panel {
-                display: flex;
-                justify-content: space-between;
-                background: #FAF7F0;
-                border: 1px solid #E8DECA;
-                border-radius: 5px;
-                padding: 10px 14px;
-                margin: 14px 0 16px 0;
-                font-size: 11.5px;
-              }
-              .info-col {
-                flex: 1;
-                line-height: 1.6;
-              }
-              .info-col b {
-                color: #333;
-              }
-              .data-table {
-                width: 100%;
-                border-collapse: collapse;
-                margin-top: 6px;
-                font-size: 11px;
-              }
-              .data-table th {
-                background: #8D6409;
-                color: #FFFFFF;
-                font-weight: 700;
-                text-transform: uppercase;
-                font-size: 10px;
-                letter-spacing: 0.5px;
-                padding: 7px 6px;
-                border: 1px solid #7D5605;
-              }
-              .summary-container {
-                display: flex;
-                justify-content: space-between;
-                gap: 18px;
-                margin-top: 14px;
-              }
-              .pay-box {
-                flex: 1.1;
-                background: #FDFCF9;
-                border: 1px solid #EAE0CB;
-                border-radius: 4px;
-                padding: 10px 12px;
-              }
-              .totals-box {
-                flex: 1;
-                background: #FAF7F0;
-                border: 1px solid #E8DECA;
-                border-radius: 4px;
-                padding: 10px 14px;
-              }
-              .total-row {
-                display: flex;
-                justify-content: space-between;
-                padding: 3px 0;
-                font-size: 11.5px;
-                color: #444;
-              }
-              .total-row.grand {
-                border-top: 2px solid #8D6409;
-                margin-top: 6px;
-                padding-top: 6px;
-                font-size: 14px;
-                font-weight: 800;
-                color: #8D6409;
-              }
-              .terms-box {
-                font-size: 9.5px;
-                color: #666;
-                line-height: 1.4;
-                border-top: 1px solid #EBE2D2;
-                padding-top: 10px;
-                margin-top: 20px;
-              }
-              .sig-row {
-                display: flex;
-                justify-content: space-between;
-                margin-top: 28px;
-                padding: 0 20px;
-              }
-              .sig-line {
-                width: 160px;
-                text-align: center;
-                border-top: 1px solid #888;
-                padding-top: 4px;
-                font-size: 10.5px;
-                color: #444;
-              }
-            </style>
-          </head>
-          <body>
-            <div class="page-sheet">
-              <div>
-                <!-- Header -->
-                <div style="display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #8D6409; padding-bottom: 12px;">
-                  <div>
-                    <div class="company-title">${compName}</div>
-                    <div class="company-sub">${compAddr1}</div>
-                    <div class="company-sub">${compAddr2}</div>
-                    <div class="company-sub">${compContact}</div>
-                  </div>
-                  <div style="text-align: right;">
-                    <div class="report-badge">${reportTitle}</div>
-                    <div style="font-size: 12px; font-weight: 700; color: #333; margin-top: 8px;">Invoice No: <span style="font-family: monospace; color: #8D6409;">${trimmedNo}</span></div>
-                    <div style="font-size: 11px; color: #555;">Date: ${invoiceDateFormatted || '-'}</div>
-                    <div style="font-size: 10px; color: #777;">Time: ${printTimeStr}</div>
-                  </div>
-                </div>
-
-                <!-- Gold Daily Rates Bar -->
-                <div class="rates-box">
-                  <span>Gold Rates Today:</span>
-                  <span>999 (24K): <b>$${rates?.rate999 || '-'}</b></span>
-                  <span>916 (22K): <b>$${rates?.rate916 || '-'}</b></span>
-                  <span>Silver (835): <b>$${rates?.rate835 || '-'}</b></span>
-                </div>
-
-                <!-- Customer & Bill Info Panel -->
-                <div class="info-panel">
-                  <div class="info-col">
-                    <div><b>Customer:</b> ${custName}</div>
-                    ${custNric ? `<div><b>NRIC / ID:</b> ${custNric}</div>` : ''}
-                    <div><b>Address:</b> ${[custAddr1, custAddr2, custAddr3].filter(Boolean).join(', ') || '-'}</div>
-                  </div>
-                  <div class="info-col" style="text-align: right;">
-                    <div><b>Salesman:</b> ${salesman || '-'}</div>
-                    <div><b>Location:</b> ${location}</div>
-                    <div><b>Sales Type:</b> Wholesale</div>
-                  </div>
-                </div>
-
-                <!-- Items Table -->
-                <table class="data-table">
-                  <thead>
-                    <tr>
-                      <th style="width: 32px; text-align: center;">#</th>
-                      <th style="width: 110px; text-align: left;">Item Code</th>
-                      <th style="text-align: left;">Description</th>
-                      <th style="width: 45px; text-align: center;">PCS</th>
-                      <th style="width: 70px; text-align: right;">Weight (g)</th>
-                      <th style="width: 80px; text-align: right;">Rate /g</th>
-                      <th style="width: 75px; text-align: right;">SMC</th>
-                      <th style="width: 90px; text-align: right;">Amount ($)</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    ${itemsHtml || '<tr><td colspan="8" style="text-align: center; padding: 14px;">No items found</td></tr>'}
-                  </tbody>
-                </table>
-
-                <!-- Summary -->
-                <div class="summary-container">
-                  <div class="pay-box">
-                    <div style="font-size: 11px; font-weight: 700; color: #8D6409; text-transform: uppercase; margin-bottom: 6px; border-bottom: 1px solid #EADBBA; padding-bottom: 4px;">Terms & Remarks</div>
-                    <div style="font-size: 11px; color: #555;">Payment Type: Wholesale Credit Settlement</div>
-                    ${header.Remarks && header.Remarks.trim() ? `
-                      <div style="margin-top: 8px; font-size: 10.5px; color: #666; border-top: 1px dashed #DDD; padding-top: 4px;">
-                        <b>Remarks:</b> ${header.Remarks.trim()}
-                      </div>
-                    ` : ''}
-                  </div>
-
-                  <!-- Financial Totals -->
-                  <div class="totals-box">
-                    <div class="total-row">
-                      <span>Total PCS:</span>
-                      <b>${totalPCS}</b>
-                    </div>
-                    <div class="total-row">
-                      <span>Total Weight (g):</span>
-                      <b>${totalWeight} g</b>
-                    </div>
-                    <div class="total-row">
-                      <span>Total SMC:</span>
-                      <span>$${totalSMC}</span>
-                    </div>
-                    ${parseFloat(netDiscountVal) > 0 ? `
-                      <div class="total-row">
-                        <span>Net Discount:</span>
-                        <span style="color: #C62828;">-$${netDiscountVal}</span>
-                      </div>
-                    ` : ''}
-                    <div class="total-row">
-                      <span>GST:</span>
-                      <span>$${gstAmtVal}</span>
-                    </div>
-                    <div class="total-row grand">
-                      <span>Net Total:</span>
-                      <span>$${netTotalVal}</span>
-                    </div>
-                  </div>
-                </div>
-
-                <!-- Terms and Signatures -->
-                <div class="terms-box">
-                  <b>Terms & Conditions:</b> Goods sold are non-refundable. Any discrepancies must be reported within 3 days with this invoice intact. Weights and purities are verified as per industry standards.
-                </div>
-
-                <div class="sig-row">
-                  <div class="sig-line">Customer Signature</div>
-                  <div class="sig-line">Authorized Signature</div>
-                </div>
-              </div>
-
-              <!-- Footer Print Info -->
-              <div style="border-top: 1px solid #EBE2D2; padding-top: 8px; display: flex; justify-content: space-between; font-size: 9.5px; color: #888;">
-                <span>SmartGold Wholesale POS System &copy; ${new Date().getFullYear()}</span>
-                <span>Page 1 of 1</span>
-              </div>
-            </div>
-
-            <script>
-              window.onload = function() {
-                window.print();
-              };
-            </script>
-          </body>
-        </html>
+      const printScript = `
+        <script>
+          window.onload = function() {
+            setTimeout(function() {
+              window.print();
+            }, 300);
+          };
+        </script>
       `;
+      const printHtml = htmlContent.replace('</body>', `${printScript}</body>`);
 
       if (Platform.OS === 'web' && typeof window !== 'undefined' && typeof document !== 'undefined') {
-        let printFrame = document.getElementById('wholesale-print-iframe') as HTMLIFrameElement | null;
+        const frameId = '__wholesale_invoice_print_frame__';
+        let printFrame = document.getElementById(frameId) as HTMLIFrameElement | null;
         if (!printFrame) {
           printFrame = document.createElement('iframe');
-          printFrame.id = 'wholesale-print-iframe';
+          printFrame.id = frameId;
           printFrame.style.position = 'fixed';
           printFrame.style.right = '0';
           printFrame.style.bottom = '0';
           printFrame.style.width = '0';
           printFrame.style.height = '0';
           printFrame.style.border = '0';
+          printFrame.style.visibility = 'hidden';
           document.body.appendChild(printFrame);
         }
 
         const frameDoc = printFrame.contentDocument || printFrame.contentWindow?.document;
-        if (frameDoc) {
+        if (frameDoc && printFrame.contentWindow) {
           frameDoc.open();
-          frameDoc.write(printHtml);
+          frameDoc.write(htmlContent);
+          frameDoc.title = docTitle;
           frameDoc.close();
 
           setTimeout(() => {
             try {
               printFrame?.contentWindow?.focus();
               printFrame?.contentWindow?.print();
-              showToast(`Wholesale Invoice print preview opened: ${trimmedNo}`, 'success');
+              showToast(`Wholesale Invoice ${trimmedNo} print dialog opened`, 'success');
             } catch (pErr) {
+              console.error('Iframe print error:', pErr);
               const printWindow = window.open('', '_blank', 'width=900,height=750');
               if (printWindow) {
                 printWindow.document.open();
                 printWindow.document.write(printHtml);
+                printWindow.document.title = docTitle;
                 printWindow.document.close();
               }
             }
@@ -1073,6 +1110,7 @@ export default function WholeSalePOSScreen() {
           if (printWindow) {
             printWindow.document.open();
             printWindow.document.write(printHtml);
+            printWindow.document.title = docTitle;
             printWindow.document.close();
             showToast(`Wholesale Invoice print preview opened: ${trimmedNo}`, 'success');
           } else {
@@ -1085,6 +1123,111 @@ export default function WholeSalePOSScreen() {
     } catch (err: any) {
       console.error("Print error:", err);
       showToast(err.message || 'Error occurred while generating print preview', 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Dedicated PDF Download Functionality
+  const handleDownloadPdf = async (sInvoiceNo?: string, isReprint: boolean = false) => {
+    const trimmedNo = (sInvoiceNo || headerState.InvoiceNo || '').trim();
+    if (!trimmedNo) {
+      showToast('Validation Error: Invoice number is required to download PDF', 'error');
+      return;
+    }
+
+    try {
+      setLoading(true);
+      const res = await fetch(`${API_URL}/wholesalepos/print-data?invoiceNo=${encodeURIComponent(trimmedNo)}`);
+      const json = await res.json();
+
+      if (!json.success || !json.data) {
+        showToast(json.message || `Wholesale invoice "${trimmedNo}" not found`, 'error');
+        return;
+      }
+
+      const htmlContent = buildWholesaleInvoiceHtml(trimmedNo, isReprint, json.data);
+      const downloadFilename = `Wholesale_Tax_Invoice_${trimmedNo.replace(/[^a-zA-Z0-9_-]/g, '_')}.pdf`;
+
+      const pdfRes = await fetch(`${API_URL}/wholesalepos/export-pdf`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          html: htmlContent,
+          filename: downloadFilename
+        })
+      });
+
+      if (!pdfRes.ok) {
+        throw new Error('Server returned error while generating PDF');
+      }
+
+      const pdfBlob = await pdfRes.blob();
+
+      if (Platform.OS === 'web' && typeof window !== 'undefined') {
+        const url = URL.createObjectURL(pdfBlob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = downloadFilename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+        showToast(`Wholesale Tax Invoice PDF downloaded: ${downloadFilename}`, 'success');
+      } else {
+        showToast('PDF generated successfully.', 'success');
+      }
+    } catch (err: any) {
+      console.error('PDF Export Error:', err);
+      showToast('Failed to download PDF: ' + (err.message || 'Error'), 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Dedicated Excel Download Functionality
+  const handleDownloadExcel = async (sInvoiceNo?: string, isReprint: boolean = false) => {
+    const trimmedNo = (sInvoiceNo || headerState.InvoiceNo || '').trim();
+    if (!trimmedNo) {
+      showToast('Validation Error: Invoice number is required to download Excel', 'error');
+      return;
+    }
+
+    try {
+      setLoading(true);
+      const excelRes = await fetch(`${API_URL}/wholesalepos/export-excel`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          invoiceNo: trimmedNo,
+          isReprint: isReprint
+        })
+      });
+
+      if (!excelRes.ok) {
+        const errJson = await excelRes.json().catch(() => ({}));
+        throw new Error(errJson.message || 'Server error generating Excel file');
+      }
+
+      const excelBlob = await excelRes.blob();
+      const downloadFilename = `Wholesale_Tax_Invoice_${trimmedNo.replace(/[^a-zA-Z0-9_-]/g, '_')}.xlsx`;
+
+      if (Platform.OS === 'web' && typeof window !== 'undefined') {
+        const url = URL.createObjectURL(excelBlob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = downloadFilename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+        showToast(`Wholesale Tax Invoice Excel downloaded: ${downloadFilename}`, 'success');
+      } else {
+        showToast('Excel file generated successfully.', 'success');
+      }
+    } catch (err: any) {
+      console.error('Excel Export Error:', err);
+      showToast('Failed to download Excel: ' + (err.message || 'Error'), 'error');
     } finally {
       setLoading(false);
     }
@@ -1273,6 +1416,16 @@ export default function WholeSalePOSScreen() {
           <TouchableOpacity style={styles.headerBtnSecondary} onPress={handleRePrint}>
             <Ionicons name="print-outline" size={14} color="#554428" style={{ marginRight: 4 }} />
             <ThemedText style={styles.headerBtnSecondaryText}>Re Print / Find</ThemedText>
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.headerBtnSecondary} onPress={() => handleDownloadPdf()} disabled={loading}>
+            <Ionicons name="document-text-outline" size={14} color="#554428" style={{ marginRight: 4 }} />
+            <ThemedText style={styles.headerBtnSecondaryText}>PDF</ThemedText>
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.headerBtnSecondary} onPress={() => handleDownloadExcel()} disabled={loading}>
+            <Ionicons name="download-outline" size={14} color="#554428" style={{ marginRight: 4 }} />
+            <ThemedText style={styles.headerBtnSecondaryText}>Excel</ThemedText>
           </TouchableOpacity>
 
           <TouchableOpacity
@@ -1959,7 +2112,7 @@ export default function WholeSalePOSScreen() {
                   autoFocus
                   onSubmitEditing={executeRePrint}
                 />
-                <View style={{ flexDirection: 'row', gap: 10 }}>
+                <View style={{ flexDirection: 'row', gap: 8 }}>
                   <TouchableOpacity
                     style={[styles.headerBtnSecondary, { flex: 1, justifyContent: 'center' }]}
                     onPress={() => {
@@ -1971,7 +2124,39 @@ export default function WholeSalePOSScreen() {
                     <ThemedText style={styles.headerBtnSecondaryText}>Cancel</ThemedText>
                   </TouchableOpacity>
                   <TouchableOpacity
-                    style={[styles.headerBtnPrimary, { flex: 1, justifyContent: 'center' }]}
+                    style={[styles.headerBtnSecondary, { flex: 1, justifyContent: 'center' }]}
+                    onPress={async () => {
+                      const trimmed = (reprintBillNo || '').trim();
+                      if (!trimmed) {
+                        showToast('Validation Error: Please enter a Bill No', 'error');
+                        return;
+                      }
+                      setReprintModalVisible(false);
+                      handleDownloadPdf(trimmed, true);
+                    }}
+                    disabled={loading}
+                    activeOpacity={0.8}
+                  >
+                    <ThemedText style={styles.headerBtnSecondaryText}>PDF</ThemedText>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.headerBtnSecondary, { flex: 1, justifyContent: 'center' }]}
+                    onPress={async () => {
+                      const trimmed = (reprintBillNo || '').trim();
+                      if (!trimmed) {
+                        showToast('Validation Error: Please enter a Bill No', 'error');
+                        return;
+                      }
+                      setReprintModalVisible(false);
+                      handleDownloadExcel(trimmed, true);
+                    }}
+                    disabled={loading}
+                    activeOpacity={0.8}
+                  >
+                    <ThemedText style={styles.headerBtnSecondaryText}>Excel</ThemedText>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.headerBtnPrimary, { flex: 1.2, justifyContent: 'center' }]}
                     onPress={executeRePrint}
                     disabled={loading}
                     activeOpacity={0.8}
@@ -2010,16 +2195,42 @@ export default function WholeSalePOSScreen() {
                 <ThemedText style={{ fontSize: 13, color: '#3B2D17', textAlign: 'center', marginBottom: 16 }}>
                   Do you want to print ?
                 </ThemedText>
-                <View style={{ flexDirection: 'row', gap: 12, width: '100%' }}>
+                <View style={{ flexDirection: 'row', gap: 8, width: '100%' }}>
                   <TouchableOpacity
                     style={[styles.headerBtnSecondary, { flex: 1, justifyContent: 'center' }]}
                     onPress={() => setPrintConfirmInvoiceNo(null)}
                     activeOpacity={0.7}
                   >
-                    <ThemedText style={styles.headerBtnSecondaryText}>No</ThemedText>
+                    <ThemedText style={styles.headerBtnSecondaryText}>Cancel</ThemedText>
                   </TouchableOpacity>
                   <TouchableOpacity
-                    style={[styles.headerBtnPrimary, { flex: 1, justifyContent: 'center' }]}
+                    style={[styles.headerBtnSecondary, { flex: 1, justifyContent: 'center' }]}
+                    onPress={() => {
+                      const invNoToPrint = printConfirmInvoiceNo;
+                      setPrintConfirmInvoiceNo(null);
+                      if (invNoToPrint) {
+                        handleDownloadPdf(invNoToPrint, false);
+                      }
+                    }}
+                    activeOpacity={0.7}
+                  >
+                    <ThemedText style={styles.headerBtnSecondaryText}>PDF</ThemedText>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.headerBtnSecondary, { flex: 1, justifyContent: 'center' }]}
+                    onPress={() => {
+                      const invNoToPrint = printConfirmInvoiceNo;
+                      setPrintConfirmInvoiceNo(null);
+                      if (invNoToPrint) {
+                        handleDownloadExcel(invNoToPrint, false);
+                      }
+                    }}
+                    activeOpacity={0.7}
+                  >
+                    <ThemedText style={styles.headerBtnSecondaryText}>Excel</ThemedText>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.headerBtnPrimary, { flex: 1.2, justifyContent: 'center' }]}
                     onPress={() => {
                       const invNoToPrint = printConfirmInvoiceNo;
                       setPrintConfirmInvoiceNo(null);
@@ -2029,7 +2240,7 @@ export default function WholeSalePOSScreen() {
                     }}
                     activeOpacity={0.7}
                   >
-                    <ThemedText style={styles.headerBtnPrimaryText}>Yes</ThemedText>
+                    <ThemedText style={styles.headerBtnPrimaryText}>Print</ThemedText>
                   </TouchableOpacity>
                 </View>
               </View>

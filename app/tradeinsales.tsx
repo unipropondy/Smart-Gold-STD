@@ -1,6 +1,8 @@
 /** Developer: durairaj */
 import { ThemedText } from '@/components/themed-text';
+import { PrintReportModal } from '@/components/PrintReportModal';
 import { API_BASE_URL } from '@/constants/api';
+import { getStandardReportCss, renderStandardReportFooter, renderStandardReportHeader } from '@/utils/standardPrintReport';
 import { Ionicons } from '@expo/vector-icons';
 import { Stack, useFocusEffect, useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useState } from 'react';
@@ -86,6 +88,9 @@ export default function TradeInSalesScreen() {
   // Reprint Bill Modal (PnlReprint)
   const [isReprintModalVisible, setIsReprintModalVisible] = useState(false);
   const [reprintBillNo, setReprintBillNo] = useState('');
+  const [isPrintConfirmVisible, setIsPrintConfirmVisible] = useState(false);
+  const [activePrintBillNo, setActivePrintBillNo] = useState('');
+  const [isReprintPrintMode, setIsReprintPrintMode] = useState(false);
 
   // Cost Admin Password verification modal (for Cost > Market Rate)
   const [isAdminPwdVisible, setIsAdminPwdVisible] = useState(false);
@@ -499,10 +504,14 @@ export default function TradeInSalesScreen() {
       const json = await res.json();
       if (json.success) {
         showToast(`Transaction saved! Sales No: ${invoiceNo}`, 'success');
-        if (invoiceNo && invoiceNo.trim() !== '') {
-          subPrintBill(invoiceNo.trim());
-        }
+        const savedInvoiceNo = (invoiceNo || '').trim();
         handleClearAll();
+        // Open Print Invoice confirmation popup after successful backend save
+        if (savedInvoiceNo !== '') {
+          setActivePrintBillNo(savedInvoiceNo);
+          setIsReprintPrintMode(false);
+          setIsPrintConfirmVisible(true);
+        }
       } else {
         showToast(json.message || "Transaction not saved", 'error');
       }
@@ -529,8 +538,395 @@ export default function TradeInSalesScreen() {
     fetchInitialData();
   };
 
+  // Helper to build standardized HTML for Trade-In Gold Invoice
+  const buildTradeInInvoiceHtml = (trimmedBill: string, isReprint: boolean, printData: any) => {
+    const { company, rates, header, items } = printData;
+
+    // Extract Company Details
+    const compName = company.name || 'SMART';
+    const compAddr1 = [company.address1, company.address2].filter(Boolean).join(', ');
+    const compAddr2 = [company.city, company.state, company.country].filter(Boolean).join(' ');
+    const compContact = [
+      company.phone ? `Tel: ${company.phone}` : '',
+      company.fax ? `Fax: ${company.fax}` : ''
+    ].filter(Boolean).join(' | ');
+
+    // Customers details
+    const custName = header.CustomerName || '-';
+    const custAddr1 = header.Address1 || '';
+    const custAddr2 = [header.Address2, header.Address3].filter(Boolean).join(', ');
+
+    // Class Rates (24K, 22K, 20KJ/835)
+    const rate1 = rates?.rate999 || '-';
+    const rate2 = rates?.rate916 || '-';
+    const rate3 = rates?.rate835 || '-';
+
+    // Date formatting
+    const rawDate = header.Date || header.CreateDate;
+    let dateFormatted = '';
+    if (rawDate) {
+      const d = new Date(rawDate);
+      if (!isNaN(d.getTime())) {
+        dateFormatted = `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`;
+      } else {
+        dateFormatted = String(rawDate);
+      }
+    }
+
+    const printTimeStr = new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
+
+    const totalWt = parseFloat(header.TotalWeight) || (items || []).reduce((acc: number, it: any) => acc + (parseFloat(it.Weight) || 0), 0);
+    const totalStoneWt = parseFloat(header.TotalStoneWeight) || (items || []).reduce((acc: number, it: any) => acc + (parseFloat(it.StoneWeight) || 0), 0);
+    const totalCost = parseFloat(header.TotalCost) || (items || []).reduce((acc: number, it: any) => acc + (parseFloat(it.TotalCost) || 0), 0);
+
+    const actualInvoiceNo = header.InvoiceNo || trimmedBill;
+    const reportTitle = 'POS';
+    const docTitle = `POS - ${actualInvoiceNo}`;
+
+    return `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <meta charset="utf-8" />
+          <title>${docTitle}</title>
+          <style>
+            @page {
+              size: A4 portrait;
+              margin: 0 !important;
+            }
+            ${getStandardReportCss()}
+
+            @media print {
+              @page {
+                margin: 0 !important;
+              }
+              html, body {
+                width: 210mm !important;
+                height: 100% !important;
+                margin: 0 !important;
+                padding: 0 !important;
+                background: #FFFFFF !important;
+                -webkit-print-color-adjust: exact !important;
+                print-color-adjust: exact !important;
+              }
+              .page-sheet {
+                width: 210mm !important;
+                min-height: 297mm !important;
+                height: 297mm !important;
+                margin: 0 !important;
+                padding: 12mm 14mm !important;
+                box-shadow: none !important;
+                display: flex !important;
+                flex-direction: column !important;
+                justify-content: space-between !important;
+                box-sizing: border-box !important;
+                page-break-after: avoid !important;
+                break-after: avoid !important;
+              }
+            }
+
+            html, body {
+              height: 100%;
+              margin: 0;
+              padding: 0;
+            }
+
+            .page-sheet {
+              width: 210mm;
+              min-height: 297mm;
+              padding: 12mm 14mm;
+              display: flex;
+              flex-direction: column;
+              justify-content: space-between;
+              box-sizing: border-box;
+            }
+
+            .report-main-content {
+              flex-grow: 1;
+            }
+
+            .std-footer-container {
+              margin-top: auto !important;
+              padding-top: 14px !important;
+              page-break-inside: avoid !important;
+              break-inside: avoid !important;
+            }
+
+            /* Cambria Typography across all elements */
+            *, *:before, *:after, body, div, table, tr, th, td, span, p, h1, h2, h3, h4, h5, h6 {
+              font-family: 'Cambria', Georgia, 'Times New Roman', serif !important;
+            }
+
+            body {
+              font-family: 'Cambria', Georgia, 'Times New Roman', serif !important;
+            }
+
+            .std-company-name {
+              font-family: 'Cambria', Georgia, serif !important;
+              font-size: 24px !important;
+              font-weight: 800 !important;
+              letter-spacing: 2px !important;
+              color: #A37416 !important;
+            }
+
+            .std-company-address {
+              font-family: 'Cambria', Georgia, serif !important;
+              font-size: 11px !important;
+              font-weight: 700 !important;
+              color: #1A1A1A !important;
+              letter-spacing: 0.5px !important;
+            }
+
+            .std-report-title {
+              font-family: 'Cambria', Georgia, serif !important;
+              font-size: 22px !important;
+              font-weight: 800 !important;
+              letter-spacing: 1.5px !important;
+              color: #4A3511 !important;
+            }
+
+            .std-printed-time {
+              font-family: 'Cambria', Georgia, serif !important;
+              font-size: 11.5px !important;
+              font-weight: 700 !important;
+              color: #222222 !important;
+            }
+
+            /* DAILY RATE STRIP (Rate1, Rate2, Rate3) */
+            .rates-strip {
+              display: flex;
+              justify-content: space-around;
+              background: #FAF8F5;
+              border: 1px solid #C49A45;
+              border-radius: 4px;
+              padding: 6px 12px;
+              margin-top: 6px;
+              margin-bottom: 12px;
+              font-size: 11px;
+              font-weight: 700;
+              color: #222222;
+            }
+            .rate-item span {
+              color: #8C5D08;
+              font-weight: 800;
+              margin-left: 4px;
+            }
+
+            /* INFO GRID */
+            .info-grid {
+              display: grid;
+              grid-template-columns: 1fr 1fr;
+              gap: 16px;
+              margin-bottom: 12px;
+            }
+            .info-card {
+              border: 1px solid #C49A45;
+              background: #FAF8F5;
+              border-radius: 4px;
+              padding: 10px 14px;
+            }
+            .card-title {
+              font-size: 11.5px;
+              font-weight: 800;
+              color: #8C5D08;
+              border-bottom: 1px dotted #DDC89A;
+              padding-bottom: 5px;
+              margin-bottom: 8px;
+              text-transform: uppercase;
+              letter-spacing: 0.5px;
+            }
+            .info-row {
+              display: flex;
+              font-size: 11px;
+              margin-bottom: 3px;
+              line-height: 1.35;
+            }
+            .info-lbl {
+              width: 130px;
+              font-weight: 700;
+              color: #222222;
+              flex-shrink: 0;
+            }
+            .info-colon {
+              width: 15px;
+              font-weight: 700;
+              color: #222222;
+              text-align: center;
+              flex-shrink: 0;
+            }
+            .info-val {
+              color: #222222;
+              font-weight: 700;
+              flex-grow: 1;
+              word-break: break-word;
+            }
+
+            /* ITEMS TABLE */
+            .detail-table {
+              width: 100%;
+              border-collapse: collapse;
+              margin-top: 4px;
+              margin-bottom: 12px;
+              font-size: 11px;
+            }
+            .detail-table th {
+              background: #8C5D08;
+              color: #FFFFFF;
+              text-align: left;
+              padding: 6px 8px;
+              font-weight: 800;
+              border: 1px solid #734C06;
+              text-transform: uppercase;
+              font-size: 10px;
+              letter-spacing: 0.5px;
+            }
+            .detail-table td {
+              padding: 6px 8px;
+              border: 1px solid #D9C8A5;
+              background: #FFFFFF;
+              color: #222222;
+            }
+            .detail-table tr:nth-child(even) td {
+              background: #FAF8F5;
+            }
+
+            /* TOTALS SECTION */
+            .totals-section {
+              display: flex;
+              justify-content: flex-end;
+              margin-bottom: 14px;
+            }
+            .totals-box {
+              width: 290px;
+              border: 1px solid #C49A45;
+              background: #FAF8F5;
+              border-radius: 4px;
+              padding: 8px 12px;
+            }
+            .total-row {
+              display: flex;
+              justify-content: space-between;
+              font-size: 11.5px;
+              padding: 2.5px 0;
+              color: #222222;
+              font-weight: 700;
+            }
+            .total-row-grand {
+              border-top: 2px solid #8C5D08;
+              margin-top: 4px;
+              padding-top: 4px;
+              font-weight: 800;
+              font-size: 13.5px;
+              color: #8C5D08;
+            }
+          </style>
+        </head>
+        <body>
+          <div class="page-sheet">
+            <div class="report-main-content">
+              ${renderStandardReportHeader({
+                company: {
+                  name: compName,
+                  address: [compAddr1, compAddr2, compContact].filter(Boolean).join(' ')
+                },
+                reportTitle: reportTitle,
+                printedDateTime: `${dateFormatted || ''} ${printTimeStr}`
+              })}
+
+              <!-- INFO GRID -->
+              <div class="info-grid">
+                <!-- INVOICE INFO -->
+                <div class="info-card">
+                  <div class="card-title">TRADE-IN REFERENCE DETAILS</div>
+                  <div class="info-row"><span class="info-lbl">Invoice / Ref No</span><span class="info-colon">:</span><span class="info-val font-bold">${actualInvoiceNo}</span></div>
+                  <div class="info-row"><span class="info-lbl">Date</span><span class="info-colon">:</span><span class="info-val">${dateFormatted || '-'}</span></div>
+                  <div class="info-row"><span class="info-lbl">Salesman</span><span class="info-colon">:</span><span class="info-val">${(header.SalesmanCode || header.CreateUser || 'SALES').trim()}</span></div>
+                  <div class="info-row"><span class="info-lbl">Remarks</span><span class="info-colon">:</span><span class="info-val">${header.Remarks || '-'}</span></div>
+                </div>
+
+                <!-- CUSTOMER INFO (Customer1, Customer2, Customer3) -->
+                <div class="info-card">
+                  <div class="card-title">CUSTOMER DETAILS</div>
+                  <div class="info-row"><span class="info-lbl">Name</span><span class="info-colon">:</span><span class="info-val font-bold">${custName}</span></div>
+                  <div class="info-row"><span class="info-lbl">Address</span><span class="info-colon">:</span><span class="info-val">${[custAddr1, custAddr2].filter(Boolean).join(', ') || '-'}</span></div>
+                  <div class="info-row"><span class="info-lbl">Customer Code</span><span class="info-colon">:</span><span class="info-val">${header.CustomerCode || '-'}</span></div>
+                </div>
+              </div>
+
+              <!-- ITEMS TABLE -->
+              <table class="detail-table">
+                <thead>
+                  <tr>
+                    <th style="width: 5%; text-align: center;">#</th>
+                    <th style="width: 35%;">ITEM DESCRIPTION</th>
+                    <th style="width: 14%; text-align: right;">WEIGHT (G)</th>
+                    <th style="width: 12%; text-align: right;">LOSS (%)</th>
+                    <th style="width: 16%; text-align: right;">COST / GM ($)</th>
+                    <th style="width: 18%; text-align: right;">TOTAL COST ($)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${(items || []).map((it: any, idx: number) => {
+                    const desc = (it.Description || '').trim();
+                    const diaDesc = (it.DiamondDescription || '').trim();
+                    const fullDesc = diaDesc ? `${desc} (${diaDesc})` : desc;
+                    const wt = parseFloat(it.Weight) || 0;
+                    const loss = parseFloat(it.GoldLoss) || 0;
+                    const costPerGm = parseFloat(it.CostPerGram) || 0;
+                    const rowCost = parseFloat(it.TotalCost) || 0;
+                    return `
+                      <tr>
+                        <td style="text-align: center; font-weight: 700;">${idx + 1}</td>
+                        <td style="font-weight: 700;">
+                          <strong>${fullDesc || 'Trade-In Item'}</strong>
+                          ${it.ClassCode ? `<div style="font-size: 10px; color: #777;">Class: ${it.ClassCode.trim()}</div>` : ''}
+                        </td>
+                        <td style="text-align: right; font-weight: 700;">${wt.toFixed(3)}</td>
+                        <td style="text-align: right; font-weight: 700;">${loss.toFixed(2)}%</td>
+                        <td style="text-align: right; font-weight: 700;">$ ${costPerGm.toFixed(2)}</td>
+                        <td style="text-align: right; font-weight: 800; color: #8C5D08;">$ ${rowCost.toFixed(2)}</td>
+                      </tr>
+                    `;
+                  }).join('')}
+                </tbody>
+              </table>
+
+              <!-- TOTALS SECTION -->
+              <div class="totals-section">
+                <div class="totals-box">
+                  <div class="total-row">
+                    <span>Total Weight:</span>
+                    <span style="font-weight: 800;">${totalWt.toFixed(3)} g</span>
+                  </div>
+                  ${totalStoneWt > 0 ? `
+                  <div class="total-row">
+                    <span>Stone Weight:</span>
+                    <span style="font-weight: 800;">${totalStoneWt.toFixed(3)} g</span>
+                  </div>` : ''}
+                  <div class="total-row total-row-grand">
+                    <span>TRADE-IN VALUE:</span>
+                    <span>$ ${totalCost.toFixed(2)}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            ${renderStandardReportFooter({
+              staff: {
+                staffLabel: 'PREPARED BY (STAFF)',
+                staffName: (header.SalesmanCode || header.CreateUser || 'SALES').trim(),
+                receiverLabel: 'SUPPLIER / AUTHORIZED RECEIVER',
+                receiverName: (custName || '-').trim()
+              }
+            })}
+          </div>
+        </body>
+      </html>
+    `;
+  };
+
   // Print Bill function (subPrintBill migrated from VB.NET)
-  const subPrintBill = async (sInvoiceNo: string) => {
+  const subPrintBill = async (sInvoiceNo: string, isReprint: boolean = false) => {
     const trimmedBill = (sInvoiceNo || '').trim();
     if (!trimmedBill) return;
 
@@ -544,459 +940,74 @@ export default function TradeInSalesScreen() {
         return;
       }
 
-      const { company, rates, header, items } = result.data;
+      const htmlContent = buildTradeInInvoiceHtml(trimmedBill, isReprint, result.data);
+      const actualInvNo = result.data.header?.InvoiceNo || trimmedBill;
+      const docTitle = isReprint ? `Trade-In Gold Invoice (Duplicate) - ${actualInvNo}` : `Trade-In Gold Invoice - ${actualInvNo}`;
 
-      // Extract Company Details (matching CompAddress1, CompAddress2, CompAddress3)
-      const compName = company.name || 'SMART GOLD';
-      const compAddr1 = [company.address1, company.address2].filter(Boolean).join(', ');
-      const compAddr2 = [company.city, company.state, company.country].filter(Boolean).join(' ');
-      const compContact = [
-        company.phone ? `Tel: ${company.phone}` : '',
-        company.fax ? `Fax: ${company.fax}` : ''
-      ].filter(Boolean).join(' | ');
-
-      // Customers details (matching Customer1, Customer2, Customer3)
-      const custName = header.CustomerName || '-';
-      const custAddr1 = header.Address1 || '';
-      const custAddr2 = [header.Address2, header.Address3].filter(Boolean).join(', ');
-
-      // Class Rates (matching Rate1: 24K, Rate2: 22K, Rate3: 20KJ/835)
-      const rate1 = rates?.rate999 || '-';
-      const rate2 = rates?.rate916 || '-';
-      const rate3 = rates?.rate835 || '-';
-
-      // Date formatting
-      const rawDate = header.Date || header.CreateDate;
-      let dateFormatted = '';
-      if (rawDate) {
-        const d = new Date(rawDate);
-        if (!isNaN(d.getTime())) {
-          dateFormatted = `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`;
-        } else {
-          dateFormatted = String(rawDate);
-        }
-      }
-
-      const now = new Date();
-      const printTimeStr = `${String(now.getDate()).padStart(2, '0')}/${String(now.getMonth() + 1).padStart(2, '0')}/${now.getFullYear()} ${now.toLocaleTimeString()}`;
-
-      const totalWt = parseFloat(header.TotalWeight) || (items || []).reduce((acc: number, it: any) => acc + (parseFloat(it.Weight) || 0), 0);
-      const totalStoneWt = parseFloat(header.TotalStoneWeight) || (items || []).reduce((acc: number, it: any) => acc + (parseFloat(it.StoneWeight) || 0), 0);
-      const totalCost = parseFloat(header.TotalCost) || (items || []).reduce((acc: number, it: any) => acc + (parseFloat(it.TotalCost) || 0), 0);
-      const currencySign = company.currencySign || 'SGD';
-
-      const printHtml = `
-        <!DOCTYPE html>
-        <html>
-          <head>
-            <meta charset="utf-8" />
-            <title>Trade-In Gold Invoice - ${header.InvoiceNo || trimmedBill}</title>
-            <style>
-              @page {
-                size: A4 portrait;
-                margin: 0;
-              }
-              *, *:before, *:after {
-                box-sizing: border-box;
-              }
-              body {
-                font-family: 'Segoe UI', Tahoma, Arial, sans-serif;
-                margin: 0;
-                padding: 0;
-                background-color: #525659;
-                color: #222;
-                -webkit-print-color-adjust: exact;
-                print-color-adjust: exact;
-              }
-              .page-sheet {
-                background: #FFFFFF;
-                width: 210mm;
-                min-height: 297mm;
-                margin: 10mm auto;
-                padding: 12mm 15mm;
-                box-shadow: 0 0 14px rgba(0,0,0,0.4);
-                display: flex;
-                flex-direction: column;
-                justify-content: space-between;
-              }
-              @media print {
-                body {
-                  background: #FFFFFF;
-                }
-                .page-sheet {
-                  margin: 0;
-                  padding: 10mm 12mm;
-                  width: 100%;
-                  min-height: 100%;
-                  box-shadow: none;
-                }
-              }
-
-              /* HEADER SECTION */
-              .comp-header {
-                text-align: center;
-                border-bottom: 2px solid #9E741D;
-                padding-bottom: 8px;
-                margin-bottom: 10px;
-              }
-              .comp-name {
-                font-size: 20px;
-                font-weight: 800;
-                letter-spacing: 1.5px;
-                color: #5A3F0C;
-                text-transform: uppercase;
-                margin-bottom: 3px;
-              }
-              .comp-details {
-                font-size: 11px;
-                color: #444;
-                line-height: 1.4;
-              }
-
-              /* TITLE BADGE */
-              .doc-badge-container {
-                display: flex;
-                justify-content: space-between;
-                align-items: center;
-                background: #FBF6EC;
-                border: 1px solid #E2D3B3;
-                border-radius: 6px;
-                padding: 8px 14px;
-                margin-bottom: 10px;
-              }
-              .doc-title {
-                font-size: 15px;
-                font-weight: 800;
-                color: #8C5D08;
-                letter-spacing: 1px;
-                text-transform: uppercase;
-              }
-              .doc-print-time {
-                font-size: 10px;
-                color: #77664B;
-              }
-
-              /* DAILY RATE STRIP (Rate1, Rate2, Rate3) */
-              .rates-strip {
-                display: flex;
-                justify-content: space-around;
-                background: #F7EEDB;
-                border: 1px solid #E0CEAC;
-                border-radius: 5px;
-                padding: 6px 12px;
-                margin-bottom: 12px;
-                font-size: 11px;
-                font-weight: 700;
-                color: #5A3F0C;
-              }
-              .rate-item span {
-                color: #8C5D08;
-                margin-left: 4px;
-              }
-
-              /* INFO GRID */
-              .info-grid {
-                display: grid;
-                grid-template-columns: 1fr 1fr;
-                gap: 12px;
-                margin-bottom: 12px;
-              }
-              .info-card {
-                border: 1px solid #E6DAC5;
-                background: #FAF8F5;
-                border-radius: 5px;
-                padding: 8px 12px;
-              }
-              .card-title {
-                font-size: 11px;
-                font-weight: 700;
-                color: #7A5716;
-                border-bottom: 1px solid #ECE1CD;
-                padding-bottom: 3px;
-                margin-bottom: 6px;
-                text-transform: uppercase;
-                letter-spacing: 0.5px;
-              }
-              .info-row {
-                display: flex;
-                font-size: 11px;
-                margin-bottom: 3px;
-                line-height: 1.35;
-              }
-              .info-lbl {
-                width: 100px;
-                font-weight: 600;
-                color: #665235;
-                flex-shrink: 0;
-              }
-              .info-val {
-                color: #1A1A1A;
-                flex-grow: 1;
-                word-break: break-word;
-              }
-
-              /* ITEMS TABLE */
-              .detail-table {
-                width: 100%;
-                border-collapse: collapse;
-                margin-bottom: 12px;
-                font-size: 11px;
-              }
-              .detail-table th {
-                background: #8C5D08;
-                color: #FFFFFF;
-                text-align: left;
-                padding: 6px 8px;
-                font-weight: 700;
-                border: 1px solid #734C06;
-                text-transform: uppercase;
-                font-size: 10px;
-                letter-spacing: 0.5px;
-              }
-              .detail-table td {
-                padding: 6px 8px;
-                border: 1px solid #E8DECC;
-                background: #FFFFFF;
-              }
-              .detail-table tr:nth-child(even) td {
-                background: #FAF8F5;
-              }
-
-              /* TOTALS SECTION */
-              .totals-section {
-                display: flex;
-                justify-content: flex-end;
-                margin-bottom: 14px;
-              }
-              .totals-box {
-                width: 260px;
-                border: 1px solid #E6DAC5;
-                background: #FAF8F5;
-                border-radius: 5px;
-                padding: 8px 12px;
-              }
-              .total-row {
-                display: flex;
-                justify-content: space-between;
-                font-size: 11px;
-                padding: 3px 0;
-                color: #444;
-              }
-              .total-row-grand {
-                border-top: 2px solid #8C5D08;
-                margin-top: 4px;
-                padding-top: 4px;
-                font-weight: 800;
-                font-size: 13px;
-                color: #8C5D08;
-              }
-
-              /* SIGNATURES */
-              .sign-grid {
-                display: grid;
-                grid-template-columns: 1fr 1fr;
-                gap: 25px;
-                margin-top: 15px;
-              }
-              .sign-card {
-                padding: 6px 10px;
-                border: 1px solid #EFE4D0;
-                background: #FAF8F5;
-                border-radius: 4px;
-              }
-              .sign-title {
-                font-size: 10px;
-                font-weight: 700;
-                color: #7A5716;
-                text-transform: uppercase;
-                margin-bottom: 30px;
-              }
-              .sign-line {
-                border-bottom: 1px solid #444;
-                margin-bottom: 4px;
-              }
-              .sign-sub {
-                font-size: 10px;
-                color: #555;
-                display: flex;
-                justify-content: space-between;
-              }
-
-              /* FOOTER */
-              .footer-bar {
-                margin-top: 14px;
-                text-align: center;
-                border-top: 1px solid #E2D3B3;
-                padding-top: 8px;
-                font-size: 10px;
-                color: #7C694F;
-              }
-            </style>
-          </head>
-          <body>
-            <div class="page-sheet">
-              <div>
-                <!-- COMPANY HEADER -->
-                <div class="comp-header">
-                  <div class="comp-name">${compName}</div>
-                  <div class="comp-details">
-                    ${compAddr1 ? `<div>${compAddr1}</div>` : ''}
-                    ${compAddr2 ? `<div>${compAddr2}</div>` : ''}
-                    ${compContact ? `<div>${compContact}</div>` : ''}
-                  </div>
-                </div>
-
-                <!-- TITLE BADGE -->
-                <div class="doc-badge-container">
-                  <div class="doc-title">TRADE-IN GOLD INVOICE</div>
-                  <div class="doc-print-time">Printed: ${printTimeStr} (1 Copy)</div>
-                </div>
-
-                <!-- TODAY GOLD RATES (Rate1, Rate2, Rate3) -->
-                <div class="rates-strip">
-                  <div class="rate-item">24K (999): <span>$ ${rate1}</span></div>
-                  <div class="rate-item">22K (916): <span>$ ${rate2}</span></div>
-                  <div class="rate-item">20KJ / 835: <span>$ ${rate3}</span></div>
-                </div>
-
-                <!-- INFO GRID -->
-                <div class="info-grid">
-                  <!-- INVOICE INFO -->
-                  <div class="info-card">
-                    <div class="card-title">TRADE-IN REFERENCE DETAILS</div>
-                    <div class="info-row"><span class="info-lbl">Invoice / Ref No:</span><span class="info-val font-bold">${header.InvoiceNo || trimmedBill}</span></div>
-                    <div class="info-row"><span class="info-lbl">Date:</span><span class="info-val">${dateFormatted || '-'}</span></div>
-                    <div class="info-row"><span class="info-lbl">Salesman:</span><span class="info-val">${header.SalesmanCode || header.CreateUser || 'sys'}</span></div>
-                    <div class="info-row"><span class="info-lbl">Remarks:</span><span class="info-val">${header.Remarks || '-'}</span></div>
-                  </div>
-
-                  <!-- CUSTOMER INFO (Customer1, Customer2, Customer3) -->
-                  <div class="info-card">
-                    <div class="card-title">CUSTOMER DETAILS</div>
-                    <div class="info-row"><span class="info-lbl">Name:</span><span class="info-val font-bold">${custName}</span></div>
-                    <div class="info-row"><span class="info-lbl">Address:</span><span class="info-val">${[custAddr1, custAddr2].filter(Boolean).join(', ') || '-'}</span></div>
-                    <div class="info-row"><span class="info-lbl">Customer Code:</span><span class="info-val">${header.CustomerCode || '-'}</span></div>
-                  </div>
-                </div>
-
-                <!-- ITEMS TABLE -->
-                <table class="detail-table">
-                  <thead>
-                    <tr>
-                      <th style="width: 5%; text-align: center;">#</th>
-                      <th style="width: 35%;">Item Description</th>
-                      <th style="width: 12%; text-align: right;">Weight (g)</th>
-                      <th style="width: 12%; text-align: right;">Loss (%)</th>
-                      <th style="width: 16%; text-align: right;">Cost / Gm ($)</th>
-                      <th style="width: 20%; text-align: right;">Total Cost ($)</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    ${(items || []).map((it: any, idx: number) => {
-                      const desc = (it.Description || '').trim();
-                      const diaDesc = (it.DiamondDescription || '').trim();
-                      const fullDesc = diaDesc ? `${desc} (${diaDesc})` : desc;
-                      const wt = parseFloat(it.Weight) || 0;
-                      const loss = parseFloat(it.GoldLoss) || 0;
-                      const costPerGm = parseFloat(it.CostPerGram) || 0;
-                      const rowCost = parseFloat(it.TotalCost) || 0;
-                      return `
-                        <tr>
-                          <td style="text-align: center;">${idx + 1}</td>
-                          <td>
-                            <strong>${fullDesc || 'Trade-In Item'}</strong>
-                            ${it.ClassCode ? `<div style="font-size: 10px; color: #777;">Class: ${it.ClassCode.trim()}</div>` : ''}
-                          </td>
-                          <td style="text-align: right;">${wt.toFixed(3)}</td>
-                          <td style="text-align: right;">${loss.toFixed(2)}%</td>
-                          <td style="text-align: right;">$ ${costPerGm.toFixed(2)}</td>
-                          <td style="text-align: right; font-weight: 700; color: #8C5D08;">$ ${rowCost.toFixed(2)}</td>
-                        </tr>
-                      `;
-                    }).join('')}
-                  </tbody>
-                </table>
-
-                <!-- TOTALS SECTION -->
-                <div class="totals-section">
-                  <div class="totals-box">
-                    <div class="total-row">
-                      <span>Total Weight:</span>
-                      <span style="font-weight: 600;">${totalWt.toFixed(3)} g</span>
-                    </div>
-                    ${totalStoneWt > 0 ? `
-                    <div class="total-row">
-                      <span>Stone Weight:</span>
-                      <span>${totalStoneWt.toFixed(3)} g</span>
-                    </div>` : ''}
-                    <div class="total-row total-row-grand">
-                      <span>TRADE-IN VALUE:</span>
-                      <span>$ ${totalCost.toFixed(2)}</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <div>
-                <!-- SIGNATURES -->
-                <div class="sign-grid">
-                  <div class="sign-card">
-                    <div class="sign-title">Customer Signature</div>
-                    <div class="sign-line"></div>
-                    <div class="sign-sub">
-                      <span>Customer: ${custName}</span>
-                      <span>Date: ........................</span>
-                    </div>
-                  </div>
-                  <div class="sign-card">
-                    <div class="sign-title">Staff / Authorized Signatory</div>
-                    <div class="sign-line"></div>
-                    <div class="sign-sub">
-                      <span>Staff: ${header.SalesmanCode || header.CreateUser || 'sys'}</span>
-                      <span>Date: ........................</span>
-                    </div>
-                  </div>
-                </div>
-
-                <!-- FOOTER -->
-                <div class="footer-bar">
-                  *** Official Trade-In Gold Invoice - System Generated by SmartGold POS ***
-                </div>
-              </div>
-            </div>
-
-            <script>
-              window.onload = function() {
-                setTimeout(function() {
-                  window.print();
-                }, 300);
-              };
-            </script>
-          </body>
-        </html>
+      const printScript = `
+        <script>
+          window.onload = function() {
+            setTimeout(function() {
+              window.print();
+            }, 300);
+          };
+        </script>
       `;
+      const printHtml = htmlContent.replace('</body>', `${printScript}</body>`);
 
       if (Platform.OS === 'web' && typeof window !== 'undefined') {
-        const printWindow = window.open('', '_blank', 'width=900,height=750');
-        if (printWindow) {
-          printWindow.document.open();
-          printWindow.document.write(printHtml);
-          printWindow.document.close();
-          showToast(`Trade-In bill ${trimmedBill} print preview opened`);
+        const frameId = '__tradein_invoice_print_frame__';
+        let iframe = document.getElementById(frameId) as HTMLIFrameElement;
+        if (!iframe) {
+          iframe = document.createElement('iframe');
+          iframe.id = frameId;
+          iframe.style.position = 'fixed';
+          iframe.style.right = '0';
+          iframe.style.bottom = '0';
+          iframe.style.width = '0';
+          iframe.style.height = '0';
+          iframe.style.border = '0';
+          iframe.style.visibility = 'hidden';
+          document.body.appendChild(iframe);
+        }
+
+        const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
+        if (iframeDoc && iframe.contentWindow) {
+          iframeDoc.open();
+          iframeDoc.write(htmlContent);
+          iframeDoc.title = docTitle;
+          iframeDoc.close();
+
+          setTimeout(() => {
+            try {
+              iframe.contentWindow?.focus();
+              iframe.contentWindow?.print();
+              showToast(`Trade-In bill ${trimmedBill} print dialog opened`, 'success');
+            } catch (printErr) {
+              console.error('Iframe print error:', printErr);
+              const printWindow = window.open('', '_blank', 'width=900,height=750');
+              if (printWindow) {
+                printWindow.document.open();
+                printWindow.document.write(printHtml);
+                printWindow.document.title = docTitle;
+                printWindow.document.close();
+              }
+            }
+          }, 350);
         } else {
-          const blob = new Blob([printHtml], { type: 'text/html;charset=utf-8;' });
-          const url = URL.createObjectURL(blob);
-          const a = document.createElement('a');
-          a.href = url;
-          a.target = '_blank';
-          document.body.appendChild(a);
-          a.click();
-          document.body.removeChild(a);
-          URL.revokeObjectURL(url);
-          showToast(`Trade-In bill ${trimmedBill} print preview opened`);
+          const printWindow = window.open('', '_blank', 'width=900,height=750');
+          if (printWindow) {
+            printWindow.document.open();
+            printWindow.document.write(printHtml);
+            printWindow.document.title = docTitle;
+            printWindow.document.close();
+            showToast(`Trade-In bill ${trimmedBill} print preview opened`, 'success');
+          } else {
+            showToast('Popup blocker prevented opening print preview. Please allow popups.', 'error');
+          }
         }
       } else {
-        showToast(`Print preview initiated for ${trimmedBill}`);
+        showToast(`Print preview initiated for ${trimmedBill}`, 'success');
       }
     } catch (err) {
       console.error(err);
@@ -1006,19 +1017,123 @@ export default function TradeInSalesScreen() {
     }
   };
 
+  // Dedicated PDF Download Functionality
+  const handleDownloadPdf = async (sInvoiceNo?: string, isReprint: boolean = false) => {
+    const trimmedBill = (sInvoiceNo || invoiceNo || refNo || '').trim();
+    if (!trimmedBill) {
+      showToast('Validation Error: Bill No is required to download PDF', 'error');
+      return;
+    }
+
+    try {
+      setLoading(true);
+      const res = await fetch(`${API_URL}/print-data?billNo=${encodeURIComponent(trimmedBill)}`);
+      const result = await res.json();
+
+      if (!result.success || !result.data) {
+        showToast(result.message || `Trade-In bill "${trimmedBill}" not found`, 'error');
+        return;
+      }
+
+      const htmlContent = buildTradeInInvoiceHtml(trimmedBill, isReprint, result.data);
+      const actualInvNo = result.data.header?.InvoiceNo || trimmedBill;
+      const downloadFilename = `Trade_In_Gold_Invoice_${actualInvNo.replace(/[^a-zA-Z0-9_-]/g, '_')}.pdf`;
+
+      const pdfRes = await fetch(`${API_URL}/export-pdf`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          html: htmlContent,
+          filename: downloadFilename
+        })
+      });
+
+      if (!pdfRes.ok) {
+        throw new Error('Server returned error while generating PDF');
+      }
+
+      const pdfBlob = await pdfRes.blob();
+
+      if (Platform.OS === 'web' && typeof window !== 'undefined') {
+        const url = URL.createObjectURL(pdfBlob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = downloadFilename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+        showToast(`Trade-In Gold Invoice PDF downloaded: ${downloadFilename}`, 'success');
+      } else {
+        showToast('PDF generated successfully.', 'success');
+      }
+    } catch (err: any) {
+      console.error('PDF Export Error:', err);
+      showToast('Failed to download PDF: ' + (err.message || 'Error'), 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Dedicated Excel Download Functionality
+  const handleDownloadExcel = async (sInvoiceNo?: string, isReprint: boolean = false) => {
+    const trimmedBill = (sInvoiceNo || invoiceNo || refNo || '').trim();
+    if (!trimmedBill) {
+      showToast('Validation Error: Bill No is required to download Excel', 'error');
+      return;
+    }
+
+    try {
+      setLoading(true);
+      const excelRes = await fetch(`${API_URL}/export-excel`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          billNo: trimmedBill,
+          isReprint: isReprint
+        })
+      });
+
+      if (!excelRes.ok) {
+        const errJson = await excelRes.json().catch(() => ({}));
+        throw new Error(errJson.message || 'Server error generating Excel file');
+      }
+
+      const excelBlob = await excelRes.blob();
+      const downloadFilename = `Trade_In_Gold_Invoice_${trimmedBill.replace(/[^a-zA-Z0-9_-]/g, '_')}.xlsx`;
+
+      if (Platform.OS === 'web' && typeof window !== 'undefined') {
+        const url = URL.createObjectURL(excelBlob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = downloadFilename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+        showToast(`Trade-In Gold Invoice Excel downloaded: ${downloadFilename}`, 'success');
+      } else {
+        showToast('Excel file generated successfully.', 'success');
+      }
+    } catch (err: any) {
+      console.error('Excel Export Error:', err);
+      showToast('Failed to download Excel: ' + (err.message || 'Error'), 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   // Reprint handling (migrated from btnReprintOK_Click in VB.NET)
   const handleReprintSubmit = () => {
     const bill = reprintBillNo.trim();
     if (bill !== "") {
-      subPrintBill(bill);
+      setActivePrintBillNo(bill);
+      setIsReprintPrintMode(true);
       setIsReprintModalVisible(false);
       setReprintBillNo('');
-      handleClearAll();
+      setIsPrintConfirmVisible(true);
     } else {
       showToast(" BillNo is not Correct!...", 'error');
-      setIsReprintModalVisible(false);
-      setReprintBillNo('');
-      handleClearAll();
     }
   };
 
@@ -1142,7 +1257,15 @@ export default function TradeInSalesScreen() {
         <View style={styles.headerRight}>
           <TouchableOpacity
             style={styles.headerActionBtn}
-            onPress={() => setIsReprintModalVisible(true)}
+            onPress={() => {
+              if (invoiceNo && invoiceNo.trim()) {
+                setActivePrintBillNo(invoiceNo.trim());
+                setIsReprintPrintMode(true);
+                setIsPrintConfirmVisible(true);
+              } else {
+                setIsReprintModalVisible(true);
+              }
+            }}
             activeOpacity={0.7}
           >
             <Ionicons name="print-outline" size={15} color="#5C4A28" />
@@ -1739,9 +1862,9 @@ export default function TradeInSalesScreen() {
                   autoFocus
                   onSubmitEditing={handleReprintSubmit}
                 />
-                <View style={{ flexDirection: 'row', gap: 10 }}>
+                <View style={{ flexDirection: 'row', gap: 8, justifyContent: 'flex-end' }}>
                   <TouchableOpacity
-                    style={[styles.modalActionBtn, styles.modalBtnCancel]}
+                    style={[styles.modalActionBtn, styles.modalBtnCancel, { flex: 1 }]}
                     onPress={() => {
                       setIsReprintModalVisible(false);
                       setReprintBillNo('');
@@ -1751,11 +1874,11 @@ export default function TradeInSalesScreen() {
                     <ThemedText style={styles.modalBtnCancelText}>Cancel</ThemedText>
                   </TouchableOpacity>
                   <TouchableOpacity
-                    style={[styles.modalActionBtn, styles.modalBtnPrimary]}
+                    style={[styles.modalActionBtn, styles.modalBtnPrimary, { flex: 1.2 }]}
                     onPress={handleReprintSubmit}
                     activeOpacity={0.7}
                   >
-                    <ThemedText style={styles.modalBtnPrimaryText}>Load Bill</ThemedText>
+                    <ThemedText style={styles.modalBtnPrimaryText}>Continue</ThemedText>
                   </TouchableOpacity>
                 </View>
               </View>
@@ -1763,6 +1886,45 @@ export default function TradeInSalesScreen() {
           </TouchableWithoutFeedback>
         </TouchableOpacity>
       </Modal>
+
+      {/* Standardized Print Report Popup */}
+      <PrintReportModal
+        visible={isPrintConfirmVisible}
+        title="Print Invoice"
+        message="Do you want to print ?"
+        loading={loading}
+        onCancel={() => {
+          setIsPrintConfirmVisible(false);
+          setActivePrintBillNo('');
+        }}
+        onPdf={() => {
+          const bill = activePrintBillNo;
+          const reprint = isReprintPrintMode;
+          setIsPrintConfirmVisible(false);
+          setActivePrintBillNo('');
+          if (bill) {
+            handleDownloadPdf(bill, reprint);
+          }
+        }}
+        onExcel={() => {
+          const bill = activePrintBillNo;
+          const reprint = isReprintPrintMode;
+          setIsPrintConfirmVisible(false);
+          setActivePrintBillNo('');
+          if (bill) {
+            handleDownloadExcel(bill, reprint);
+          }
+        }}
+        onPrint={() => {
+          const bill = activePrintBillNo;
+          const reprint = isReprintPrintMode;
+          setIsPrintConfirmVisible(false);
+          setActivePrintBillNo('');
+          if (bill) {
+            subPrintBill(bill, reprint);
+          }
+        }}
+      />
 
       {/* Admin Cost Password Authorization Modal */}
       <Modal visible={isAdminPwdVisible} transparent animationType="fade">

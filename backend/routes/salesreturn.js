@@ -64,7 +64,7 @@ router.get("/salesheader/:billNo", async (req, res) => {
     try {
       const checkRet = await pool.request()
         .input("InvoiceNo", sql.VarChar, billNo.trim())
-        .query(`SELECT TOP 1 ReturnNo, RefNo FROM tblSalesReturnHeader WHERE InvoiceNo = @InvoiceNo`);
+        .query(`SELECT TOP 1 RefNo FROM tblSalesReturnHeader WHERE InvoiceNo = @InvoiceNo`);
       if (checkRet.recordset && checkRet.recordset.length > 0) {
         return res.status(200).json({
           success: false,
@@ -456,6 +456,35 @@ router.post("/save", async (req, res) => {
 
     await transaction.begin();
 
+    // 0. Ensure SalesReturnRefNo in tblCompany is synchronized with existing transactions
+    // in tblSalesReturnHeader and tblSalesHeader to avoid PK collision on HQ02...
+    try {
+      const qCheck = await transaction.request().query(`
+        SELECT ISNULL(MAX(num), 0) AS maxNum
+        FROM (
+          SELECT CAST(SUBSTRING(RTRIM(LTRIM(InvoiceNo)), 5, 10) AS INT) AS num
+          FROM tblSalesHeader
+          WHERE InvoiceNo LIKE 'HQ02%' AND ISNUMERIC(SUBSTRING(RTRIM(LTRIM(InvoiceNo)), 5, 10)) = 1
+          UNION ALL
+          SELECT CAST(SUBSTRING(RTRIM(LTRIM(RefNo)), 5, 10) AS INT) AS num
+          FROM tblSalesReturnHeader
+          WHERE RefNo LIKE 'HQ02%' AND ISNUMERIC(SUBSTRING(RTRIM(LTRIM(RefNo)), 5, 10)) = 1
+        ) t
+      `);
+      const highestExisting = qCheck.recordset[0]?.maxNum || 0;
+      if (highestExisting > 0) {
+        await transaction.request()
+          .input("HighestNum", sql.Int, highestExisting)
+          .query(`
+            UPDATE tblCompany
+            SET SalesReturnRefNo = @HighestNum
+            WHERE CompanyID = '1' AND (SalesReturnRefNo IS NULL OR SalesReturnRefNo < @HighestNum)
+          `);
+      }
+    } catch (syncErr) {
+      console.warn("SalesReturnRefNo auto-synchronization warning:", syncErr.message);
+    }
+
     // 1. EXEC sp_SalesReturnHeader
     const reqHeader = new sql.Request(transaction);
     const headerRes = await reqHeader
@@ -577,7 +606,276 @@ router.post("/save", async (req, res) => {
     } catch (rerr) {
       console.error("Rollback failed:", rerr);
     }
-    res.status(500).json({ success: false, message: "Database Save Error", error: err.message });
+    const errorMsg = err.message || "Unknown error";
+    res.status(500).json({ success: false, message: `Database Save Error: ${errorMsg}`, error: errorMsg });
+  }
+});
+
+// ================= EXPORT PDF ENDPOINT =================
+// POST /api/salesreturn/export-pdf
+router.post("/export-pdf", async (req, res) => {
+  try {
+    const { html, filename } = req.body;
+    if (!html) {
+      return res.status(400).json({ success: false, message: "HTML content is required for PDF export." });
+    }
+
+    const { convertHtmlToPdf } = require("../utils/htmlToPdf");
+    const pdfBuffer = await convertHtmlToPdf(html);
+    const downloadName = (filename || "Sales_Return_Voucher.pdf").replace(/[^a-zA-Z0-9_\-\.]/g, "_");
+
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `attachment; filename="${downloadName}"`);
+    res.setHeader("Content-Length", pdfBuffer.length);
+    return res.send(pdfBuffer);
+  } catch (err) {
+    console.error("Sales Return Export PDF Error:", err);
+    return res.status(500).json({ success: false, message: "Failed to generate PDF: " + err.message });
+  }
+});
+
+// ================= EXPORT EXCEL ENDPOINT =================
+// POST /api/salesreturn/export-excel
+router.post("/export-excel", async (req, res) => {
+  try {
+    const { returnNo } = req.body;
+    const cleanNo = (returnNo || "").trim();
+    if (!cleanNo) {
+      return res.status(400).json({ success: false, message: "Return Reference Number is required." });
+    }
+
+    const pool = req.pool || (await poolPromise);
+
+    // Fetch company info
+    const compRes = await pool.request().query("SELECT TOP 1 * FROM tblCompany");
+    const rawCompany = compRes.recordset[0] || {};
+    const companyName = String(rawCompany.Name || rawCompany.CompanyName || "SMART").trim();
+    const address = [
+      String(rawCompany.Address1 || "").trim(),
+      String(rawCompany.Address2 || "").trim(),
+      String(rawCompany.City || "").trim(),
+      String(rawCompany.Country || "").trim()
+    ].filter(Boolean).join(" ");
+
+    // Fetch header
+    const headerRes = await pool.request()
+      .input("ReturnNo", sql.VarChar(50), cleanNo)
+      .query(`
+        SELECT 
+          RTRIM(LTRIM(h.RefNo)) AS RefNo,
+          RTRIM(LTRIM(h.InvoiceNo)) AS InvoiceNo,
+          h.InvoiceDate,
+          RTRIM(LTRIM(h.CompanyCode)) AS CompanyCode,
+          RTRIM(LTRIM(h.LocationCode)) AS LocationCode,
+          RTRIM(LTRIM(h.TerminalCode)) AS TerminalCode,
+          RTRIM(LTRIM(h.CustomerCode)) AS CustomerCode,
+          RTRIM(LTRIM(h.SalesManCode)) AS SalesManCode,
+          ISNULL(h.TotalWeight, 0) AS TotalWeight,
+          ISNULL(h.TotalStoneWeight, 0) AS TotalStoneWeight,
+          ISNULL(h.TotalGoldLoss, 0) AS TotalGoldLoss,
+          ISNULL(h.TotalSMC, 0) AS TotalSMC,
+          ISNULL(h.TotalPCS, 0) AS TotalPCS,
+          ISNULL(h.GST, 0) AS GST,
+          ISNULL(h.DetailDiscount, 0) AS DetailDiscount,
+          ISNULL(h.NetDiscount, 0) AS NetDiscount,
+          ISNULL(h.Discount, 0) AS Discount,
+          ISNULL(h.NetTotal, 0) AS NetTotal,
+          ISNULL(h.PaidAmt, 0) AS PaidAmt,
+          ISNULL(h.BalanceAmt, 0) AS BalanceAmt,
+          ISNULL(h.TotalValue, 0) AS TotalValue,
+          ISNULL(h.TotalCost, 0) AS TotalCost,
+          RTRIM(LTRIM(ISNULL(h.Remarks, ''))) AS Remarks,
+          RTRIM(LTRIM(ISNULL(h.ReturnType, ''))) AS ReturnType,
+          RTRIM(LTRIM(ISNULL(h.JournalNo, ''))) AS JournalNo,
+          RTRIM(LTRIM(ISNULL(h.ModifyUser, ''))) AS ModifyUser,
+          h.ModifyDate,
+          RTRIM(LTRIM(ISNULL(h.MemberCode, ''))) AS MemberCode,
+          RTRIM(LTRIM(ISNULL(c.CustomerName, ''))) AS CustCustomerName,
+          RTRIM(LTRIM(ISNULL(c.Address1, ''))) AS CustomerAddress1,
+          RTRIM(LTRIM(ISNULL(c.Address2, ''))) AS CustomerAddress2,
+          RTRIM(LTRIM(ISNULL(c.Address3, ''))) AS CustomerAddress3,
+          RTRIM(LTRIM(ISNULL(c.CustomerType, ''))) AS CustomerType
+        FROM tblSalesReturnHeader h
+        LEFT JOIN tblCustomer c ON RTRIM(LTRIM(c.CustomerCode)) = RTRIM(LTRIM(h.CustomerCode))
+        WHERE RTRIM(LTRIM(h.RefNo)) = @ReturnNo OR RTRIM(LTRIM(h.InvoiceNo)) = @ReturnNo
+      `);
+
+    if (headerRes.recordset.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: `No Sales Return records found for Return No: ${cleanNo}`
+      });
+    }
+
+    const header = headerRes.recordset[0];
+    const actualRefNo = header.RefNo || cleanNo;
+
+    // Fetch details
+    const detailRes = await pool.request()
+      .input("RefNo", sql.VarChar(50), actualRefNo)
+      .query(`
+        SELECT 
+          RTRIM(LTRIM(RefNo)) AS RefNo,
+          RTRIM(LTRIM(InvoiceNo)) AS InvoiceNo,
+          RTRIM(LTRIM(InventoryCode)) AS InventoryCode,
+          RTRIM(LTRIM(Description)) AS Description,
+          ISNULL(Weight, 0) AS Weight,
+          ISNULL(StoneWeight, 0) AS StoneWeight,
+          ISNULL(GoldLoss, 0) AS GoldLoss,
+          ISNULL(Rate, 0) AS Rate,
+          ISNULL(SMC, 0) AS SMC,
+          ISNULL(PCS, 0) AS PCS,
+          ISNULL(GST, 0) AS GST,
+          ISNULL(NetAmount, 0) AS NetAmount,
+          ISNULL(ActualSales, 0) AS ActualSales,
+          ISNULL(TotalValue, 0) AS TotalValue,
+          ISNULL(TotalCost, 0) AS TotalCost
+        FROM tblSalesReturnDetail
+        WHERE RTRIM(LTRIM(RefNo)) = @RefNo
+        ORDER BY InventoryCode ASC
+      `);
+
+    const details = detailRes.recordset || [];
+
+    // Format dates
+    const rawRetDate = header.ModifyDate || header.InvoiceDate;
+    let returnDateFormatted = "";
+    if (rawRetDate) {
+      const d = new Date(rawRetDate);
+      if (!isNaN(d.getTime())) {
+        returnDateFormatted = `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}/${d.getFullYear()}`;
+      } else {
+        returnDateFormatted = String(rawRetDate);
+      }
+    }
+
+    const rawInvDate = header.InvoiceDate;
+    let invoiceDateFormatted = "";
+    if (rawInvDate) {
+      const d = new Date(rawInvDate);
+      if (!isNaN(d.getTime())) {
+        invoiceDateFormatted = `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}/${d.getFullYear()}`;
+      } else {
+        invoiceDateFormatted = String(rawInvDate);
+      }
+    }
+
+    const now = new Date();
+    const printTimeStr = `${String(now.getDate()).padStart(2, "0")}/${String(now.getMonth() + 1).padStart(2, "0")}/${now.getFullYear()} ${now.toLocaleTimeString()}`;
+
+    const custName = header.CustCustomerName || header.CustomerCode || "CASH CUSTOMER";
+    const custAddress = [header.CustomerAddress1, header.CustomerAddress2, header.CustomerAddress3].filter(Boolean).map(s => String(s).trim()).join(", ") || "-";
+
+    const totalItemsQty = parseFloat(header.TotalPCS) || details.reduce((acc, it) => acc + (parseFloat(it.PCS) || 0), 0) || 0;
+    const totalWeight = parseFloat(header.TotalWeight) || details.reduce((acc, it) => acc + (parseFloat(it.Weight) || 0), 0) || 0;
+    const totalAmt = parseFloat(header.TotalValue) || parseFloat(header.NetTotal) || details.reduce((acc, it) => acc + (parseFloat(it.TotalValue || it.NetAmount) || 0), 0);
+    const gstAmt = parseFloat(header.GST) || 0;
+    const netTotal = parseFloat(header.NetTotal) || totalAmt;
+
+    const XLSX = require("xlsx");
+    const wb = XLSX.utils.book_new();
+
+    const rows = [
+      // Company Information
+      ["COMPANY NAME", companyName],
+      ["COMPANY ADDRESS", address],
+      [],
+      // Sales Return Voucher Information
+      ["REPORT NAME", "SALES RETURN VOUCHER"],
+      ["PRINTED DATE & TIME", printTimeStr],
+      ["RETURN VOUCHER NUMBER", actualRefNo],
+      ["RETURN DATE", returnDateFormatted],
+      ["ORIGINAL BILL NUMBER", header.InvoiceNo || "-"],
+      ["ORIGINAL BILL DATE", invoiceDateFormatted || "-"],
+      ["TERMINAL / CASHIER", `${header.TerminalCode || "-"} / ${header.ModifyUser || header.SalesManCode || "SYS"}`],
+      [],
+      // Customer Information
+      ["CUSTOMER CODE", (header.CustomerCode || "-").trim()],
+      ["CUSTOMER NAME", custName],
+      ["CUSTOMER TYPE", (header.CustomerType || "-").trim()],
+      ["CUSTOMER ADDRESS", custAddress],
+      ["REMARKS", (header.Remarks || "-").trim()],
+      [],
+      // Inventory Details Header (Aligned across 7 columns A-G)
+      ["#", "INVENTORY CODE", "DESCRIPTION", "WEIGHT (G)", "PCS", "RATE ($)", "RETURN AMOUNT ($)"]
+    ];
+
+    const itemStartRow = rows.length + 1; // 1-based index of first detail row
+
+    details.forEach((item, idx) => {
+      const wt = parseFloat(item.Weight) || 0;
+      const pces = parseInt(item.PCS) || 1;
+      const rate = parseFloat(item.Rate) || 0;
+      const val = parseFloat(item.NetAmount || item.ActualSales || item.TotalValue) || 0;
+
+      rows.push([
+        idx + 1,
+        (item.InventoryCode || "").trim(),
+        (item.Description || "-").trim(),
+        Number(wt.toFixed(3)),
+        pces,
+        Number(rate.toFixed(2)),
+        Number(val.toFixed(2))
+      ]);
+    });
+
+    const itemEndRow = rows.length; // 1-based index of last detail row
+
+    // Totals Section (Aligned under details table)
+    rows.push(
+      [],
+      ["", "", "", "", "Total Items:", totalItemsQty, ""],
+      ["", "", "", "", "Total Weight:", Number(totalWeight.toFixed(3)), "G"],
+      ["", "", "", "", "Gross Return Amount:", Number(totalAmt.toFixed(2)), "$"]
+    );
+
+    if (gstAmt > 0) {
+      rows.push(["", "", "", "", "GST Amount:", Number(gstAmt.toFixed(2)), "$"]);
+    }
+
+    rows.push(
+      ["", "", "", "", "NET REFUND / CREDIT:", Number(netTotal.toFixed(2)), "$"],
+      [],
+      // Staff / Receiver Information
+      ["PREPARED BY (STAFF)", (header.ModifyUser || header.SalesManCode || "SYS").trim()],
+      ["SUPPLIER / AUTHORIZED RECEIVER", custName]
+    );
+
+    const ws = XLSX.utils.aoa_to_sheet(rows);
+
+    // Set precise column widths matching content
+    ws["!cols"] = [
+      { wch: 8 },   // Col A: # / Section Labels
+      { wch: 25 },  // Col B: Inventory Code / Values
+      { wch: 35 },  // Col C: Description
+      { wch: 16 },  // Col D: Weight (G)
+      { wch: 12 },  // Col E: PCS / Total Labels
+      { wch: 16 },  // Col F: Rate ($) / Total Values
+      { wch: 20 }   // Col G: Return Amount ($) / Unit signs
+    ];
+
+    // Format numeric cells in item rows
+    if (details.length > 0) {
+      for (let r = itemStartRow; r <= itemEndRow; r++) {
+        if (ws[`D${r}`]) ws[`D${r}`].z = "#,##0.000";
+        if (ws[`E${r}`]) ws[`E${r}`].z = "#,##0";
+        if (ws[`F${r}`]) ws[`F${r}`].z = "$#,##0.00";
+        if (ws[`G${r}`]) ws[`G${r}`].z = "$#,##0.00";
+      }
+    }
+
+    XLSX.utils.book_append_sheet(wb, ws, "Sales Return Voucher");
+
+    const excelBuffer = XLSX.write(wb, { type: "buffer", bookType: "xlsx" });
+    const downloadName = `Sales_Return_${actualRefNo}.xlsx`;
+
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    res.setHeader("Content-Disposition", `attachment; filename="${downloadName}"`);
+    res.setHeader("Content-Length", excelBuffer.length);
+    return res.send(excelBuffer);
+  } catch (err) {
+    console.error("Sales Return Export Excel Error:", err);
+    return res.status(500).json({ success: false, message: "Failed to generate Excel: " + err.message });
   }
 });
 

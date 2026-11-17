@@ -1,6 +1,8 @@
 import { ThemedText } from '@/components/themed-text';
+import { PrintReportModal } from '@/components/PrintReportModal';
 import { API_BASE_URL } from '@/constants/api';
 import { useThemeColors } from '@/hooks/useThemeColors';
+import { getStandardReportCss, renderStandardReportFooter, renderStandardReportHeader } from '@/utils/standardPrintReport';
 import { UNIPRO_LOGO_DATA_URI } from '@/utils/uniproLogo';
 import { Ionicons } from '@expo/vector-icons';
 import { Stack, useRouter } from 'expo-router';
@@ -57,6 +59,11 @@ export default function TradeInIssueScreen() {
   const [lovData, setLovData] = useState<any[]>([]);
   const [lovType, setLovType] = useState<'supplier' | 'tradebill' | 'history'>('supplier');
   const [lovSearchQuery, setLovSearchQuery] = useState('');
+
+  // Standardized Print Report Modal state
+  const [isPrintModalVisible, setIsPrintModalVisible] = useState(false);
+  const [activePrintIssueNo, setActivePrintIssueNo] = useState('');
+  const [activePrintIsReprint, setActivePrintIsReprint] = useState(false);
 
   const showToast = (message: string, type: 'success' | 'error' = 'success') => {
     setToast({ message, type });
@@ -263,13 +270,12 @@ export default function TradeInIssueScreen() {
       if (data.success) {
         showToast('Tradein Gold Issued Sucessfully', 'success');
         const assignedNo = data.tradeIssueNo || issueNo;
-        // Automatically prompt to print matching VB.NET subPrint after issue proceed
-        if (assignedNo && assignedNo.trim()) {
-          setTimeout(() => {
-            subPrint(assignedNo.trim());
-          }, 400);
-        }
         handleClear();
+        if (assignedNo && assignedNo.trim()) {
+          setActivePrintIssueNo(assignedNo.trim());
+          setActivePrintIsReprint(false);
+          setIsPrintModalVisible(true);
+        }
       } else {
         showToast(data.message || 'Error in save', 'error');
       }
@@ -280,612 +286,554 @@ export default function TradeInIssueScreen() {
     }
   };
 
-  // Original subPrint() implementation (matching VB.NET subPrint in frmTradeInIssue)
-  // Selection: {tblTradeIssueHistory.TradeIssueNo} = sTradeInIssueNo
-  // Report Title: "Trade In Issue Report For " & sTradeInIssueNo
-  const subPrint = async (targetIssueNo: string) => {
+  // Standardized Cambria Report Generator for Trade In Issue
+  const buildTradeInIssueHtml = (targetIssueNo: string, isReprint: boolean, printData: any) => {
+    const { company, header, history, tradeBills, rates } = printData || {};
+
+    const now = new Date();
+    const sgTimeStr = now.toLocaleTimeString('en-US', {
+      timeZone: 'Asia/Singapore',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: true,
+    });
+
+    const sCompanyName = (company?.name || 'SMART').trim();
+    const sCompAddress2 = [company?.address1, company?.address2, company?.country].filter(Boolean).join(' ');
+    const sCompAddress3 = [company?.phone, company?.fax].filter(Boolean).join(' ');
+
+    const sSupplierName = (header?.SupplierName || supplierName || 'REFINERY / WHOLESALE').trim();
+    const sSupplierCode = (header?.SupplierCode || supplierCode || '').trim();
+    const sSupplierAddress = [
+      header?.SupplierAddress1,
+      header?.SupplierAddress2,
+    ].filter(Boolean).map((s: string) => String(s).trim()).join(' ');
+
+    const s999 = rates?.rate999 || '-';
+    const s916 = rates?.rate916 || '-';
+    const s835 = rates?.rate835 || '-';
+
+    const formatDate = (val: any) => {
+      if (!val) return '-';
+      const d = new Date(val);
+      if (isNaN(d.getTime())) return String(val).split('T')[0] || '-';
+      return d.toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' });
+    };
+
+    const rawDate = header?.TradeIssueDate || (history && history[0] && history[0].CreateDate);
+    const issueDateFormatted = formatDate(rawDate || new Date());
+    const sReportTitle = isReprint ? 'TRADE-IN ISSUE VOUCHER (DUPLICATE COPY)' : 'TRADE-IN ISSUE VOUCHER';
+
+    const itemsToRender = (history && history.length > 0) ? history : (tradeBills || []);
+    let totalWt = 0;
+    let totalAmount = 0;
+
+    itemsToRender.forEach((row: any) => {
+      const wt = parseFloat(row.TotalWeight || row.IssuedWeight || 0);
+      const rate = parseFloat(row.CostPerGram || header?.CostPerGram || 0);
+      const amt = parseFloat(row.TotalCost || row.Amount || (wt * rate) || 0);
+      totalWt += wt;
+      totalAmount += amt;
+    });
+
+    const sTradeInIssueNo = (targetIssueNo || header?.TradeIssueNo || issueNo || '').trim();
+
+    const generatePageMarkup = (copyLabel: string) => `
+      <div class="page-sheet">
+        <div class="report-main-content">
+          ${renderStandardReportHeader({
+            company: {
+              name: sCompanyName,
+              address: [sCompAddress2, sCompAddress3].filter(Boolean).join(' ')
+            },
+            reportTitle: `${sReportTitle} (${copyLabel})`,
+            printedDateTime: `${issueDateFormatted} ${sgTimeStr}`
+          })}
+
+          <!-- TWO-COLUMN INFO: SUPPLIER vs DOCKET -->
+          <div class="info-grid">
+            <div class="info-card">
+              <div class="card-title">SUPPLIER / REFINERY DETAILS</div>
+              <table class="info-table">
+                <tr>
+                  <td class="lbl">Supplier</td>
+                  <td class="colon">:</td>
+                  <td class="val font-bold">${sSupplierName}</td>
+                </tr>
+                <tr>
+                  <td class="lbl">Supplier Code</td>
+                  <td class="colon">:</td>
+                  <td class="val">${sSupplierCode || '-'}</td>
+                </tr>
+                <tr>
+                  <td class="lbl">Address</td>
+                  <td class="colon">:</td>
+                  <td class="val">${sSupplierAddress || '-'}</td>
+                </tr>
+              </table>
+            </div>
+
+            <div class="info-card">
+              <div class="card-title">TRADE-IN ISSUE DOCKET</div>
+              <table class="info-table">
+                <tr>
+                  <td class="lbl">Trade Issue No</td>
+                  <td class="colon">:</td>
+                  <td class="val font-bold">${sTradeInIssueNo}</td>
+                </tr>
+                <tr>
+                  <td class="lbl">Issue Date</td>
+                  <td class="colon">:</td>
+                  <td class="val">${issueDateFormatted}</td>
+                </tr>
+                <tr>
+                  <td class="lbl">Total Bills</td>
+                  <td class="colon">:</td>
+                  <td class="val font-bold">${itemsToRender.length}</td>
+                </tr>
+                <tr>
+                  <td class="lbl">Status</td>
+                  <td class="colon">:</td>
+                  <td class="val font-bold">COMPLETED</td>
+                </tr>
+                <tr>
+                  <td class="lbl">Remarks</td>
+                  <td class="colon">:</td>
+                  <td class="val">${header?.Remarks || remarks || '-'}</td>
+                </tr>
+              </table>
+            </div>
+          </div>
+
+          <!-- CURRENT SUMMARY HIGHLIGHT CARD -->
+          <div class="current-payment-card">
+            <div class="payment-title">TOTAL TRADE-IN ISSUED VALUE</div>
+            <div class="payment-amount">$ ${totalAmount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+          </div>
+
+          <!-- DETAIL ITEMS TABLE -->
+          <div class="table-section-title">ISSUED TRADE-IN BILLS & LINE SPECIFICATIONS</div>
+          <table class="detail-table">
+            <thead>
+              <tr>
+                <th style="width: 5%; text-align: center;">#</th>
+                <th style="width: 18%; text-align: center;">BILL / INVOICE NO</th>
+                <th style="width: 26%; text-align: left;">PARTICULARS</th>
+                <th style="width: 14%; text-align: right;">ISSUED WT (G)</th>
+                <th style="width: 12%; text-align: right;">RATE / G ($)</th>
+                <th style="width: 13%; text-align: right;">AMOUNT ($)</th>
+                <th style="width: 12%; text-align: left;">REMARKS</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${(itemsToRender && itemsToRender.length > 0)
+                ? itemsToRender.map((row: any, idx: number) => {
+                    const invNo = String(row.InvoiceNo || row.InventoryCode || `ITEM-${idx + 1}`).trim();
+                    const cust = String(row.CustomerName || '').trim();
+                    const rem = String(row.Remarks || '').trim();
+                    const wt = parseFloat(row.TotalWeight || row.IssuedWeight || 0);
+                    const rate = parseFloat(row.CostPerGram || header?.CostPerGram || 0);
+                    const amt = parseFloat(row.TotalCost || row.Amount || (wt * rate) || 0);
+
+                    return `
+                      <tr>
+                        <td style="text-align: center; font-weight: 700;">${idx + 1}</td>
+                        <td style="text-align: center; font-weight: 700;">${invNo || '-'}</td>
+                        <td style="text-align: left; font-weight: 700;">${cust || 'REFINERY / WHOLESALE'}</td>
+                        <td style="text-align: right; font-weight: 700;">${wt.toFixed(3)}</td>
+                        <td style="text-align: right;">${rate > 0 ? `$ ${rate.toFixed(2)}` : '-'}</td>
+                        <td style="text-align: right; font-weight: 800; color: #8C5D08;">$ ${amt.toFixed(2)}</td>
+                        <td style="text-align: left; font-size: 10px;">${rem || '-'}</td>
+                      </tr>
+                    `;
+                  }).join('')
+                : `
+                  <tr>
+                    <td style="text-align: center; font-weight: 700;">1</td>
+                    <td style="text-align: center; font-weight: 700;">${sTradeInIssueNo}</td>
+                    <td style="text-align: left; font-weight: 700;">${sSupplierName}</td>
+                    <td style="text-align: right; font-weight: 700;">0.000</td>
+                    <td style="text-align: right;">$ 0.00</td>
+                    <td style="text-align: right; font-weight: 800; color: #8C5D08;">$ 0.00</td>
+                    <td style="text-align: left;">-</td>
+                  </tr>
+                `
+              }
+            </tbody>
+          </table>
+
+          <!-- SUMMARY FINANCIAL BALANCES -->
+          <div class="totals-section">
+            <div class="totals-box">
+              <div class="total-row">
+                <span>Total No of Bills:</span>
+                <span>${itemsToRender.length}</span>
+              </div>
+              <div class="total-row">
+                <span>Total Issued Weight:</span>
+                <span>${totalWt.toFixed(3)} g</span>
+              </div>
+              <div class="total-row total-row-grand">
+                <span>TOTAL VALUE ISSUED:</span>
+                <span>$ ${totalAmount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        ${renderStandardReportFooter({
+          staff: {
+            staffLabel: 'PREPARED BY (STAFF)',
+            staffName: 'Staff',
+            receiverLabel: 'SUPPLIER / AUTHORIZED RECEIVER',
+            receiverName: sSupplierName
+          }
+        })}
+      </div>
+    `;
+
+    const printPagesHtml = `
+      ${generatePageMarkup('CUSTOMER COPY')}
+      ${generatePageMarkup('OFFICE COPY')}
+    `;
+
+    return `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <meta charset="utf-8" />
+          <title>${sReportTitle} - ${sTradeInIssueNo}</title>
+          <style>
+            @page {
+              size: A4 portrait;
+              margin: 0 !important;
+            }
+            ${getStandardReportCss()}
+
+            @media print {
+              @page {
+                margin: 0 !important;
+              }
+              html, body {
+                width: 210mm !important;
+                height: 100% !important;
+                margin: 0 !important;
+                padding: 0 !important;
+                background: #FFFFFF !important;
+                -webkit-print-color-adjust: exact !important;
+                print-color-adjust: exact !important;
+              }
+              .page-sheet {
+                width: 210mm !important;
+                min-height: 297mm !important;
+                height: 297mm !important;
+                margin: 0 !important;
+                padding: 12mm 14mm !important;
+                box-shadow: none !important;
+                display: flex !important;
+                flex-direction: column !important;
+                justify-content: space-between !important;
+                box-sizing: border-box !important;
+                page-break-after: always !important;
+                break-after: page !important;
+              }
+              .page-sheet:last-child {
+                page-break-after: auto !important;
+                break-after: auto !important;
+              }
+            }
+
+            html, body {
+              height: 100%;
+              margin: 0;
+              padding: 0;
+            }
+
+            .page-sheet {
+              width: 210mm;
+              min-height: 297mm;
+              padding: 12mm 14mm;
+              display: flex;
+              flex-direction: column;
+              justify-content: space-between;
+              box-sizing: border-box;
+            }
+
+            .report-main-content {
+              flex-grow: 1;
+            }
+
+            .std-footer-container {
+              margin-top: auto !important;
+              padding-top: 14px !important;
+              page-break-inside: avoid !important;
+              break-inside: avoid !important;
+            }
+
+            *, *:before, *:after, body, div, table, tr, th, td, span, p, h1, h2, h3, h4, h5, h6 {
+              font-family: 'Cambria', Georgia, 'Times New Roman', serif !important;
+            }
+
+            /* GOLD RATES BANNER */
+            .gold-rate-strip {
+              display: flex;
+              justify-content: space-around;
+              background: #FAF8F5;
+              border: 1px solid #C49A45;
+              border-radius: 4px;
+              padding: 6px 12px;
+              margin-top: 6px;
+              margin-bottom: 12px;
+              font-size: 11px;
+              font-weight: 700;
+              color: #222222;
+            }
+            .rate-cell span.rate-lbl {
+              color: #222222;
+              font-weight: 700;
+            }
+            .rate-cell span.rate-val {
+              color: #8C5D08;
+              font-weight: 800;
+              margin-left: 4px;
+            }
+
+            /* TWO-COLUMN INFO */
+            .info-grid {
+              display: grid;
+              grid-template-columns: 1fr 1fr;
+              gap: 16px;
+              margin-bottom: 12px;
+            }
+            .info-card {
+              border: 1px solid #C49A45;
+              background: #FAF8F5;
+              border-radius: 4px;
+              padding: 10px 14px;
+            }
+            .card-title {
+              font-size: 11.5px;
+              font-weight: 800;
+              color: #8C5D08;
+              border-bottom: 1px dotted #DDC89A;
+              padding-bottom: 5px;
+              margin-bottom: 8px;
+              text-transform: uppercase;
+              letter-spacing: 0.5px;
+            }
+            .info-table {
+              width: 100%;
+              border-collapse: collapse;
+              font-size: 11px;
+            }
+            .info-table td {
+              padding: 2px 0;
+              vertical-align: top;
+              line-height: 1.35;
+            }
+            .info-table .lbl {
+              width: 130px;
+              font-weight: 700;
+              color: #222222;
+            }
+            .info-table .colon {
+              width: 15px;
+              font-weight: 700;
+              color: #222222;
+              text-align: center;
+            }
+            .info-table .val {
+              color: #222222;
+              font-weight: 700;
+              word-break: break-word;
+            }
+            .font-bold {
+              font-weight: 800;
+            }
+
+            /* CURRENT HIGHLIGHT CARD */
+            .current-payment-card {
+              background: #FAF8F5;
+              border: 1px solid #C49A45;
+              border-radius: 4px;
+              padding: 10px 16px;
+              text-align: center;
+              margin-bottom: 12px;
+            }
+            .payment-title {
+              font-size: 11px;
+              font-weight: 800;
+              color: #8C5D08;
+              letter-spacing: 0.8px;
+              text-transform: uppercase;
+              margin-bottom: 2px;
+            }
+            .payment-amount {
+              font-size: 24px;
+              font-weight: 800;
+              color: #8C5D08;
+              letter-spacing: 1px;
+            }
+
+            /* TABLE */
+            .table-section-title {
+              font-size: 11px;
+              font-weight: 800;
+              color: #8C5D08;
+              text-transform: uppercase;
+              letter-spacing: 0.5px;
+              margin-bottom: 6px;
+            }
+            .detail-table {
+              width: 100%;
+              border-collapse: collapse;
+              margin-bottom: 12px;
+              font-size: 10.5px;
+            }
+            .detail-table th {
+              background: #8C5D08;
+              color: #FFFFFF;
+              text-align: left;
+              padding: 6px 8px;
+              font-weight: 800;
+              border: 1px solid #734C06;
+              text-transform: uppercase;
+              font-size: 10px;
+              letter-spacing: 0.5px;
+            }
+            .detail-table td {
+              padding: 6px 8px;
+              border: 1px solid #D9C8A5;
+              background: #FFFFFF;
+              color: #222222;
+            }
+            .detail-table tr:nth-child(even) td {
+              background: #FAF8F5;
+            }
+
+            /* TOTALS SECTION */
+            .totals-section {
+              display: flex;
+              justify-content: flex-end;
+              margin-bottom: 14px;
+            }
+            .totals-box {
+              width: 330px;
+              border: 1px solid #C49A45;
+              background: #FAF8F5;
+              border-radius: 4px;
+              padding: 8px 12px;
+            }
+            .total-row {
+              display: flex;
+              justify-content: space-between;
+              font-size: 11.5px;
+              padding: 2.5px 0;
+              color: #222222;
+              font-weight: 700;
+            }
+            .total-row-grand {
+              border-top: 2px solid #8C5D08;
+              margin-top: 4px;
+              padding-top: 4px;
+              font-weight: 800;
+              font-size: 13.5px;
+              color: #8C5D08;
+            }
+          </style>
+        </head>
+        <body>
+          ${printPagesHtml}
+        </body>
+      </html>
+    `;
+  };
+
+  // subPrint using hidden iframe
+  const subPrint = async (targetIssueNo: string, isReprintMode: boolean = false) => {
     const sTradeInIssueNo = (targetIssueNo || '').trim();
     if (!sTradeInIssueNo) return;
 
     try {
       setLoading(true);
 
-      let company: any = { name: '', address1: '', address2: '', country: '', phone: '', fax: '' };
-      let header: any = null;
-      let historyRows: any[] = [];
-      let tradeBills: any[] = [];
-
-      // 1. Fetch print data from backend SQL Server
       const res = await fetch(`${API_URL}/print-data?issueNo=${encodeURIComponent(sTradeInIssueNo)}`);
       const json = await res.json();
 
-      if (json.success && json.data) {
-        company = json.data.company || company;
-        header = json.data.header || {};
-        historyRows = json.data.history || [];
-        tradeBills = json.data.tradeBills || [];
-      } else {
+      if (!json.success || !json.data) {
         showToast(json.message || 'Trade In Issue record not found for print.', 'error');
         setLoading(false);
         return;
       }
 
-      // Singapore Print Date & Time (Asia/Singapore)
-      const now = new Date();
-      const sgDateStr = now.toLocaleDateString('en-GB', {
-        timeZone: 'Asia/Singapore',
-        day: '2-digit',
-        month: '2-digit',
-        year: 'numeric',
-      });
-      const sgTimeStr = now.toLocaleTimeString('en-US', {
-        timeZone: 'Asia/Singapore',
-        hour: '2-digit',
-        minute: '2-digit',
-        hour12: true,
-      });
-      const printTimestamp = `Printed: ${sgDateStr}, ${sgTimeStr}`;
+      const htmlContent = buildTradeInIssueHtml(sTradeInIssueNo, isReprintMode, json.data);
+      const docTitle = isReprintMode ? `Trade-In Issue (Duplicate) - ${sTradeInIssueNo}` : `Trade-In Issue - ${sTradeInIssueNo}`;
 
-      // Issue Date
-      let issueDateFormatted = '';
-      const rawDate = header.TradeIssueDate || (historyRows[0] && historyRows[0].CreateDate);
-      if (rawDate) {
-        const vd = new Date(rawDate);
-        if (!isNaN(vd.getTime())) {
-          issueDateFormatted = `${String(vd.getDate()).padStart(2, '0')}/${String(vd.getMonth() + 1).padStart(2, '0')}/${vd.getFullYear()}`;
-        }
-      }
-      if (!issueDateFormatted) {
-        issueDateFormatted = sgDateStr;
-      }
-
-      // Detail rows
-      const itemsToRender = historyRows.length > 0 ? historyRows : tradeBills;
-      let totalWt = 0;
-      let totalAmount = 0;
-
-      const rowsHtml = itemsToRender.map((row: any, idx: number) => {
-        const invNo = String(row.InvoiceNo || row.InventoryCode || `ITEM-${idx + 1}`).trim();
-        const cust = String(row.CustomerName || '').trim();
-        const remarks = String(row.Remarks || '').trim();
-        const wt = parseFloat(row.TotalWeight || row.IssuedWeight || 0);
-        const rate = parseFloat(row.CostPerGram || header.CostPerGram || 0);
-        const amt = parseFloat(row.TotalCost || row.Amount || (wt * rate) || 0);
-
-        totalWt += wt;
-        totalAmount += amt;
-
-        return `
-          <tr>
-            <td style="text-align: center; font-weight: 700;">${idx + 1}</td>
-            <td style="text-align: center; font-weight: 600;">${invNo || '-'}</td>
-            <td style="text-align: left; font-weight: 500;">${cust || 'REFINERY / WHOLESALE'}</td>
-            <td style="text-align: right;">${wt.toFixed(3)}</td>
-            <td style="text-align: right;">${rate > 0 ? `$ ${rate.toFixed(2)}` : '-'}</td>
-            <td style="text-align: right; font-weight: 700;">$ ${amt.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-            <td style="text-align: left; font-size: 10px;">${remarks || '-'}</td>
-          </tr>
-        `;
-      }).join('');
-
-      const sCompanyname = (company.name || 'SMART GOLD').trim();
-      const sAddress = [company.address1, company.address2, company.country].filter(Boolean).join(' ');
-      const sPhone = (company.phone || '').trim();
-      const sFax = (company.fax || '').trim();
-      const sReportTitle = `Trade In Issue Report For ${sTradeInIssueNo}`;
-
-      const printHtml = `
-        <!DOCTYPE html>
-        <html>
-          <head>
-            <meta charset="utf-8" />
-            <title>${sReportTitle}</title>
-            <style>
-              @page {
-                size: A4 portrait;
-                margin: 0 !important;
-              }
-              html, body {
-                margin: 0;
-                padding: 0;
-                background-color: #f7f5f0;
-                font-family: Cambria, Georgia, "Times New Roman", serif !important;
-                color: #3b2d17;
-                -webkit-print-color-adjust: exact !important;
-                print-color-adjust: exact !important;
-              }
-              .page-sheet {
-                width: 210mm;
-                min-height: 297mm;
-                margin: 15px auto;
-                background: #ffffff;
-                padding: 10mm 12mm;
-                box-sizing: border-box;
-                display: flex;
-                flex-direction: column;
-                font-family: Cambria, Georgia, "Times New Roman", serif !important;
-                box-shadow: 0 4px 14px rgba(0,0,0,0.08);
-              }
-
-              /* HEADER SECTION */
-              .header-row {
-                display: flex;
-                justify-content: space-between;
-                align-items: center;
-                margin-bottom: 6px;
-                position: relative;
-              }
-              .header-left {
-                width: 140px;
-                display: flex;
-                align-items: center;
-              }
-              .header-left img.unipro-logo-img {
-                max-height: 48px;
-                max-width: 135px;
-                object-fit: contain;
-                display: block;
-              }
-              .header-center {
-                flex: 1;
-                text-align: center;
-                padding: 0 10px;
-              }
-              .company-title {
-                font-family: Cambria, Georgia, "Times New Roman", serif !important;
-                font-size: 26px;
-                font-weight: 700;
-                color: #996515;
-                letter-spacing: 2px;
-                text-transform: uppercase;
-                margin-bottom: 3px;
-                line-height: 1.15;
-              }
-              .company-address {
-                font-family: Cambria, Georgia, "Times New Roman", serif !important;
-                font-size: 11px;
-                color: #4a3b22;
-                font-weight: 700;
-                letter-spacing: 0.5px;
-                text-transform: uppercase;
-              }
-              .header-right {
-                width: 140px;
-                text-align: right;
-                font-size: 11px;
-                color: #705832;
-                font-weight: 600;
-              }
-              .header-right table {
-                float: right;
-                font-size: 10.5px;
-                border-collapse: collapse;
-              }
-              .header-right td {
-                padding: 1px 3px;
-              }
-              .header-ornament {
-                text-align: center;
-                margin: 6px 0 10px 0;
-                color: #d4a742;
-                font-size: 14px;
-                position: relative;
-              }
-              .header-ornament::before,
-              .header-ornament::after {
-                content: "";
-                position: absolute;
-                top: 50%;
-                width: calc(50% - 18px);
-                height: 1.5px;
-                background: #d4a742;
-              }
-              .header-ornament::before { left: 0; }
-              .header-ornament::after { right: 0; }
-
-              /* REPORT TITLE AREA */
-              .report-title-area {
-                text-align: center;
-                margin-bottom: 12px;
-              }
-              .report-main-title {
-                font-family: Cambria, Georgia, "Times New Roman", serif !important;
-                font-size: 20px;
-                font-weight: 700;
-                color: #3b2d17;
-                letter-spacing: 1px;
-                text-transform: uppercase;
-                margin-bottom: 4px;
-              }
-              .report-sub-info {
-                font-family: Cambria, Georgia, "Times New Roman", serif !important;
-                font-size: 11.5px;
-                color: #705832;
-                font-weight: 600;
-                margin-bottom: 2px;
-              }
-              .report-period-line {
-                font-family: Cambria, Georgia, "Times New Roman", serif !important;
-                font-size: 11.5px;
-                color: #705832;
-                font-weight: 600;
-                margin-top: 3px;
-              }
-
-              /* META CARD */
-              .meta-card-container {
-                display: flex;
-                flex-direction: column;
-                gap: 8px;
-                margin-bottom: 14px;
-              }
-              .meta-info-card {
-                display: flex;
-                justify-content: space-between;
-                background: #fffbf2;
-                border: 1px solid #d4a742;
-                border-radius: 6px;
-                padding: 8px 14px;
-                font-size: 11.5px;
-              }
-              .meta-item {
-                display: flex;
-                flex-direction: column;
-              }
-              .meta-label {
-                font-size: 10px;
-                font-weight: 700;
-                color: #705832;
-                text-transform: uppercase;
-                letter-spacing: 0.5px;
-                margin-bottom: 2px;
-              }
-              .meta-val {
-                font-size: 12px;
-                font-weight: 700;
-                color: #996515;
-              }
-
-              /* DETAIL TABLE */
-              .table-container {
-                width: 100%;
-                overflow: hidden;
-                margin-bottom: 10px;
-              }
-              table.report-table {
-                width: 100% !important;
-                border-collapse: collapse;
-                font-family: Cambria, Georgia, "Times New Roman", serif !important;
-                font-size: 11px;
-                border: 0.75px solid #d4a742;
-              }
-              table.report-table thead th {
-                background-color: #996515 !important;
-                color: #ffffff !important;
-                font-weight: 700 !important;
-                font-family: Cambria, Georgia, "Times New Roman", serif !important;
-                padding: 7px 6px;
-                letter-spacing: 0.4px;
-                border: 0.75px solid #d4a742;
-                font-size: 11px;
-                line-height: 1.2;
-                text-align: center !important;
-                text-transform: uppercase !important;
-              }
-              table.report-table tbody td {
-                padding: 6px 6px;
-                color: #3b2d17;
-                font-family: Cambria, Georgia, "Times New Roman", serif !important;
-                border: 0.75px solid #f0d9a0;
-                font-size: 11px;
-                line-height: 1.25;
-              }
-              table.report-table tbody tr:nth-child(even) td {
-                background-color: #fffbf2 !important;
-              }
-              table.report-table tbody tr:nth-child(odd) td {
-                background-color: #ffffff !important;
-              }
-              table.report-table tr.grand-total-row td {
-                background-color: #fff8e7 !important;
-                font-weight: 700 !important;
-                font-family: Cambria, Georgia, "Times New Roman", serif !important;
-                color: #996515 !important;
-                border: 0.75px solid #d4a742 !important;
-                border-top: 1.5px solid #d4a742 !important;
-                border-bottom: 1.5px solid #d4a742 !important;
-                padding: 7px 6px;
-                font-size: 11px;
-              }
-
-              /* SIGNATURE SECTION */
-              .signature-section {
-                margin-top: 30px;
-                width: 100%;
-                display: flex;
-                justify-content: space-between;
-                font-size: 11px;
-                page-break-inside: avoid;
-                break-inside: avoid;
-              }
-              .sign-card {
-                width: 48%;
-                border: 1px solid #d4a742;
-                border-radius: 6px;
-                background-color: #ffffff;
-                padding: 10px 14px;
-                box-sizing: border-box;
-              }
-              .sign-header {
-                font-size: 11.5px;
-                font-weight: 700;
-                color: #996515;
-                text-transform: uppercase;
-                margin-bottom: 10px;
-                border-bottom: 1px dashed #d4a742;
-                padding-bottom: 4px;
-              }
-              .sign-row {
-                margin-bottom: 8px;
-                color: #4a3b22;
-                font-size: 11px;
-                white-space: nowrap;
-              }
-
-              /* FOOTER */
-              .report-footer {
-                margin-top: auto !important;
-                text-align: center;
-                padding-top: 14px;
-                padding-bottom: 2mm;
-                page-break-inside: avoid;
-                break-inside: avoid;
-              }
-              .footer-divider {
-                width: 100%;
-                height: 1.5px;
-                background: #d4a742;
-                margin-bottom: 10px;
-              }
-              .footer-gen-text {
-                font-size: 11px;
-                color: #705832;
-                font-weight: 600;
-                margin-bottom: 3px;
-              }
-              .footer-powered {
-                font-size: 12px;
-                color: #996515;
-                font-weight: 700;
-              }
-
-              /* TOOLBAR */
-              .print-toolbar {
-                position: fixed;
-                top: 16px;
-                right: 20px;
-                z-index: 1000;
-              }
-              .btn-action {
-                background: #996515;
-                color: #fff;
-                border: none;
-                padding: 9px 20px;
-                font-family: Cambria, Georgia, serif;
-                font-size: 12px;
-                font-weight: 700;
-                border-radius: 6px;
-                cursor: pointer;
-                box-shadow: 0 4px 12px rgba(153, 101, 21, 0.25);
-              }
-              .btn-action:hover {
-                background: #7a5408;
-              }
-
-              @media print {
-                @page {
-                  margin: 0 !important;
-                  size: A4 portrait;
-                }
-                html, body {
-                  background: #fff !important;
-                  padding: 0 !important;
-                  margin: 0 !important;
-                  height: 100% !important;
-                }
-                .print-toolbar {
-                  display: none !important;
-                }
-                .page-sheet {
-                  width: 100% !important;
-                  min-height: 297mm !important;
-                  height: 100% !important;
-                  margin: 0 !important;
-                  padding: 10mm 12mm 10mm 12mm !important;
-                  box-shadow: none !important;
-                  box-sizing: border-box !important;
-                  display: flex !important;
-                  flex-direction: column !important;
-                }
-                table.report-table {
-                  page-break-inside: auto;
-                }
-                tr {
-                  page-break-inside: avoid;
-                  break-inside: avoid;
-                }
-                thead {
-                  display: table-header-group;
-                }
-                tfoot {
-                  display: table-footer-group;
-                }
-                .signature-section {
-                  page-break-inside: avoid;
-                  break-inside: avoid;
-                }
-                .report-footer {
-                  margin-top: auto !important;
-                  page-break-inside: avoid !important;
-                  break-inside: avoid !important;
-                  padding-bottom: 4mm !important;
-                }
-              }
-            </style>
-          </head>
-          <body>
-            <div class="print-toolbar">
-              <button class="btn-action" onclick="window.print()">Print Report</button>
-            </div>
-
-            <div class="page-sheet">
-              <!-- HEADER -->
-              <div class="header-row">
-                <div class="header-left">
-                  <img src="${UNIPRO_LOGO_DATA_URI}" alt="UNIPRO" class="unipro-logo-img" />
-                </div>
-
-                <div class="header-center">
-                  <div class="company-title">${sCompanyname}</div>
-                  ${sAddress ? `<div class="company-address">${sAddress}</div>` : ''}
-                  ${sPhone ? `<div class="company-address" style="margin-top: 2px;">TEL: ${sPhone}${sFax ? ` &nbsp; FAX: ${sFax}` : ''}</div>` : ''}
-                </div>
-
-                <div class="header-right">
-                  <table>
-                    <tr><td>PAGE</td><td>:</td><td style="font-weight: 700;">1</td></tr>
-                  </table>
-                </div>
-              </div>
-
-              <div class="header-ornament">◆</div>
-
-              <!-- REPORT TITLE -->
-              <div class="report-title-area">
-                <div class="report-main-title">TRADE IN ISSUE REPORT</div>
-                <div class="report-sub-info">ISSUE NO: ${sTradeInIssueNo}</div>
-                <div class="report-period-line">${printTimestamp}</div>
-              </div>
-
-              <!-- META CARD -->
-              <div class="meta-card-container">
-                <div class="meta-info-card">
-                  <div class="meta-item">
-                    <span class="meta-label">Trade Issue No</span>
-                    <span class="meta-val">${sTradeInIssueNo}</span>
-                  </div>
-                  <div class="meta-item">
-                    <span class="meta-label">Issue Date</span>
-                    <span class="meta-val">${issueDateFormatted}</span>
-                  </div>
-                  <div class="meta-item">
-                    <span class="meta-label">Supplier Code</span>
-                    <span class="meta-val">${header.SupplierCode || supplierCode || 'N/A'}</span>
-                  </div>
-                  <div class="meta-item">
-                    <span class="meta-label">Supplier Name</span>
-                    <span class="meta-val">${header.SupplierName || supplierName || 'REFINERY / WHOLESALE'}</span>
-                  </div>
-                </div>
-              </div>
-
-              <!-- DETAIL TABLE -->
-              <div class="table-container">
-                <table class="report-table">
-                  <colgroup>
-                    <col style="width: 6%;" />
-                    <col style="width: 18%;" />
-                    <col style="width: 26%;" />
-                    <col style="width: 14%;" />
-                    <col style="width: 12%;" />
-                    <col style="width: 12%;" />
-                    <col style="width: 12%;" />
-                  </colgroup>
-                  <thead>
-                    <tr>
-                      <th>#</th>
-                      <th>BILL / INVOICE NO</th>
-                      <th style="text-align: left !important; padding-left: 8px;">PARTICULARS</th>
-                      <th style="text-align: right !important; padding-right: 8px;">ISSUED WT (g)</th>
-                      <th style="text-align: right !important; padding-right: 8px;">RATE / g</th>
-                      <th style="text-align: right !important; padding-right: 8px;">AMOUNT ($)</th>
-                      <th style="text-align: left !important; padding-left: 8px;">REMARKS</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    ${rowsHtml || '<tr><td colspan="7" style="text-align:center; padding: 12px;">No issue line items found</td></tr>'}
-
-                    <!-- Grand Total Row -->
-                    <tr class="grand-total-row">
-                      <td colspan="3" style="text-align: right !important; padding-right: 14px; font-weight: 700;">TOTAL ISSUED:</td>
-                      <td style="text-align: right !important; padding-right: 8px; font-weight: 700;">${totalWt.toFixed(3)}</td>
-                      <td></td>
-                      <td style="text-align: right !important; padding-right: 8px; font-weight: 700;">$ ${totalAmount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-                      <td></td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-
-              <!-- SIGNATURE SECTION -->
-              <div class="signature-section">
-                <!-- Supplier Signature -->
-                <div class="sign-card">
-                  <div class="sign-header">RECEIVED BY (SUPPLIER / REFINERY)</div>
-                  <div class="sign-row">Authorized Sign: ...........................................</div>
-                  <div class="sign-row" style="margin-top: 14px;">Name: ................................................................</div>
-                  <div class="sign-row" style="margin-top: 14px;">Date: ................................................................</div>
-                </div>
-
-                <!-- Store Officer -->
-                <div class="sign-card">
-                  <div class="sign-header">DISPATCHED BY (STORE OFFICER)</div>
-                  <div class="sign-row">Authorized Sign: ...........................................</div>
-                  <div class="sign-row" style="margin-top: 14px;">Name: ................................................................</div>
-                  <div class="sign-row" style="margin-top: 14px;">Date: ................................................................</div>
-                </div>
-              </div>
-
-              <!-- FOOTER -->
-              <div class="report-footer">
-                <div class="footer-divider"></div>
-                <div class="footer-gen-text">*** System Generated Report ***</div>
-                <div class="footer-powered">Powered by Unipro SG</div>
-              </div>
-            </div>
-
-            <script>
-              window.onload = function() {
-                setTimeout(function() {
-                  window.print();
-                }, 300);
-              };
-            </script>
-          </body>
-        </html>
+      const printScript = `
+        <script>
+          window.onload = function() {
+            setTimeout(function() {
+              window.print();
+            }, 300);
+          };
+        </script>
       `;
+      const printHtml = htmlContent.replace('</body>', `${printScript}</body>`);
 
       if (Platform.OS === 'web' && typeof window !== 'undefined') {
-        const printWindow = window.open('', '_blank', 'width=900,height=750');
-        if (printWindow) {
-          printWindow.document.open();
-          printWindow.document.write(printHtml);
-          printWindow.document.close();
-          showToast('Trade In Issue report preview opened', 'success');
+        const frameId = '__trade_in_issue_print_frame__';
+        let iframe = document.getElementById(frameId) as HTMLIFrameElement;
+        if (!iframe) {
+          iframe = document.createElement('iframe');
+          iframe.id = frameId;
+          iframe.style.position = 'fixed';
+          iframe.style.right = '0';
+          iframe.style.bottom = '0';
+          iframe.style.width = '0';
+          iframe.style.height = '0';
+          iframe.style.border = '0';
+          iframe.style.visibility = 'hidden';
+          document.body.appendChild(iframe);
+        }
+
+        const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
+        if (iframeDoc && iframe.contentWindow) {
+          iframeDoc.open();
+          iframeDoc.write(htmlContent);
+          iframeDoc.title = docTitle;
+          iframeDoc.close();
+
+          setTimeout(() => {
+            try {
+              iframe.contentWindow?.focus();
+              iframe.contentWindow?.print();
+              showToast(`Trade In Issue ${sTradeInIssueNo} print dialog opened`, 'success');
+            } catch (printErr) {
+              console.error('Iframe print error:', printErr);
+              const printWindow = window.open('', '_blank', 'width=900,height=750');
+              if (printWindow) {
+                printWindow.document.open();
+                printWindow.document.write(printHtml);
+                printWindow.document.title = docTitle;
+                printWindow.document.close();
+              }
+            }
+          }, 350);
         } else {
-          const blob = new Blob([printHtml], { type: 'text/html;charset=utf-8;' });
-          const url = URL.createObjectURL(blob);
-          const win = window.open(url, '_blank');
-          if (!win) {
-            showToast('Popup blocker prevented opening print preview. Please allow popups.', 'error');
-          } else {
+          const printWindow = window.open('', '_blank', 'width=900,height=750');
+          if (printWindow) {
+            printWindow.document.open();
+            printWindow.document.write(printHtml);
+            printWindow.document.title = docTitle;
+            printWindow.document.close();
             showToast('Trade In Issue report preview opened', 'success');
+          } else {
+            showToast('Popup blocker prevented opening print preview. Please allow popups.', 'error');
           }
         }
       } else {
         showToast('Print preview generated.', 'success');
       }
-
     } catch (err: any) {
       console.error('Print Error:', err);
       showToast('Error generating print preview: ' + (err.message || 'Error'), 'error');
@@ -894,15 +842,122 @@ export default function TradeInIssueScreen() {
     }
   };
 
-  // Exact VB.NET btnPrint_Click validation:
-  // If txtTradeIssueNo.Text.Trim <> "" Then
-  //     subPrint(txtTradeIssueNo.Text.Trim)
-  // End If
+  // Dedicated PDF Download Functionality
+  const handleDownloadPdf = async (targetIssueNo?: string, isReprint: boolean = false) => {
+    const rawNo = (targetIssueNo || issueNo || '').trim();
+    if (!rawNo) {
+      showToast('Validation Error: Trade Issue No is required to download PDF', 'error');
+      return;
+    }
+
+    try {
+      setLoading(true);
+      const res = await fetch(`${API_URL}/print-data?issueNo=${encodeURIComponent(rawNo)}`);
+      const json = await res.json();
+
+      if (!json.success || !json.data) {
+        showToast(json.message || `Trade In Issue record "${rawNo}" not found`, 'error');
+        return;
+      }
+
+      const htmlContent = buildTradeInIssueHtml(rawNo, isReprint, json.data);
+      const downloadFilename = `Trade_In_Issue_${rawNo.replace(/[^a-zA-Z0-9_-]/g, '_')}.pdf`;
+
+      const pdfRes = await fetch(`${API_URL}/export-pdf`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          html: htmlContent,
+          filename: downloadFilename
+        })
+      });
+
+      if (!pdfRes.ok) {
+        throw new Error('Server returned error while generating PDF');
+      }
+
+      const pdfBlob = await pdfRes.blob();
+
+      if (Platform.OS === 'web' && typeof window !== 'undefined') {
+        const url = URL.createObjectURL(pdfBlob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = downloadFilename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+        showToast(`PDF downloaded successfully: ${downloadFilename}`, 'success');
+      } else {
+        showToast('PDF file generated successfully.', 'success');
+      }
+    } catch (err: any) {
+      console.error('PDF Export Error:', err);
+      showToast('Failed to download PDF: ' + (err.message || 'Error'), 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Dedicated Excel Download Functionality
+  const handleDownloadExcel = async (targetIssueNo?: string, isReprint: boolean = false) => {
+    const rawNo = (targetIssueNo || issueNo || '').trim();
+    if (!rawNo) {
+      showToast('Validation Error: Trade Issue No is required to download Excel', 'error');
+      return;
+    }
+
+    try {
+      setLoading(true);
+      const excelRes = await fetch(`${API_URL}/export-excel`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tradeIssueNo: rawNo,
+          isReprint: isReprint
+        })
+      });
+
+      if (!excelRes.ok) {
+        const errJson = await excelRes.json().catch(() => ({}));
+        throw new Error(errJson.message || 'Server error generating Excel file');
+      }
+
+      const excelBlob = await excelRes.blob();
+      const downloadFilename = `Trade_In_Issue_${rawNo.replace(/[^a-zA-Z0-9_-]/g, '_')}.xlsx`;
+
+      if (Platform.OS === 'web' && typeof window !== 'undefined') {
+        const url = URL.createObjectURL(excelBlob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = downloadFilename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+        showToast(`Trade In Issue Excel downloaded: ${downloadFilename}`, 'success');
+      } else {
+        showToast('Excel file generated successfully.', 'success');
+      }
+    } catch (err: any) {
+      console.error('Excel Export Error:', err);
+      showToast('Failed to download Excel: ' + (err.message || 'Error'), 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Print button click handler opening confirmation modal
   const handlePrintClick = () => {
     try {
-      if (issueNo && issueNo.trim() !== '') {
-        subPrint(issueNo.trim());
+      const cleanNo = (issueNo || '').trim();
+      if (!cleanNo) {
+        showToast('Please enter or select a Trade Issue Number to print', 'error');
+        return;
       }
+      setActivePrintIssueNo(cleanNo);
+      setActivePrintIsReprint(true);
+      setIsPrintModalVisible(true);
     } catch (ex: any) {
       showToast(ex.message || 'Error executing print', 'error');
     }
@@ -1447,6 +1502,39 @@ export default function TradeInIssueScreen() {
           </View>
         </View>
       </Modal>
+
+      {/* STANDARDIZED PRINT REPORT CONFIRMATION MODAL */}
+      <PrintReportModal
+        visible={isPrintModalVisible}
+        title="Print Report"
+        message="Do you want to print ?"
+        loading={loading}
+        onCancel={() => {
+          setIsPrintModalVisible(false);
+          setActivePrintIssueNo('');
+        }}
+        onPdf={() => {
+          const invNo = activePrintIssueNo;
+          const reprint = activePrintIsReprint;
+          setIsPrintModalVisible(false);
+          setActivePrintIssueNo('');
+          handleDownloadPdf(invNo, reprint);
+        }}
+        onExcel={() => {
+          const invNo = activePrintIssueNo;
+          const reprint = activePrintIsReprint;
+          setIsPrintModalVisible(false);
+          setActivePrintIssueNo('');
+          handleDownloadExcel(invNo, reprint);
+        }}
+        onPrint={() => {
+          const invNo = activePrintIssueNo;
+          const reprint = activePrintIsReprint;
+          setIsPrintModalVisible(false);
+          setActivePrintIssueNo('');
+          subPrint(invNo, reprint);
+        }}
+      />
     </SafeAreaView>
   );
 }
