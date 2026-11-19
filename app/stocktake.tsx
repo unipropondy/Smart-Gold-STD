@@ -1441,24 +1441,24 @@ export default function StockTakeScreen() {
       {/* Stock Take Session In Progress Modal */}
       <Modal visible={showAlreadyStartedModal} transparent animationType="fade" onRequestClose={() => setShowAlreadyStartedModal(false)}>
         <View style={styles.modalOverlay}>
-          <View style={[styles.modalCard, { backgroundColor: cardColor, borderColor }]}>
+          <View style={[styles.modalCard, styles.goldCard, { padding: 20 }]}>
             <View style={styles.modalHeaderRow}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                 <Ionicons name="time-outline" size={20} color="#F59E0B" />
-                <ThemedText style={{ fontSize: 16, fontWeight: '700', color: textColor }}>Stock Take In Progress</ThemedText>
+                <ThemedText style={{ fontSize: 16, fontWeight: '700', color: '#3B2D17' }}>Stock Take In Progress</ThemedText>
               </View>
               <TouchableOpacity onPress={() => setShowAlreadyStartedModal(false)}>
-                <Ionicons name="close" size={20} color={subtitleColor} />
+                <Ionicons name="close" size={20} color="#8F7E66" />
               </TouchableOpacity>
             </View>
 
-            <ThemedText style={{ fontSize: 13, color: subtitleColor, lineHeight: 20, marginBottom: 20 }}>
+            <ThemedText style={{ fontSize: 13, color: '#685942', lineHeight: 20, marginBottom: 20 }}>
               An active stock take session exists. Would you like to start a new stock take session (clearing active inventory) or resume your current session?
             </ThemedText>
 
             <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 8 }}>
               <TouchableOpacity style={styles.modalCancelBtn} onPress={() => setShowAlreadyStartedModal(false)}>
-                <ThemedText style={{ fontSize: 12.5, fontWeight: '600', color: subtitleColor }}>Cancel</ThemedText>
+                <ThemedText style={{ fontSize: 12.5, fontWeight: '600', color: '#5C4A28' }}>Cancel</ThemedText>
               </TouchableOpacity>
 
               <TouchableOpacity style={[styles.modalCancelBtn, { borderColor: '#FCA5A5', backgroundColor: '#FEF2F2' }]} onPress={() => executeProceed(true)}>
@@ -1487,8 +1487,8 @@ const styles = StyleSheet.create({
     flexDirection: 'column',
     overflow: 'hidden',
     backgroundColor: '#FBF9F5',
-    padding: 14,
-    gap: 10,
+    padding: 16,
+    gap: 12,
   },
   goldCard: {
     backgroundColor: '#FFFFFF',

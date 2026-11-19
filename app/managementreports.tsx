@@ -337,7 +337,7 @@ export default function ManagementReportsScreen() {
       <ScrollView contentContainerStyle={styles.scrollContent}>
         <View style={styles.cardWrapper}>
           <View style={styles.goldCard}>
-            {/* Top row: Management Report, From Date, To Date */}
+            {/* Top row: Management Report, From Date, To Date, Location */}
             <View style={styles.inputRow}>
               {/* Management Report */}
               <View style={styles.reportCol}>
@@ -350,53 +350,53 @@ export default function ManagementReportsScreen() {
                     setIsReportDropdownOpen(false);
                   }}
                   isOpen={isReportDropdownOpen}
-                  onToggle={() => setIsReportDropdownOpen(!isReportDropdownOpen)}
+                  onToggle={() => {
+                    closeAllDropdowns();
+                    setIsReportDropdownOpen(!isReportDropdownOpen);
+                  }}
                   maxHeight={280}
                 />
               </View>
 
               {/* From Date */}
-              <ReportDatePicker
-                label="From Date"
-                value={fromDate}
-                onChange={setFromDate}
-                isIsoOutput={true}
-                onOpenNative={() => setShowDatePicker({ show: true, mode: 'from' })}
-              />
+              <View style={styles.dateCol}>
+                <ReportDatePicker
+                  label="From Date"
+                  value={fromDate}
+                  onChange={setFromDate}
+                  isIsoOutput={true}
+                  onOpenNative={() => setShowDatePicker({ show: true, mode: 'from' })}
+                />
+              </View>
 
               {/* To Date */}
-              <ReportDatePicker
-                label="To Date"
-                value={toDate}
-                onChange={setToDate}
-                isIsoOutput={true}
-                onOpenNative={() => setShowDatePicker({ show: true, mode: 'to' })}
-              />
-            </View>
+              <View style={styles.dateCol}>
+                <ReportDatePicker
+                  label="To Date"
+                  value={toDate}
+                  onChange={setToDate}
+                  isIsoOutput={true}
+                  onOpenNative={() => setShowDatePicker({ show: true, mode: 'to' })}
+                />
+              </View>
 
-            {/* RESTORED MANAGEMENT FILTER OPTIONS MATCHING CUSTOMER REPORTS */}
-            <View style={styles.filterSection}>
-              <View style={[styles.inputRow, { marginTop: 12, zIndex: 15 }]}>
-                {/* Location Filter */}
-                <View style={styles.filterCol}>
-                  <ReportDropdown
-                    label="Location"
-                    options={locations}
-                    selectedId={locationCode}
-                    onSelect={(id) => {
-                      setLocationCode(id);
-                      setIsLocOpen(false);
-                    }}
-                    isOpen={isLocOpen}
-                    onToggle={() => {
-                      closeAllDropdowns();
-                      setIsLocOpen(!isLocOpen);
-                    }}
-                    maxHeight={200}
-                  />
-                </View>
-                {/* Spacer column to match Salesman/Supplier dropdown width */}
-                <View style={styles.filterCol} />
+              {/* Location Filter */}
+              <View style={styles.locCol}>
+                <ReportDropdown
+                  label="Location"
+                  options={locations}
+                  selectedId={locationCode}
+                  onSelect={(id) => {
+                    setLocationCode(id);
+                    setIsLocOpen(false);
+                  }}
+                  isOpen={isLocOpen}
+                  onToggle={() => {
+                    closeAllDropdowns();
+                    setIsLocOpen(!isLocOpen);
+                  }}
+                  maxHeight={200}
+                />
               </View>
             </View>
 
@@ -553,12 +553,20 @@ const styles = StyleSheet.create({
     zIndex: 10,
   },
   reportCol: {
-    flex: 1.5,
+    flex: 1.4,
+    minWidth: 220,
     position: 'relative',
     zIndex: 20,
   },
   dateCol: {
     flex: 1,
+    minWidth: 150,
+  },
+  locCol: {
+    flex: 1.1,
+    minWidth: 160,
+    position: 'relative',
+    zIndex: 15,
   },
   fieldLabel: {
     fontSize: 12,

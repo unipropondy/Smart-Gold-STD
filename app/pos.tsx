@@ -2239,8 +2239,12 @@ export default function PosScreen() {
           <ThemedText style={styles.footerVal}>{auditStats.TerminalCode || headerState.TerminalCode || ''}</ThemedText>
         </View>
         <View style={styles.footerCol}>
-          <ThemedText style={styles.footerLabel}>Last SalesMan</ThemedText>
-          <ThemedText style={styles.footerVal}>{auditStats.LastSalesMan || '0'}</ThemedText>
+          <ThemedText style={styles.footerLabel}>LAST SALESMAN</ThemedText>
+          <View style={{ width: '100%', alignItems: 'center', justifyContent: 'center' }}>
+            <ThemedText style={[styles.footerVal, { textAlign: 'center', alignSelf: 'center' }]}>
+              {auditStats.LastSalesMan || '0'}
+            </ThemedText>
+          </View>
         </View>
         <View style={styles.footerCol}>
           <ThemedText style={styles.footerLabel}>Last Bill No</ThemedText>
@@ -3267,20 +3271,25 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     borderRightWidth: 1,
     borderRightColor: '#F2E8D7',
+    textAlign: 'center' as any,
   },
   footerLabel: {
+    width: '100%',
     fontSize: 9,
     fontWeight: '600',
     color: '#8F816E',
     textTransform: 'uppercase',
     textAlign: 'center',
+    alignSelf: 'center',
   },
   footerVal: {
+    width: '100%',
     fontSize: 11,
     fontWeight: 'bold',
     color: '#3B2D17',
     marginTop: 1,
     textAlign: 'center',
+    alignSelf: 'center',
   },
 
   // ===== MODALS & CALENDAR =====

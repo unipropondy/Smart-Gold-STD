@@ -1161,6 +1161,12 @@ export default function JobSheetScreen() {
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'flex-end', alignItems: 'center', flex: 1 }}>
           <TouchableOpacity
             style={[styles.mainActionBtn, { backgroundColor: '#FFFFFF', borderColor: '#DFD5C3', marginBottom: 0, paddingVertical: 6, paddingHorizontal: 10 }]}
+            onPress={() => router.push('/goldbarissue')}
+          >
+            <ThemedText style={{ color: '#5C4A28', fontWeight: 'bold', fontSize: 12 }}>Gold Bar Issue</ThemedText>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.mainActionBtn, { backgroundColor: '#FFFFFF', borderColor: '#DFD5C3', marginBottom: 0, paddingVertical: 6, paddingHorizontal: 10 }]}
             onPress={() => router.push({ pathname: '/goldbarfix', params: { jobSheetNo: headerState.JobSheetNo } } as any)}
           >
             <ThemedText style={{ color: '#5C4A28', fontWeight: 'bold', fontSize: 12 }}>GoldBar Fix</ThemedText>

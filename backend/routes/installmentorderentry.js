@@ -15,7 +15,14 @@ router.get("/company", async (req, res) => {
     const pool = await getPool(req);
     const result = await pool.request().query("SELECT TOP 1 * FROM tblCompany");
     if (result.recordset.length > 0) {
-      res.json({ success: true, company: result.recordset[0] });
+      const comp = result.recordset[0];
+      res.json({
+        success: true,
+        company: comp,
+        tradeInLimit: parseFloat(comp.TradeInLimit || 0),
+        nextOrderNo: comp.NextOrderEntryNo || "1",
+        nextAgreementNo: comp.NextAgreementNo || "1"
+      });
     } else {
       res.json({ success: false, message: "Company not found" });
     }

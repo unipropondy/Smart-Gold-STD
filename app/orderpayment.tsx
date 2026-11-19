@@ -68,6 +68,8 @@ export default function OrderPaymentScreen() {
 
   // Trade-in
   const [tradeInOption, setTradeInOption] = useState<'Gold' | 'Cash' | 'Both'>('Gold');
+  const [tradeInAmount, setTradeInAmount] = useState('0.00');
+  const [companyTradeInLimit, setCompanyTradeInLimit] = useState('0.00');
 
   // History
   const [historyList, setHistoryList] = useState<any[]>([]);
@@ -221,6 +223,69 @@ export default function OrderPaymentScreen() {
       fetchBalance(orderNo);
     }
   }, [orderNo]);
+
+  // Fetch company trade-in limit
+  useEffect(() => {
+    const fetchCompanyConfig = async () => {
+      try {
+        const res = await fetch(`${API_BASE_URL}/installmentorderentry/company`);
+        const data = await res.json();
+        if (data && data.success && data.tradeInLimit !== undefined) {
+          setCompanyTradeInLimit(parseFloat(data.tradeInLimit || 0).toFixed(2));
+        }
+      } catch (e) {
+        console.warn('Failed to fetch company trade in limit', e);
+      }
+    };
+    fetchCompanyConfig();
+  }, []);
+
+  // Handle returning from Trade-In screen
+  useEffect(() => {
+    if (params?.tradeInAmount) {
+      const returnedTradeIn = parseFloat(params.tradeInAmount as string) || 0;
+      setTradeInAmount(returnedTradeIn.toFixed(2));
+      if (params.orderNo && !orderNo) {
+        setOrderNo(String(params.orderNo));
+      }
+      showToast(`Trade-In applied: $${returnedTradeIn.toFixed(2)}`, 'success');
+    }
+  }, [params?.tradeInAmount, params?.orderNo]);
+
+  // Navigate to Trade-In screen following frmOrderPayment.vb / frmInstallment_AJ.vb logic
+  const handleNavigateToTradeIn = () => {
+    let refNo = orderNo.trim();
+    if (!refNo) {
+      refNo = '00000001';
+    }
+
+    // Determine sales amount / total reference amount
+    const salesAmt = parseFloat(estimatedCost) || parseFloat(amountPaid) || parseFloat(balanceAmount) || 0;
+
+    const navParams: Record<string, string> = {
+      calledFrom: 'ORDERPAYMENT',
+      sCalledFrom: 'ORDERPAYMENT',
+      invoiceNo: refNo,
+      sInvoiceNo: refNo,
+      customerCode: customerCode || '',
+      customerName: customerName || '',
+      customerType: customerType || 'Customer',
+      address1: address || '',
+      address2: '',
+      address3: '',
+      tradeInLimit: companyTradeInLimit || '0.00',
+      salesAmount: salesAmt.toFixed(2),
+      sSalesAmount: salesAmt.toFixed(2),
+      remarks: remarks || '',
+      mode: 'OrderPayment',
+      paymentMode: tradeInOption,
+    };
+
+    router.push({
+      pathname: '/tradeingold',
+      params: navParams,
+    });
+  };
 
   const handleClear = () => {
     setOrderNo('');
@@ -1223,7 +1288,7 @@ export default function OrderPaymentScreen() {
                     {tradeInOption !== 'Cash' && (
                       <TouchableOpacity
                         style={styles.tradeInGoBtn}
-                        onPress={() => router.push('/tradeinsales')}
+                        onPress={handleNavigateToTradeIn}
                         activeOpacity={0.8}
                       >
                         <ThemedText style={styles.tradeInGoBtnText}>Trade IN</ThemedText>

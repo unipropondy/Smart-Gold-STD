@@ -2,11 +2,9 @@ import { formatColumnHeader } from '@/utils/formatColumnHeader';
 import { API_BASE_URL } from '@/constants/api';
 import { downloadExcelReport, downloadPdfReport, printHtmlReport } from '@/utils/reportExportClient';
 import { ReportDropdown } from '@/components/ReportDropdown';
-import { ReportDatePicker } from '@/components/ReportDatePicker';
-import { validateReportDateRange, getTodayDisp, getCurrentYearStartDisp } from '@/utils/dateValidation';
 import { Ionicons } from '@expo/vector-icons';
 import { Stack, useRouter } from 'expo-router';
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Platform,
@@ -17,7 +15,6 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import DateTimePicker from '@react-native-community/datetimepicker';
 
 // Royal Gold Design Palette (matching Customer Reports)
 const GOLD_ACCENT = '#B48218';
@@ -30,7 +27,6 @@ const TEXT_DARK = '#3B2D17';
 interface ReportOption {
   id: string;
   label: string;
-  needsDate?: boolean;
 }
 
 const REPORT_OPTIONS: ReportOption[] = [
@@ -40,7 +36,7 @@ const REPORT_OPTIONS: ReportOption[] = [
   { id: 'Tray', label: 'Tray' },
   { id: 'Sales Man', label: 'Sales Man' },
   { id: 'Suppliers', label: 'Suppliers' },
-  { id: 'Customers', label: 'Customers', needsDate: true },
+  { id: 'Customers', label: 'Customers' },
   { id: "Customer's Mailing Address", label: "Customer's Mailing Address" },
 ];
 
@@ -69,31 +65,16 @@ const RadioButton = ({
   </TouchableOpacity>
 );
 
-const formatDateLocal = (d: any) => {
-  if (!d || !(d instanceof Date) || isNaN(d.getTime())) return '';
-  const day = String(d.getDate()).padStart(2, '0');
-  const month = String(d.getMonth() + 1).padStart(2, '0');
-  const year = d.getFullYear();
-  return `${day}/${month}/${year}`;
-};
-
 export default function MasterReportsScreen() {
   const router = useRouter();
 
   const [selectedReport, setSelectedReport] = useState<string>('Class');
-  const [customerDateType, setCustomerDateType] = useState<string>('Date of Birth');
   const [actionOption, setActionOption] = useState<ActionOption>('Preview');
-  const [fromDate, setFromDate] = useState<string>(getTodayDisp('/'));
-  const [toDate, setToDate] = useState<string>(getTodayDisp('/'));
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
 
   const [toastMessage, setToastMessage] = useState('');
   const [toastType, setToastType] = useState<'success' | 'error'>('success');
-  const [showDatePicker, setShowDatePicker] = useState<{ show: boolean; mode: 'from' | 'to' }>({
-    show: false,
-    mode: 'from',
-  });
 
   const showSuccess = (msg: string) => {
     setToastType('success');
@@ -107,15 +88,6 @@ export default function MasterReportsScreen() {
     setTimeout(() => setToastMessage(''), 3000);
   };
 
-  const handleDateChange = (event: any, selectedDate?: Date) => {
-    const mode = showDatePicker.mode;
-    setShowDatePicker({ show: false, mode });
-    if (selectedDate) {
-      if (mode === 'from') setFromDate(formatDateLocal(selectedDate));
-      else setToDate(formatDateLocal(selectedDate));
-    }
-  };
-
   const selectedReportObj = useMemo(
     () => REPORT_OPTIONS.find((r) => r.id === selectedReport),
     [selectedReport]
@@ -127,12 +99,6 @@ export default function MasterReportsScreen() {
       return;
     }
 
-    const valRes = validateReportDateRange(fromDate, toDate);
-    if (!valRes.isValid) {
-      showError(valRes.errorMessage || 'Invalid date range.');
-      return;
-    }
-
     setIsLoading(true);
 
     try {
@@ -141,9 +107,6 @@ export default function MasterReportsScreen() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           SelectOption: selectedReport,
-          CustomerDateType: customerDateType,
-          DateFrom: fromDate,
-          DateTo: toDate,
         }),
       });
 
@@ -169,8 +132,6 @@ export default function MasterReportsScreen() {
             columns,
             data: reportData,
             totals: reportTotals,
-            fromDate,
-            toDate,
           },
           false
         );
@@ -183,8 +144,6 @@ export default function MasterReportsScreen() {
             columns,
             data: reportData,
             totals: reportTotals,
-            fromDate,
-            toDate,
           },
           true
         );
@@ -196,8 +155,6 @@ export default function MasterReportsScreen() {
           columns,
           data: reportData,
           totals: reportTotals,
-          fromDate,
-          toDate,
         });
         if (ok) showSuccess('PDF downloaded successfully!');
       } else if (actionOption === 'Excel') {
@@ -207,8 +164,6 @@ export default function MasterReportsScreen() {
           columns,
           data: reportData,
           totals: reportTotals,
-          fromDate,
-          toDate,
         });
         if (ok) showSuccess('Excel downloaded successfully!');
       }
@@ -265,10 +220,9 @@ export default function MasterReportsScreen() {
 
       <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
         <View style={styles.filterCard}>
-          {/* TOP ROW: REPORT DROPDOWN & DATES */}
-          <View style={styles.filterRow}>
+          <View style={styles.singleRow}>
             {/* REPORT DROPDOWN */}
-            <View style={styles.fieldColFlex}>
+            <View style={styles.dropdownCol}>
               <ReportDropdown
                 label="Master Report"
                 options={REPORT_OPTIONS}
@@ -283,93 +237,35 @@ export default function MasterReportsScreen() {
               />
             </View>
 
-            {/* FROM DATE */}
-            <ReportDatePicker
-              label="From Date"
-              value={fromDate}
-              onChange={setFromDate}
-              onOpenNative={() => setShowDatePicker({ show: true, mode: 'from' })}
-            />
-
-            {/* TO DATE */}
-            <ReportDatePicker
-              label="To Date"
-              value={toDate}
-              onChange={setToDate}
-              onOpenNative={() => setShowDatePicker({ show: true, mode: 'to' })}
-            />
-          </View>
-
-          {/* CONDITIONAL CUSTOMER DATE TYPE ROW */}
-          {selectedReport === 'Customers' && (
-            <View style={[styles.radioGroupRow, { borderBottomWidth: 1, borderBottomColor: '#F0E6CC', paddingBottom: 10, marginBottom: 12 }]}>
-              <Text style={[styles.fieldLabel, { marginRight: 15, alignSelf: 'center', marginBottom: 0 }]}>Date Filter:</Text>
+            {/* ACTION BUTTONS (4 RADIO BUTTONS) */}
+            <View style={styles.radioGroupCol}>
               <RadioButton
-                label="Date of Birth"
-                selected={customerDateType === 'Date of Birth'}
-                onPress={() => setCustomerDateType('Date of Birth')}
+                label="Preview"
+                selected={actionOption === 'Preview'}
+                onPress={() => setActionOption('Preview')}
               />
               <RadioButton
-                label="Date of Anniversary"
-                selected={customerDateType === 'Date of Anniversary'}
-                onPress={() => setCustomerDateType('Date of Anniversary')}
+                label="Print"
+                selected={actionOption === 'Print'}
+                onPress={() => setActionOption('Print')}
+              />
+              <RadioButton
+                label="PDF"
+                selected={actionOption === 'PDF'}
+                onPress={() => setActionOption('PDF')}
+              />
+              <RadioButton
+                label="Excel"
+                selected={actionOption === 'Excel'}
+                onPress={() => setActionOption('Excel')}
               />
             </View>
-          )}
-
-          {/* ACTION BUTTONS (4 RADIO BUTTONS) */}
-          <View style={styles.radioGroupRow}>
-            <RadioButton
-              label="Preview"
-              selected={actionOption === 'Preview'}
-              onPress={() => setActionOption('Preview')}
-            />
-            <RadioButton
-              label="Print"
-              selected={actionOption === 'Print'}
-              onPress={() => setActionOption('Print')}
-            />
-            <RadioButton
-              label="PDF"
-              selected={actionOption === 'PDF'}
-              onPress={() => setActionOption('PDF')}
-            />
-            <RadioButton
-              label="Excel"
-              selected={actionOption === 'Excel'}
-              onPress={() => setActionOption('Excel')}
-            />
           </View>
         </View>
       </ScrollView>
-
-      {/* MOBILE DATE PICKER */}
-      {showDatePicker.show && Platform.OS !== 'web' && (
-        <DateTimePicker
-          value={new Date()}
-          maximumDate={new Date()}
-          mode="date"
-          display="default"
-          onChange={handleDateChange}
-        />
-      )}
     </SafeAreaView>
   );
 }
-
-const webDateInputStyle: React.CSSProperties = {
-  flex: 1,
-  height: '100%',
-  border: 'none',
-  backgroundColor: 'transparent',
-  outline: 'none',
-  color: TEXT_DARK,
-  paddingLeft: 10,
-  paddingRight: 6,
-  fontSize: 13,
-  cursor: 'pointer',
-  fontFamily: 'Cambria, serif',
-};
 
 const styles = StyleSheet.create({
   safeArea: {
@@ -458,24 +354,25 @@ const styles = StyleSheet.create({
     position: 'relative',
     zIndex: 1,
   },
-  filterRow: {
+  singleRow: {
     flexDirection: 'row',
+    alignItems: 'flex-end',
+    gap: 16,
     flexWrap: 'wrap',
-    gap: 12,
-    marginBottom: 16,
     position: 'relative',
     zIndex: 100,
   },
-  fieldColFlex: {
-    flex: 2,
+  dropdownCol: {
+    width: 280,
     minWidth: 220,
     position: 'relative',
     zIndex: 100,
   },
-  dateCol: {
-    flex: 1,
-    minWidth: 140,
-    zIndex: 1,
+  radioGroupCol: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    flexWrap: 'wrap',
   },
   fieldLabel: {
     fontSize: 12,
@@ -539,37 +436,10 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: GOLD_ACCENT,
   },
-  dateInputContainer: {
-    height: 38,
-    borderWidth: 1,
-    borderColor: GOLD_BORDER,
-    borderRadius: 6,
-    backgroundColor: '#FFFFFF',
-    justifyContent: 'center',
-    overflow: 'hidden',
-  },
-  dateNativeBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 10,
-    height: '100%',
-  },
-  dateNativeText: {
-    fontSize: 13,
-    color: TEXT_DARK,
-    fontFamily: 'Cambria, serif',
-  },
-  radioGroupRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 12,
-    paddingTop: 8,
-  },
   radioBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 6,
+    height: 38,
     paddingHorizontal: 14,
     borderRadius: 6,
     borderWidth: 1,

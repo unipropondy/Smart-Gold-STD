@@ -98,6 +98,7 @@ export const MENU_STRUCTURE: MenuStructure = {
     { id: 'paymodemodification', title: 'Paymode Modification', icon: 'card-outline', color: '#3B82F6', route: '/paymodemodification' },
     { id: 'wholesalepos', title: 'WholeSale POS', icon: 'business-outline', color: '#8B5CF6', route: '/wholesalepos' },
     { id: 'tradeinsales', title: 'Trade In Sales', icon: 'swap-horizontal-outline', color: '#F43F5E', route: '/tradeinsales' },
+    { id: 'tradeingold', title: 'Trade In Gold', icon: 'sparkles-outline', color: '#EAB308', route: '/tradeingold' },
     { id: 'misc', title: 'Misc', icon: 'grid-outline', color: '#6366F1', route: '/misc' },
     { id: 'salesreturn', title: 'Sales Return', icon: 'return-down-back-outline', color: '#EC4899', route: '/salesreturn' },
     { id: 'payout', title: 'Pay Out', icon: 'wallet-outline', color: '#14B8A6', route: '/payout' },

@@ -1,3 +1,4 @@
+/** Developer: Antigravity */
 const express = require("express");
 const router = express.Router();
 const { sql, poolPromise } = require("../db");
@@ -9,515 +10,646 @@ const getPool = async (req) => {
   throw new Error("Database pool is not available.");
 };
 
-// GET /api/tradeingoldissue/customers
-// LOV for Customers
-router.get("/customers", async (req, res) => {
+// 1. GET /api/tradeingoldissue/nextIssueNo
+// VB: objTII.GetNextTradeIssueNo() -> Mid(gthisLocation,1,2) & "65" & Format(NextTradeIssueNo, "000000")
+router.get("/nextIssueNo", async (req, res) => {
   try {
-    const pool = req.pool;
-    const query = `
-      SELECT 
-        CustomerCode, 
-        CustomerName, 
-        Address1, 
-        Address2, 
-        Address3
-      FROM tblCustomer
-      UNION ALL
-      SELECT 
-        MemberCode AS CustomerCode, 
-        MemberName AS CustomerName, 
-        Address1, 
-        Address2, 
-        Address3
-      FROM tblMember
-      ORDER BY CustomerName ASC
-    `;
-    const result = await pool.request().query(query);
-    res.json({ success: true, data: result.recordset });
+    const pool = await getPool(req);
+    const result = await pool.request().query(`
+      SELECT TOP 1 
+        ISNULL(LocationCode, 'HQ') AS LocationCode, 
+        ISNULL(NextTradeIssueNo, 1) AS NextTradeIssueNo 
+      FROM tblCompany
+    `);
+
+    let loc = "HQ";
+    let nextSeq = 1;
+    if (result.recordset && result.recordset.length > 0) {
+      loc = (result.recordset[0].LocationCode || "HQ").trim();
+      nextSeq = parseInt(result.recordset[0].NextTradeIssueNo, 10) || 1;
+    }
+
+    const locPrefix = loc.substring(0, 2);
+    const issueNo = `${locPrefix}65${String(nextSeq).padStart(6, "0")}`;
+
+    res.json({ success: true, issueNo, nextSeq });
   } catch (err) {
-    console.error("Customers Error:", err);
-    res.status(500).json({ success: false, message: "Error fetching customers" });
+    console.error("TradeInIssue nextIssueNo error:", err);
+    res.status(500).json({ success: false, message: "Error generating next issue number", error: err.message });
   }
 });
 
-// GET /api/tradeingoldissue/costpergram/:classcode
-// Get Cost per gram based on Class Code
-router.get("/costpergram/:classcode", async (req, res) => {
+// 2. GET /api/tradeingoldissue/suppliers
+// VB: frmHelpSearch on tblSupplier: SupplierCode, SupplierName, Address1, Address2
+router.get("/suppliers", async (req, res) => {
   try {
-    const pool = req.pool;
-    const { classcode } = req.params;
-    let queryClass = classcode;
+    const pool = await getPool(req);
+    const result = await pool.request().query(`
+      SELECT 
+        RTRIM(LTRIM(SupplierCode)) AS SupplierCode, 
+        RTRIM(LTRIM(ISNULL(SupplierName, ''))) AS SupplierName, 
+        RTRIM(LTRIM(ISNULL(Address1, ''))) AS Address1, 
+        RTRIM(LTRIM(ISNULL(Address2, ''))) AS Address2 
+      FROM tblSupplier 
+      ORDER BY SupplierCode ASC
+    `);
+    res.json({ success: true, data: result.recordset || [] });
+  } catch (err) {
+    console.error("TradeInIssue suppliers error:", err);
+    res.status(500).json({ success: false, message: "Error fetching suppliers", error: err.message });
+  }
+});
 
-    // Handle mapping exactly like VB code
-    if (classcode === "22K") queryClass = "22K%";
-    else if (classcode === "18K") queryClass = "18K%";
-    else queryClass = classcode + "%";
-
-    const query = `SELECT Rate FROM tblClass WHERE ClassCode LIKE @ClassCode`;
+// 2b. GET /api/tradeingoldissue/supplier/:code
+// VB: subGetSupplier -> objSupp.GetSupplierDetail
+router.get("/supplier/:code", async (req, res) => {
+  try {
+    const { code } = req.params;
+    const pool = await getPool(req);
     const result = await pool.request()
-      .input('ClassCode', sql.VarChar, queryClass)
-      .query(query);
+      .input("SupplierCode", sql.VarChar, (code || "").trim())
+      .query(`
+        SELECT TOP 1 
+          RTRIM(LTRIM(SupplierCode)) AS SupplierCode, 
+          RTRIM(LTRIM(ISNULL(SupplierName, ''))) AS SupplierName, 
+          RTRIM(LTRIM(ISNULL(Address1, ''))) AS Address1, 
+          RTRIM(LTRIM(ISNULL(Address2, ''))) AS Address2 
+        FROM tblSupplier 
+        WHERE SupplierCode = @SupplierCode
+      `);
 
-    if (result.recordset.length > 0) {
-      res.json({ success: true, Rate: result.recordset[0].Rate });
+    if (result.recordset && result.recordset.length > 0) {
+      res.json({ success: true, data: result.recordset[0] });
     } else {
-      // Fallback
-      const fallbackQuery = `SELECT TOP 1 Rate FROM tblClass`;
-      const fbResult = await pool.request().query(fallbackQuery);
-      if (fbResult.recordset.length > 0) {
-        res.json({ success: true, Rate: fbResult.recordset[0].Rate });
-      } else {
-        res.json({ success: true, Rate: 0 });
-      }
+      res.json({ success: false, message: "Supplier not found" });
     }
   } catch (err) {
-    console.error("Cost Per Gram Error:", err);
-    res.status(500).json({ success: false, message: "Error fetching cost per gram" });
+    console.error("TradeInIssue supplier by code error:", err);
+    res.status(500).json({ success: false, message: "Error fetching supplier", error: err.message });
   }
 });
 
-// POST /api/tradeingoldissue/save
-// Save Trade In Gold Issue Transaction
-router.post("/save", async (req, res) => {
-  let transaction;
+// 3. GET /api/tradeingoldissue/currencies
+// VB: frmHelpSearch on tblCurrency: CurrencyCode, CurrencyName, CurrencyRate, Remarks
+router.get("/currencies", async (req, res) => {
   try {
-    const pool = req.pool;
-    transaction = new sql.Transaction(pool);
+    const pool = await getPool(req);
+    const result = await pool.request().query(`
+      SELECT 
+        RTRIM(LTRIM(CurrencyCode)) AS CurrencyCode, 
+        RTRIM(LTRIM(ISNULL(CurrencyName, ''))) AS CurrencyName, 
+        ISNULL(CurrencyRate, 1.0) AS CurrencyRate, 
+        RTRIM(LTRIM(ISNULL(Remarks, ''))) AS Remarks 
+      FROM tblCurrency 
+      ORDER BY CurrencyCode ASC
+    `);
+    res.json({ success: true, data: result.recordset || [] });
+  } catch (err) {
+    console.error("TradeInIssue currencies error:", err);
+    res.status(500).json({ success: false, message: "Error fetching currencies", error: err.message });
+  }
+});
 
+// 3b. GET /api/tradeingoldissue/currency/:code
+// VB: subGetCurrency -> objCurr.GetCurrencyDetail
+router.get("/currency/:code", async (req, res) => {
+  try {
+    const { code } = req.params;
+    const pool = await getPool(req);
+    const result = await pool.request()
+      .input("CurrencyCode", sql.VarChar, (code || "").trim())
+      .query(`
+        SELECT TOP 1 
+          RTRIM(LTRIM(CurrencyCode)) AS CurrencyCode, 
+          RTRIM(LTRIM(ISNULL(CurrencyName, ''))) AS CurrencyName, 
+          ISNULL(CurrencyRate, 1.0) AS CurrencyRate, 
+          RTRIM(LTRIM(ISNULL(Remarks, ''))) AS Remarks 
+        FROM tblCurrency 
+        WHERE CurrencyCode = @CurrencyCode
+      `);
+
+    if (result.recordset && result.recordset.length > 0) {
+      res.json({ success: true, data: result.recordset[0] });
+    } else {
+      res.json({ success: false, message: "Currency not found" });
+    }
+  } catch (err) {
+    console.error("TradeInIssue currency by code error:", err);
+    res.status(500).json({ success: false, message: "Error fetching currency", error: err.message });
+  }
+});
+
+// 4. GET /api/tradeingoldissue/tradebills
+// VB: btnTradeBillNoSearch_Click -> tblTradeInHeader WHERE ((IssueFlag is Null) or (IssueFlag <> 'Y'))
+// AND BalanceWeight > 0
+router.get("/tradebills", async (req, res) => {
+  try {
+    const pool = await getPool(req);
+    const query = `
+      SELECT 
+        RTRIM(LTRIM(InvoiceNo)) AS InvoiceNo, 
+        RTRIM(LTRIM(ISNULL(InventoryCode, ''))) AS InventoryCode, 
+        ISNULL(Weight, ISNULL(TotalWeight, 0)) AS TotalWeight, 
+        ISNULL(IssuedWeight, 0) AS IssuedWeight, 
+        ISNULL(BalanceWeight, ISNULL(Weight, ISNULL(TotalWeight, 0))) AS BalanceWeight, 
+        ISNULL(TradeInAmount, ISNULL(TotalCost, 0)) AS Amount, 
+        ISNULL(ModifyDate, CreateDate) AS ModifyDate, 
+        RTRIM(LTRIM(ISNULL(CustomerCode, ''))) AS CustomerCode 
+      FROM tblTradeInHeader 
+      WHERE (IssueFlag IS NULL OR RTRIM(LTRIM(IssueFlag)) <> 'Y') 
+        AND (ISNULL(BalanceWeight, ISNULL(Weight, ISNULL(TotalWeight, 0))) > 0) 
+      ORDER BY InvoiceNo DESC
+    `;
+    const result = await pool.request().query(query);
+    res.json({ success: true, data: result.recordset || [] });
+  } catch (err) {
+    console.error("TradeInIssue tradebills error:", err);
+    res.status(500).json({ success: false, message: "Error fetching trade bills", error: err.message });
+  }
+});
+
+// 4b. GET /api/tradeingoldissue/tradebill/:invoiceno
+// VB: objTIS.GetTradeInBalance(Trim(txtTradeBillNo.Text)) -> tblTradeInHeader WHERE InvoiceNo = ... AND BalanceWeight > 0
+router.get("/tradebill/:invoiceno", async (req, res) => {
+  try {
+    const { invoiceno } = req.params;
+    const pool = await getPool(req);
+    const result = await pool.request()
+      .input("InvoiceNo", sql.VarChar, (invoiceno || "").trim())
+      .query(`
+        SELECT TOP 1 
+          RTRIM(LTRIM(InvoiceNo)) AS InvoiceNo, 
+          RTRIM(LTRIM(ISNULL(InventoryCode, ''))) AS InventoryCode, 
+          ISNULL(Weight, ISNULL(TotalWeight, 0)) AS TotalWeight, 
+          ISNULL(IssuedWeight, 0) AS IssuedWeight, 
+          ISNULL(BalanceWeight, ISNULL(Weight, ISNULL(TotalWeight, 0))) AS BalanceWeight, 
+          ISNULL(TradeInAmount, ISNULL(TotalCost, 0)) AS Amount, 
+          ISNULL(ModifyDate, CreateDate) AS ModifyDate, 
+          RTRIM(LTRIM(ISNULL(CustomerCode, ''))) AS CustomerCode 
+        FROM tblTradeInHeader 
+        WHERE InvoiceNo = @InvoiceNo 
+          AND (ISNULL(BalanceWeight, ISNULL(Weight, ISNULL(TotalWeight, 0))) > 0)
+      `);
+
+    if (result.recordset && result.recordset.length > 0) {
+      res.json({ success: true, data: result.recordset[0] });
+    } else {
+      res.json({ success: false, message: "Trade bill not found or balance weight is 0" });
+    }
+  } catch (err) {
+    console.error("TradeInIssue tradebill lookup error:", err);
+    res.status(500).json({ success: false, message: "Error retrieving trade bill", error: err.message });
+  }
+});
+
+// 5. GET /api/tradeingoldissue/history
+// VB: btnIssueNoSearch_Click -> tblTradeIssueHistory: TradeIssueNo, SupplierCode, SupplierName, CustomerCode, InvoiceNo
+router.get("/history", async (req, res) => {
+  try {
+    const pool = await getPool(req);
+    const query = `
+      SELECT DISTINCT 
+        RTRIM(LTRIM(h.TradeIssueNo)) AS TradeIssueNo, 
+        RTRIM(LTRIM(h.SupplierCode)) AS SupplierCode, 
+        RTRIM(LTRIM(ISNULL(s.SupplierName, ''))) AS SupplierName, 
+        h.Date AS IssueDate, 
+        ISNULL(h.IssuedWeight, 0) AS IssuedWeight, 
+        ISNULL(h.TotalCost, 0) AS TotalCost 
+      FROM tblTradeIssueHistory h 
+      LEFT JOIN tblSupplier s ON h.SupplierCode = s.SupplierCode 
+      ORDER BY h.TradeIssueNo DESC
+    `;
+    const result = await pool.request().query(query);
+    res.json({ success: true, data: result.recordset || [] });
+  } catch (err) {
+    console.error("TradeInIssue history error:", err);
+    res.status(500).json({ success: false, message: "Error fetching history", error: err.message });
+  }
+});
+
+// 5b. GET /api/tradeingoldissue/history/:issueno
+// VB: objTII.GetTradeIssueHistory(txtTradeIssueNo.Text.Trim)
+router.get("/history/:issueno", async (req, res) => {
+  try {
+    const { issueno } = req.params;
+    const pool = await getPool(req);
+    const result = await pool.request()
+      .input("TradeIssueNo", sql.VarChar, (issueno || "").trim())
+      .query(`
+        SELECT 
+          h.*, 
+          RTRIM(LTRIM(ISNULL(s.SupplierName, ''))) AS SupplierName 
+        FROM tblTradeIssueHistory h 
+        LEFT JOIN tblSupplier s ON h.SupplierCode = s.SupplierCode 
+        WHERE h.TradeIssueNo = @TradeIssueNo
+      `);
+
+    res.json({ success: true, data: result.recordset || [] });
+  } catch (err) {
+    console.error("TradeInIssue history detail error:", err);
+    res.status(500).json({ success: false, message: "Error fetching history details", error: err.message });
+  }
+});
+
+// 6. POST /api/tradeingoldissue/proceed
+// VB: btnProceed_Click -> loops through grdGoldIssue, calls sp_UpdateTradeInHeader & sp_TradeIssueHistory, updates tblCompany.NextTradeIssueNo
+router.post("/proceed", async (req, res) => {
+  let pool;
+  try {
+    pool = await getPool(req);
+  } catch (pErr) {
+    return res.status(500).json({ success: false, message: pErr.message });
+  }
+
+  const transaction = new sql.Transaction(pool);
+
+  try {
     const {
-      customerCode,
-      customerName,
-      address1,
-      address2,
-      address3,
-      lossPerc,
-      costPerGram,
-      remarks,
-      items // The grid items
+      issueNo,
+      issueDate,
+      supplierCode,
+      currencyCode,
+      currencyRate = 1.0,
+      totalIssuedWt = 0,
+      totalNoOfBills = 0,
+      costPerGram = 0,
+      totalPrice = 0,
+      userId = "ADMIN",
+      items = []
     } = req.body;
 
-    if (!items || items.length === 0) {
-      return res.status(400).json({ success: false, message: "At least one item is required in the grid." });
+    if (!supplierCode || !supplierCode.trim()) {
+      return res.status(400).json({ success: false, message: "Supplier cannot be blank!" });
+    }
+    if (!currencyCode || !currencyCode.trim()) {
+      return res.status(400).json({ success: false, message: "Currency cannot be blank!" });
+    }
+    const nIssuedWt = parseFloat(totalIssuedWt) || 0;
+    if (nIssuedWt <= 0) {
+      return res.status(400).json({ success: false, message: "Gold Issued Actual Weight Should Not Be 0 !!!" });
+    }
+    if (!items || !Array.isArray(items) || items.length === 0) {
+      return res.status(400).json({ success: false, message: "Please enter Trade In Gold items in the grid!" });
     }
 
     await transaction.begin();
 
-    // Generate Invoice No (TI-XXXX)
+    // 1. Fetch current sequence and generate final TradeIssueNo
     const seqReq = new sql.Request(transaction);
     const seqRes = await seqReq.query(`
-      SELECT ISNULL(NextTradeInRefNo, 1) as NextNo FROM tblCompany
-    `);
-    const nextNo = seqRes.recordset[0].NextNo;
-    const invoiceNo = nextNo.toString();
-    const inventoryCode = "TI-" + invoiceNo;
-
-    // Update Sequence
-    const updSeqReq = new sql.Request(transaction);
-    await updSeqReq.query(`
-      UPDATE tblCompany SET NextTradeInRefNo = ISNULL(NextTradeInRefNo, 1) + 1
+      SELECT TOP 1 
+        ISNULL(LocationCode, 'HQ') AS LocationCode, 
+        ISNULL(NextTradeIssueNo, 1) AS NextTradeIssueNo 
+      FROM tblCompany
     `);
 
-    // Delete existing if any (just in case)
-    const delHeader = new sql.Request(transaction);
-    await delHeader.input("InventoryCode", sql.VarChar, inventoryCode)
-      .query(`DELETE FROM tblTradeInHeader WHERE InventoryCode = @InventoryCode`);
+    let loc = "HQ";
+    let nextSeq = 1;
+    if (seqRes.recordset && seqRes.recordset.length > 0) {
+      loc = (seqRes.recordset[0].LocationCode || "HQ").trim();
+      nextSeq = parseInt(seqRes.recordset[0].NextTradeIssueNo, 10) || 1;
+    }
 
-    const delDetail = new sql.Request(transaction);
-    await delDetail.input("InventoryCode", sql.VarChar, inventoryCode)
-      .query(`DELETE FROM tblTradeInDetail WHERE InventoryCode = @InventoryCode`);
+    const locPrefix = loc.substring(0, 2);
+    const finalTradeIssueNo = issueNo && issueNo.trim() ? issueNo.trim() : `${locPrefix}65${String(nextSeq).padStart(6, "0")}`;
 
-    // Calculate Totals
-    let totalWeight = 0;
-    let totalGoldLoss = 0;
-    let totalStoneWeight = 0;
-    let totalPCS = 0;
-    let totalAmount = 0;
-    let totalMC = 0;
+    let totPurchaseWeight = nIssuedWt;
 
-    items.forEach(item => {
-      totalWeight += parseFloat(item.weight) || 0;
-      totalGoldLoss += parseFloat(item.goldLoss) || 0;
-      totalStoneWeight += parseFloat(item.stoneWeight) || 0;
-      totalPCS += 1;
-      totalAmount += parseFloat(item.totalCost) || 0;
-      totalMC += parseFloat(item.pmc) || 0;
-    });
+    // 2. Loop through grid items matching VB btnProceed_Click logic
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      const invNo = (item.InvoiceNo || "").trim();
 
-    // Insert Header
-    const insHeader = new sql.Request(transaction);
-    await insHeader
-      .input("InventoryCode", sql.VarChar, inventoryCode)
-      .input("InvoiceNo", sql.VarChar, invoiceNo)
-      .input("CustomerCode", sql.VarChar, customerCode || "")
-      .input("CustomerName", sql.VarChar, customerName || "")
-      .input("Address1", sql.VarChar, address1 || "")
-      .input("Address2", sql.VarChar, address2 || "")
-      .input("Address3", sql.VarChar, address3 || "")
-      .input("CostPerGram", sql.Numeric(18, 4), parseFloat(costPerGram) || 0)
-      .input("Weight", sql.Numeric(18, 4), totalWeight)
-      .input("GoldLoss", sql.Numeric(18, 4), totalGoldLoss)
-      .input("StoneWeight", sql.Numeric(18, 4), totalStoneWeight)
-      .input("PCS", sql.Int, totalPCS)
-      .input("TotalCost", sql.Numeric(18, 2), totalAmount)
-      .input("TradeInAmount", sql.Numeric(18, 2), totalAmount)
-      .input("Date", sql.DateTime, new Date())
-      .query(`
-        INSERT INTO tblTradeInHeader (
-          InventoryCode, InvoiceNo, CustomerCode, CustomerName, Address1, Address2, Address3,
-          CostPerGram, Weight, GoldLoss, StoneWeight, PCS, TotalCost, TradeInAmount, Date, IssueFlag
-        ) VALUES (
-          @InventoryCode, @InvoiceNo, @CustomerCode, @CustomerName, @Address1, @Address2, @Address3,
-          @CostPerGram, @Weight, @GoldLoss, @StoneWeight, @PCS, @TotalCost, @TradeInAmount, @Date, 'N'
-        )
+      // Retrieve Trade In Header for current InvoiceNo
+      const thReq = new sql.Request(transaction);
+      thReq.input("InvNo", sql.VarChar, invNo);
+      const thRes = await thReq.query(`
+        SELECT TOP 1 * 
+        FROM tblTradeInHeader 
+        WHERE InvoiceNo = @InvNo
       `);
 
-    // Insert Details
-    let sNo = 1;
-    for (const item of items) {
-      const insDetail = new sql.Request(transaction);
-      await insDetail
-        .input("InventoryCode", sql.VarChar, inventoryCode)
-        .input("SNo", sql.Int, sNo++)
-        .input("Description", sql.VarChar, item.description || "")
-        .input("DiamondDescription", sql.VarChar, item.stoneDescription || "")
-        .input("Weight", sql.Numeric(18, 4), parseFloat(item.weight) || 0)
-        .input("StoneWeight", sql.Numeric(18, 4), parseFloat(item.stoneWeight) || 0)
-        .input("GoldLoss", sql.Numeric(18, 4), parseFloat(item.goldLoss) || 0)
-        .input("CostPerGram", sql.Numeric(18, 4), parseFloat(item.costPerGram) || 0)
-        .input("TotalCost", sql.Numeric(18, 2), parseFloat(item.totalCost) || 0)
-        .input("Class", sql.VarChar, item.class || "")
-        .query(`
-          INSERT INTO tblTradeInDetail (
-            InventoryCode, SNo, Description, DiamondDescription, Weight, StoneWeight, 
-            GoldLoss, CostPerGram, TotalCost, Class
-          ) VALUES (
-            @InventoryCode, @SNo, @Description, @DiamondDescription, @Weight, @StoneWeight,
-            @GoldLoss, @CostPerGram, @TotalCost, @Class
-          )
-        `);
+      if (thRes.recordset && thRes.recordset.length > 0) {
+        const row = thRes.recordset[0];
+        const balWeight = parseFloat(row.BalanceWeight || row.Weight || row.TotalWeight || 0);
+        let tempPurWeight = 0;
+
+        if (totPurchaseWeight >= balWeight) {
+          totPurchaseWeight -= balWeight;
+          tempPurWeight = balWeight;
+        } else {
+          tempPurWeight = totPurchaseWeight;
+          totPurchaseWeight = 0;
+        }
+
+        // Execute sp_UpdateTradeInHeader
+        try {
+          const spUpdReq = new sql.Request(transaction);
+          spUpdReq.input("SIssueNo", sql.VarChar, finalTradeIssueNo);
+          spUpdReq.input("InvoiceNo", sql.VarChar, invNo);
+          spUpdReq.input("InventoryCode", sql.VarChar, row.InventoryCode || invNo);
+          spUpdReq.input("TempPurWeight", sql.Decimal(18, 4), tempPurWeight);
+          spUpdReq.input("Supplier", sql.VarChar, supplierCode.trim());
+          spUpdReq.input("UserID", sql.VarChar, userId);
+          spUpdReq.input("ActualIssuedWeight", sql.Decimal(18, 4), 0);
+          spUpdReq.input("Remarks", sql.VarChar, "");
+
+          await spUpdReq.execute("sp_UpdateTradeInHeader");
+        } catch (spErr) {
+          // If stored procedure doesn't exist or fails, execute exact equivalent SQL
+          const directUpd = new sql.Request(transaction);
+          directUpd.input("InvoiceNo", sql.VarChar, invNo);
+          directUpd.input("IssueWt", sql.Decimal(18, 4), tempPurWeight);
+          await directUpd.query(`
+            UPDATE tblTradeInHeader SET 
+              IssuedWeight = ISNULL(IssuedWeight, 0) + @IssueWt, 
+              BalanceWeight = CASE 
+                WHEN ISNULL(BalanceWeight, ISNULL(Weight, TotalWeight)) - @IssueWt < 0 THEN 0 
+                ELSE ISNULL(BalanceWeight, ISNULL(Weight, TotalWeight)) - @IssueWt 
+              END, 
+              IssueFlag = CASE 
+                WHEN ISNULL(BalanceWeight, ISNULL(Weight, TotalWeight)) - @IssueWt <= 0 THEN 'Y' 
+                ELSE 'P' 
+              END 
+            WHERE InvoiceNo = @InvoiceNo
+          `);
+        }
+
+        // Save into tblTradeIssueHistory using sp_TradeIssueHistory or direct INSERT
+        try {
+          const spHist = new sql.Request(transaction);
+          spHist.input("TradeIssueNo", sql.VarChar, finalTradeIssueNo);
+          spHist.input("InventoryCode", sql.VarChar, row.InventoryCode || invNo);
+          spHist.input("InvoiceNo", sql.VarChar, invNo);
+          spHist.input("LocationCode", sql.VarChar, loc);
+          spHist.input("CustomerCode", sql.VarChar, row.CustomerCode || "");
+          spHist.input("CustomerName", sql.VarChar, row.CustomerName || "");
+          spHist.input("Address1", sql.VarChar, row.Address1 || "");
+          spHist.input("Address2", sql.VarChar, row.Address2 || "");
+          spHist.input("Address3", sql.VarChar, row.Address3 || "");
+          spHist.input("CostPerGram", sql.Decimal(18, 3), parseFloat(row.CostPerGram) || 0);
+          spHist.input("TotalWeight", sql.Decimal(18, 3), parseFloat(row.Weight || row.TotalWeight) || 0);
+          spHist.input("IssuedWeight", sql.Decimal(18, 3), tempPurWeight);
+          spHist.input("BalanceWeight", sql.Decimal(18, 3), Math.max(0, balWeight - tempPurWeight));
+          spHist.input("StoneWeight", sql.Decimal(18, 3), parseFloat(row.StoneWeight) || 0);
+          spHist.input("MC", sql.Decimal(18, 2), 0);
+          spHist.input("PCS", sql.Decimal(18, 2), parseFloat(row.PCS) || 1);
+          spHist.input("GoldLoss", sql.Decimal(18, 3), parseFloat(row.GoldLoss) || 0);
+          spHist.input("TotalCost", sql.Decimal(18, 2), parseFloat(row.TotalCost) || 0);
+          spHist.input("Amount", sql.Decimal(18, 2), parseFloat(row.TradeInAmount || row.TotalCost) || 0);
+          spHist.input("Remarks", sql.VarChar, row.Remarks || "");
+          spHist.input("SoldFlag", sql.VarChar, "N");
+          spHist.input("UserID", sql.VarChar, userId);
+
+          await spHist.execute("sp_TradeIssueHistory");
+        } catch (spHistErr) {
+          const directHist = new sql.Request(transaction);
+          directHist
+            .input("TradeIssueNo", sql.VarChar, finalTradeIssueNo)
+            .input("InventoryCode", sql.VarChar, row.InventoryCode || invNo)
+            .input("InvoiceNo", sql.VarChar, invNo)
+            .input("LocationCode", sql.VarChar, loc)
+            .input("SupplierCode", sql.VarChar, supplierCode.trim())
+            .input("CustomerCode", sql.VarChar, row.CustomerCode || "")
+            .input("CustomerName", sql.VarChar, row.CustomerName || "")
+            .input("Address1", sql.VarChar, row.Address1 || "")
+            .input("Address2", sql.VarChar, row.Address2 || "")
+            .input("Address3", sql.VarChar, row.Address3 || "")
+            .input("CostPerGram", sql.Decimal(18, 3), parseFloat(row.CostPerGram) || 0)
+            .input("TotalWeight", sql.Decimal(18, 3), parseFloat(row.Weight || row.TotalWeight) || 0)
+            .input("IssuedWeight", sql.Decimal(18, 3), tempPurWeight)
+            .input("BalanceWeight", sql.Decimal(18, 3), Math.max(0, balWeight - tempPurWeight))
+            .input("StoneWeight", sql.Decimal(18, 3), parseFloat(row.StoneWeight) || 0)
+            .input("MC", sql.Decimal(18, 2), 0)
+            .input("PCS", sql.Decimal(18, 2), parseFloat(row.PCS) || 1)
+            .input("GoldLoss", sql.Decimal(18, 3), parseFloat(row.GoldLoss) || 0)
+            .input("TotalCost", sql.Decimal(18, 2), parseFloat(row.TotalCost) || 0)
+            .input("Amount", sql.Decimal(18, 2), parseFloat(row.TradeInAmount || row.TotalCost) || 0)
+            .input("Remarks", sql.VarChar, row.Remarks || "")
+            .input("SoldFlag", sql.VarChar, "N")
+            .input("UserID", sql.VarChar, userId);
+
+          await directHist.query(`
+            INSERT INTO tblTradeIssueHistory (
+              TradeIssueNo, InventoryCode, InvoiceNo, LocationCode, SupplierCode,
+              CustomerCode, CustomerName, Address1, Address2, Address3,
+              CostPerGram, TotalWeight, IssuedWeight, BalanceWeight, StoneWeight,
+              MC, PCS, GoldLoss, TotalCost, Amount,
+              Remarks, SoldFlag, Date, UserID
+            ) VALUES (
+              @TradeIssueNo, @InventoryCode, @InvoiceNo, @LocationCode, @SupplierCode,
+              @CustomerCode, @CustomerName, @Address1, @Address2, @Address3,
+              @CostPerGram, @TotalWeight, @IssuedWeight, @BalanceWeight, @StoneWeight,
+              @MC, @PCS, @GoldLoss, @TotalCost, @Amount,
+              @Remarks, @SoldFlag, GETDATE(), @UserID
+            )
+          `);
+        }
+      }
     }
+
+    // 3. Update Sequence in tblCompany: NextTradeIssueNo = NextTradeIssueNo + 1
+    const updComp = new sql.Request(transaction);
+    await updComp.query(`
+      UPDATE tblCompany 
+      SET NextTradeIssueNo = ISNULL(NextTradeIssueNo, 1) + 1
+    `);
 
     await transaction.commit();
-    res.json({ success: true, message: "Trade In Gold Saved Successfully", invoiceNo: inventoryCode });
-
-  } catch (err) {
-    if (transaction) await transaction.rollback();
-    console.error("TradeIn Gold Save Error:", err);
-    res.status(500).json({ success: false, message: "Error saving trade in gold", error: err.message });
-  }
-});
-
-// GET /api/tradeingoldissue/print-data
-// Fetch actual Trade-In voucher data from SQL Server for printing
-router.get("/print-data", async (req, res) => {
-  try {
-    const { invoiceNo } = req.query;
-    if (!invoiceNo || !invoiceNo.trim()) {
-      return res.status(400).json({ success: false, message: "Voucher / Invoice Number is required for print." });
-    }
-
-    const pool = req.pool;
-    const cleanNo = invoiceNo.trim();
-
-    // 1. Fetch Company Information
-    const compRes = await pool.request().query("SELECT TOP 1 * FROM tblCompany");
-    const rawCompany = compRes.recordset[0] || {};
-    const company = {
-      name: String(rawCompany.Name || rawCompany.CompanyName || '').trim(),
-      address1: String(rawCompany.Address1 || '').trim(),
-      address2: String(rawCompany.Address2 || '').trim(),
-      city: String(rawCompany.City || '').trim(),
-      state: String(rawCompany.State || '').trim(),
-      country: String(rawCompany.Country || '').trim(),
-      phone: String(rawCompany.Phone || '').trim(),
-      fax: String(rawCompany.Fax || '').trim(),
-    };
-
-    // 2. Fetch Header Information from tblTradeInHeader
-    let headerQuery = `
-      SELECT TOP 1 *
-      FROM tblTradeInHeader
-      WHERE RTRIM(LTRIM(CAST(InvoiceNo AS VARCHAR(50)))) = @InvoiceNo
-         OR RTRIM(LTRIM(CAST(InventoryCode AS VARCHAR(50)))) = @InvoiceNo
-         OR RTRIM(LTRIM(CAST(InventoryCode AS VARCHAR(50)))) = 'TI-' + @InvoiceNo
-    `;
-    let headerRes = await pool.request()
-      .input("InvoiceNo", sql.VarChar(50), cleanNo)
-      .query(headerQuery);
-
-    if (headerRes.recordset.length === 0) {
-      return res.status(404).json({ success: false, message: `Trade-in voucher not found for: ${cleanNo}` });
-    }
-
-    const rawHeader = headerRes.recordset[0];
-    const header = {
-      inventoryCode: String(rawHeader.InventoryCode || '').trim(),
-      invoiceNo: String(rawHeader.InvoiceNo || cleanNo).trim(),
-      customerCode: String(rawHeader.CustomerCode || '').trim(),
-      customerName: String(rawHeader.CustomerName || '').trim(),
-      address1: String(rawHeader.Address1 || '').trim(),
-      address2: String(rawHeader.Address2 || '').trim(),
-      address3: String(rawHeader.Address3 || '').trim(),
-      costPerGram: parseFloat(rawHeader.CostPerGram || 0),
-      totalWeight: parseFloat(rawHeader.TotalWeight || 0),
-      totalGoldLoss: parseFloat(rawHeader.TotalGoldLoss || 0),
-      totalStoneWeight: parseFloat(rawHeader.TotalStoneWeight || 0),
-      totalPCS: parseInt(rawHeader.TotalPCS || 0, 10),
-      totalCost: parseFloat(rawHeader.TotalCost || 0),
-      amount: parseFloat(rawHeader.Amount || rawHeader.TradeInAmount || rawHeader.TotalCost || 0),
-      remarks: String(rawHeader.Remarks || '').trim(),
-      date: rawHeader.CreateDate || rawHeader.Date || null,
-    };
-
-    // 3. Fetch Detail items from tblTradeInDetail
-    const targetInvCode = header.inventoryCode || cleanNo;
-    let detailQuery = `
-      SELECT *
-      FROM tblTradeInDetail
-      WHERE RTRIM(LTRIM(CAST(InventoryCode AS VARCHAR(50)))) = @InventoryCode
-         OR RTRIM(LTRIM(CAST(InvoiceNo AS VARCHAR(50)))) = @InvoiceNo
-      ORDER BY ItemNo ASC
-    `;
-    let detailRes = await pool.request()
-      .input("InventoryCode", sql.VarChar(50), targetInvCode)
-      .input("InvoiceNo", sql.VarChar(50), header.invoiceNo)
-      .query(detailQuery);
-
-    const details = detailRes.recordset.map((row, idx) => ({
-      itemNo: row.ItemNo !== null && row.ItemNo !== undefined ? row.ItemNo : (idx + 1),
-      description: String(row.Description || '').trim(),
-      diamondDescription: String(row.DiamondDescription || '').trim(),
-      weight: parseFloat(row.Weight || 0),
-      stoneWeight: parseFloat(row.StoneWeight || 0),
-      goldLoss: parseFloat(row.GoldLoss || 0),
-      costPerGram: parseFloat(row.CostPerGram || 0),
-      totalCost: parseFloat(row.TotalCost || 0),
-      class: String(row.Class || '').trim(),
-      remarks: String(row.Remarks || '').trim(),
-    }));
-
-    // 4. Fetch Gold Purity Benchmark Rates from tblClass
-    let rates = { rate999: '', rate916: '', rate835: '', rate22k: '' };
-    try {
-      const classRes = await pool.request().query("SELECT ClassCode, Rate FROM tblClass");
-      classRes.recordset.forEach(r => {
-        const code = String(r.ClassCode || '').trim().toUpperCase();
-        const val = parseFloat(r.Rate || 0).toFixed(2);
-        if (code.startsWith('999') || code.startsWith('24K')) rates.rate999 = val;
-        else if (code.startsWith('916') || code.startsWith('22K')) {
-          rates.rate916 = val;
-          rates.rate22k = val;
-        } else if (code.startsWith('835')) rates.rate835 = val;
-      });
-    } catch (eRates) {}
 
     res.json({
       success: true,
-      data: {
-        company,
-        header,
-        details,
-        rates,
-      }
+      message: "Tradein Gold Issued Successfully",
+      tradeIssueNo: finalTradeIssueNo
     });
-
-  } catch (error) {
-    console.error("Fetch Trade In Print Data Error:", error);
-    res.status(500).json({ success: false, message: "Error fetching trade-in print data: " + error.message });
-  }
-});
-
-// ================= EXPORT PDF ENDPOINT =================
-// POST /api/tradeingoldissue/export-pdf
-router.post("/export-pdf", async (req, res) => {
-  try {
-    const { html, filename } = req.body;
-    if (!html) {
-      return res.status(400).json({ success: false, message: "HTML content is required for PDF export." });
-    }
-
-    const { convertHtmlToPdf } = require("../utils/htmlToPdf");
-    const pdfBuffer = await convertHtmlToPdf(html);
-    const downloadName = (filename || "Trade_In_Gold_Issue_Voucher.pdf").replace(/[^a-zA-Z0-9_\-\.]/g, "_");
-
-    res.setHeader("Content-Type", "application/pdf");
-    res.setHeader("Content-Disposition", `attachment; filename="${downloadName}"`);
-    res.setHeader("Content-Length", pdfBuffer.length);
-    return res.send(pdfBuffer);
   } catch (err) {
-    console.error("Trade In Gold Issue Export PDF Error:", err);
-    return res.status(500).json({ success: false, message: "Failed to generate PDF: " + err.message });
+    if (transaction) {
+      try { await transaction.rollback(); } catch (rErr) {}
+    }
+    console.error("TradeInIssue proceed error:", err);
+    res.status(500).json({ success: false, message: "Error in save", error: err.message });
   }
 });
 
-// ================= EXPORT EXCEL ENDPOINT =================
-// POST /api/tradeingoldissue/export-excel
-router.post("/export-excel", async (req, res) => {
+// Aliases for frontend LOV paths
+router.get("/lov/suppliers", async (req, res) => {
   try {
-    const { invoiceNo, isReprint } = req.body;
-    const cleanNo = (invoiceNo || "").trim();
-    if (!cleanNo) {
-      return res.status(400).json({ success: false, message: "Voucher / Invoice Number is required." });
-    }
-
     const pool = await getPool(req);
-
-    // 1. Company
-    const compResult = await pool.request().query("SELECT TOP 1 * FROM tblCompany");
-    const compRow = compResult.recordset[0] || {};
-    const companyName = String(compRow.Name || compRow.CompanyName || "SMART").trim();
-    const companyAddress = [compRow.Address1, compRow.Address2, compRow.City, compRow.Country].filter(Boolean).map(s => String(s).trim()).join(" ");
-
-    // 2. Header
-    let headerQuery = `
-      SELECT TOP 1 *
-      FROM tblTradeInHeader
-      WHERE RTRIM(LTRIM(CAST(InvoiceNo AS VARCHAR(50)))) = @InvoiceNo
-         OR RTRIM(LTRIM(CAST(InventoryCode AS VARCHAR(50)))) = @InvoiceNo
-         OR RTRIM(LTRIM(CAST(InventoryCode AS VARCHAR(50)))) = 'TI-' + @InvoiceNo
-    `;
-    let headerRes = await pool.request()
-      .input("InvoiceNo", sql.VarChar(50), cleanNo)
-      .query(headerQuery);
-
-    if (headerRes.recordset.length === 0) {
-      return res.status(404).json({ success: false, message: `Trade In Gold Issue record "${cleanNo}" not found.` });
-    }
-
-    const header = headerRes.recordset[0];
-    const targetInvCode = String(header.InventoryCode || cleanNo).trim();
-
-    // 3. Details
-    let detailQuery = `
-      SELECT *
-      FROM tblTradeInDetail
-      WHERE RTRIM(LTRIM(CAST(InventoryCode AS VARCHAR(50)))) = @InventoryCode
-         OR RTRIM(LTRIM(CAST(InvoiceNo AS VARCHAR(50)))) = @InvoiceNo
-    `;
-    let detailRes = await pool.request()
-      .input("InventoryCode", sql.VarChar(50), targetInvCode)
-      .input("InvoiceNo", sql.VarChar(50), String(header.InvoiceNo || cleanNo).trim())
-      .query(detailQuery);
-    const details = detailRes.recordset || [];
-
-    // 4. Gold Rates
-    const ratesResult = await pool.request().query("SELECT ClassCode, Rate FROM tblClass WHERE ClassCode IN ('24K', '22K', '835', '999', '916', '18K', 'SIL')");
-    const ratesMap = {};
-    ratesResult.recordset.forEach((r) => {
-      ratesMap[(r.ClassCode || "").trim().toUpperCase()] = r.Rate;
-    });
-    const s999 = ratesMap["24K"] !== undefined ? parseFloat(ratesMap["24K"]).toFixed(2) : (ratesMap["999"] ? parseFloat(ratesMap["999"]).toFixed(2) : "-");
-    const s916 = ratesMap["22K"] !== undefined ? parseFloat(ratesMap["22K"]).toFixed(2) : (ratesMap["916"] ? parseFloat(ratesMap["916"]).toFixed(2) : "-");
-    const s835 = ratesMap["835"] !== undefined ? parseFloat(ratesMap["835"]).toFixed(2) : (ratesMap["18K"] ? parseFloat(ratesMap["18K"]).toFixed(2) : "-");
-
-    // Dates
-    const rawDate = header.Date || header.CreateDate;
-    let voucherDateStr = "-";
-    if (rawDate) {
-      const d = new Date(rawDate);
-      if (!isNaN(d.getTime())) {
-        voucherDateStr = `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`;
-      }
-    }
-    const printTimeStr = new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
-
-    const reportTitle = "TRADE-IN GOLD ISSUE";
-
-    const XLSX = require("xlsx");
-    const wb = XLSX.utils.book_new();
-    const rows = [];
-
-    rows.push([companyName]);
-    rows.push([companyAddress]);
-    rows.push([]);
-    rows.push([reportTitle]);
-    rows.push([`Printed: ${voucherDateStr} ${printTimeStr}`]);
-    rows.push([]);
-
-    // Two panels
-    const custName = (header.CustomerName || "").trim();
-    const custAddress = [header.Address1, header.Address2, header.Address3].filter(Boolean).map(s => String(s).trim()).join(" ");
-
-    rows.push(["CUSTOMER INFORMATION", "", "", "TRADE-IN VOUCHER DETAILS"]);
-    rows.push(["Customer Code:", (header.CustomerCode || "-").trim(), "", "Voucher / Invoice No:", String(header.InvoiceNo || header.InventoryCode || cleanNo).trim()]);
-    rows.push(["Customer Name:", custName || "CASH CUSTOMER", "", "Voucher Date:", voucherDateStr]);
-    rows.push(["Address:", custAddress || "-", "", "Status:", "ISSUED"]);
-    rows.push(["Remarks:", (header.Remarks || "-").trim(), "", "Purity / Class:", (details[0]?.Class || "22K")]);
-    rows.push([]);
-
-    // Items table
-    rows.push(["#", "ITEM DESCRIPTION", "PURITY / CLASS", "GROSS WT (G)", "STONE WT (G)", "LOSS (G)", "RATE / G ($)", "TOTAL COST ($)"]);
-    let sumGross = 0;
-    let sumStone = 0;
-    let sumLoss = 0;
-    let sumCost = 0;
-
-    if (details.length > 0) {
-      details.forEach((item, idx) => {
-        const wt = parseFloat(item.Weight) || 0;
-        const st = parseFloat(item.StoneWeight) || 0;
-        const loss = parseFloat(item.GoldLoss) || 0;
-        const cost = parseFloat(item.TotalCost) || 0;
-        sumGross += wt;
-        sumStone += st;
-        sumLoss += loss;
-        sumCost += cost;
-
-        rows.push([
-          idx + 1,
-          (item.Description || "Trade-In Item").trim(),
-          (item.Class || "22K").trim(),
-          wt.toFixed(3),
-          st.toFixed(3),
-          loss.toFixed(3),
-          parseFloat(item.CostPerGram || 0),
-          cost
-        ]);
-      });
-    } else {
-      const hWt = parseFloat(header.Weight || header.TotalWeight || 0);
-      const hLoss = parseFloat(header.GoldLoss || header.TotalGoldLoss || 0);
-      const hSt = parseFloat(header.StoneWeight || header.TotalStoneWeight || 0);
-      const hCost = parseFloat(header.TotalCost || header.TradeInAmount || 0);
-      sumGross = hWt;
-      sumStone = hSt;
-      sumLoss = hLoss;
-      sumCost = hCost;
-
-      rows.push([1, "TRADE-IN GOLD ITEMS", "22K", hWt.toFixed(3), hSt.toFixed(3), hLoss.toFixed(3), parseFloat(header.CostPerGram || 0), hCost]);
-    }
-    rows.push([]);
-
-    // Summary totals
-    rows.push(["", "", "", "Total Gross Weight:", `${sumGross.toFixed(3)} g`]);
-    rows.push(["", "", "", "Total Stone Weight:", `${sumStone.toFixed(3)} g`]);
-    rows.push(["", "", "", "Total Gold Loss:", `${sumLoss.toFixed(3)} g`]);
-    rows.push(["", "", "", "TOTAL SETTLEMENT VALUE:", sumCost]);
-    rows.push([]);
-
-    // Signatures
-    rows.push(["PREPARED BY (STAFF)", "", "", "SUPPLIER / AUTHORIZED RECEIVER"]);
-    rows.push(["Staff Name:", "Staff", "", "Receiver Name:", custName || "CASH CUSTOMER"]);
-    rows.push(["Signature:", "______________________", "", "Signature:", "______________________"]);
-    rows.push(["Date:", "______________________", "", "Date:", "______________________"]);
-    rows.push([]);
-    rows.push(["*** System Generated Report ***"]);
-    rows.push(["Powered by Unipro SG"]);
-
-    const ws = XLSX.utils.aoa_to_sheet(rows);
-    ws["!cols"] = [{ wch: 6 }, { wch: 28 }, { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 18 }];
-    XLSX.utils.book_append_sheet(wb, ws, "Trade In Gold Issue");
-
-    const excelBuffer = XLSX.write(wb, { type: "buffer", bookType: "xlsx" });
-    const downloadName = `Trade_In_Gold_Issue_${cleanNo.replace(/[^a-zA-Z0-9_\-]/g, "_")}.xlsx`;
-
-    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
-    res.setHeader("Content-Disposition", `attachment; filename="${downloadName}"`);
-    res.setHeader("Content-Length", excelBuffer.length);
-    return res.send(excelBuffer);
+    const result = await pool.request().query(`
+      SELECT 
+        RTRIM(LTRIM(SupplierCode)) AS SupplierCode, 
+        RTRIM(LTRIM(ISNULL(SupplierName, ''))) AS SupplierName, 
+        RTRIM(LTRIM(ISNULL(Address1, ''))) AS Address1, 
+        RTRIM(LTRIM(ISNULL(Address2, ''))) AS Address2 
+      FROM tblSupplier 
+      ORDER BY SupplierCode ASC
+    `);
+    res.json({ success: true, data: result.recordset || [] });
   } catch (err) {
-    console.error("Trade In Gold Issue Export Excel Error:", err);
-    return res.status(500).json({ success: false, message: "Failed to generate Excel: " + err.message });
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+router.get("/lov/currencies", async (req, res) => {
+  try {
+    const pool = await getPool(req);
+    const result = await pool.request().query(`
+      SELECT 
+        RTRIM(LTRIM(CurrencyCode)) AS CurrencyCode, 
+        RTRIM(LTRIM(ISNULL(CurrencyName, ''))) AS CurrencyName, 
+        ISNULL(CurrencyRate, 1.0) AS CurrencyRate, 
+        RTRIM(LTRIM(ISNULL(Remarks, ''))) AS Remarks 
+      FROM tblCurrency 
+      ORDER BY CurrencyCode ASC
+    `);
+    res.json({ success: true, data: result.recordset || [] });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+router.get("/currencyDetails", async (req, res) => {
+  try {
+    const code = (req.query.code || "").trim();
+    const pool = await getPool(req);
+    const result = await pool.request()
+      .input("CurrencyCode", sql.VarChar, code)
+      .query(`
+        SELECT TOP 1 
+          RTRIM(LTRIM(CurrencyCode)) AS CurrencyCode, 
+          RTRIM(LTRIM(ISNULL(CurrencyName, ''))) AS CurrencyName, 
+          ISNULL(CurrencyRate, 1.0) AS CurrencyRate, 
+          RTRIM(LTRIM(ISNULL(Remarks, ''))) AS Remarks 
+        FROM tblCurrency 
+        WHERE CurrencyCode = @CurrencyCode
+      `);
+    if (result.recordset && result.recordset.length > 0) {
+      res.json({ success: true, data: result.recordset[0] });
+    } else {
+      res.json({ success: false, message: "Currency not found" });
+    }
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+router.get("/lov/pendingTradeBills", async (req, res) => {
+  try {
+    const pool = await getPool(req);
+    const query = `
+      SELECT 
+        RTRIM(LTRIM(InvoiceNo)) AS InvoiceNo, 
+        RTRIM(LTRIM(ISNULL(InventoryCode, ''))) AS InventoryCode, 
+        ISNULL(Weight, ISNULL(TotalWeight, 0)) AS PurchaseWeight, 
+        ISNULL(IssuedWeight, 0) AS IssuedWeight, 
+        ISNULL(BalanceWeight, ISNULL(Weight, ISNULL(TotalWeight, 0))) AS BalanceWeight, 
+        ISNULL(TradeInAmount, ISNULL(TotalCost, 0)) AS TotalCost, 
+        ISNULL(ModifyDate, CreateDate) AS InvoiceDate, 
+        RTRIM(LTRIM(ISNULL(CustomerCode, ''))) AS CustomerCode 
+      FROM tblTradeInHeader 
+      WHERE (IssueFlag IS NULL OR RTRIM(LTRIM(IssueFlag)) <> 'Y') 
+        AND (ISNULL(BalanceWeight, ISNULL(Weight, ISNULL(TotalWeight, 0))) > 0) 
+      ORDER BY InvoiceNo DESC
+    `;
+    const result = await pool.request().query(query);
+    res.json({ success: true, data: result.recordset || [] });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+router.get("/getTradeBill", async (req, res) => {
+  try {
+    const invoiceNo = (req.query.invoiceNo || "").trim();
+    const pool = await getPool(req);
+    const result = await pool.request()
+      .input("InvoiceNo", sql.VarChar, invoiceNo)
+      .query(`
+        SELECT TOP 1 
+          RTRIM(LTRIM(InvoiceNo)) AS InvoiceNo, 
+          RTRIM(LTRIM(ISNULL(InventoryCode, ''))) AS InventoryCode, 
+          ISNULL(Weight, ISNULL(TotalWeight, 0)) AS PurchaseWeight, 
+          ISNULL(IssuedWeight, 0) AS IssuedWeight, 
+          ISNULL(BalanceWeight, ISNULL(Weight, ISNULL(TotalWeight, 0))) AS BalanceWeight, 
+          ISNULL(TradeInAmount, ISNULL(TotalCost, 0)) AS TotalCost, 
+          ISNULL(ModifyDate, CreateDate) AS InvoiceDate, 
+          RTRIM(LTRIM(ISNULL(CustomerCode, ''))) AS CustomerCode 
+        FROM tblTradeInHeader 
+        WHERE InvoiceNo = @InvoiceNo 
+          AND (ISNULL(BalanceWeight, ISNULL(Weight, ISNULL(TotalWeight, 0))) > 0)
+      `);
+    if (result.recordset && result.recordset.length > 0) {
+      res.json({ success: true, data: result.recordset[0] });
+    } else {
+      res.json({ success: false, message: "Trade bill not found or balance weight is 0" });
+    }
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+router.get("/lov/issueList", async (req, res) => {
+  try {
+    const pool = await getPool(req);
+    const query = `
+      SELECT DISTINCT 
+        RTRIM(LTRIM(h.TradeIssueNo)) AS IssueNo, 
+        RTRIM(LTRIM(h.SupplierCode)) AS SupplierCode, 
+        RTRIM(LTRIM(ISNULL(s.SupplierName, ''))) AS SupplierName, 
+        h.Date AS IssueDate, 
+        ISNULL(h.IssuedWeight, 0) AS TotalIssuedWeight, 
+        ISNULL(h.TotalCost, 0) AS TotalPrice 
+      FROM tblTradeIssueHistory h 
+      LEFT JOIN tblSupplier s ON h.SupplierCode = s.SupplierCode 
+      ORDER BY IssueNo DESC
+    `;
+    const result = await pool.request().query(query);
+    res.json({ success: true, data: result.recordset || [] });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+router.get("/getIssueDetails", async (req, res) => {
+  try {
+    const issueNo = (req.query.issueNo || "").trim();
+    const pool = await getPool(req);
+    const result = await pool.request()
+      .input("TradeIssueNo", sql.VarChar, issueNo)
+      .query(`
+        SELECT 
+          h.*, 
+          RTRIM(LTRIM(ISNULL(s.SupplierName, ''))) AS SupplierName 
+        FROM tblTradeIssueHistory h 
+        LEFT JOIN tblSupplier s ON h.SupplierCode = s.SupplierCode 
+        WHERE h.TradeIssueNo = @TradeIssueNo
+      `);
+    const records = result.recordset || [];
+    if (records.length > 0) {
+      const first = records[0];
+      const header = {
+        TradeIssueNo: first.TradeIssueNo,
+        IssueDate: first.Date,
+        SupplierCode: first.SupplierCode,
+        SupplierName: first.SupplierName,
+        CostPerGram: first.CostPerGram,
+        TotalIssuedWeight: records.reduce((s, r) => s + (parseFloat(r.IssuedWeight) || 0), 0),
+        NoOfBills: records.length,
+        TotalPrice: records.reduce((s, r) => s + (parseFloat(r.TotalCost) || 0), 0)
+      };
+      const items = records.map(r => ({
+        InvoiceNo: r.InvoiceNo,
+        Date: r.Date,
+        PurchaseWeight: r.TotalWeight,
+        IssuedWeight: r.IssuedWeight,
+        BalanceWeight: r.BalanceWeight
+      }));
+      res.json({ success: true, data: { header, items } });
+    } else {
+      res.json({ success: false, message: "Issue details not found" });
+    }
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
   }
 });
 

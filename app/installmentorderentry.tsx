@@ -3,7 +3,7 @@ import { API_BASE_URL } from '@/constants/api';
 import { useThemeColors } from '@/hooks/useThemeColors';
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
-import { Stack, useRouter } from 'expo-router';
+import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
@@ -21,6 +21,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 export default function InstallmentOrderEntryScreen() {
   const themeColors = useThemeColors();
   const router = useRouter();
+  const searchParams = useLocalSearchParams();
 
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -31,6 +32,9 @@ export default function InstallmentOrderEntryScreen() {
 
   // Global Config
   const [globalGst, setGlobalGst] = useState(0);
+  const [companyTradeInLimit, setCompanyTradeInLimit] = useState('0.00');
+  const [nextOrderNo, setNextOrderNo] = useState('');
+  const [nextAgreementNo, setNextAgreementNo] = useState('');
 
   // Modes
   const [mode, setMode] = useState<'Installment' | 'Order'>('Installment');
@@ -234,6 +238,15 @@ export default function InstallmentOrderEntryScreen() {
       const data = await res.json();
       if (data.success) {
         setGlobalGst(data.company.GstPerc || data.company.GSTPerc || 0);
+        if (data.tradeInLimit !== undefined) {
+          setCompanyTradeInLimit(parseFloat(data.tradeInLimit || 0).toFixed(2));
+        }
+        if (data.nextOrderNo) {
+          setNextOrderNo(String(data.nextOrderNo));
+        }
+        if (data.nextAgreementNo) {
+          setNextAgreementNo(String(data.nextAgreementNo));
+        }
       }
     } catch (e) {
       console.log('Error fetching company config', e);
@@ -265,16 +278,77 @@ export default function InstallmentOrderEntryScreen() {
     let instAmt = 0;
 
     if (mode === 'Installment') {
-      if (paymentMode === 'Cash' || paymentMode === 'Gold') {
+      if (paymentMode === 'Both') {
+        instAmt = (tot - tiAmt) - dep;
+      } else {
         instAmt = tot - dep;
-      } else if (paymentMode === 'Both') {
-        instAmt = tot - tiAmt - dep;
       }
     } else {
-      instAmt = tot - dep;
+      if (paymentMode === 'Both') {
+        instAmt = tot - tiAmt - dep;
+      } else {
+        instAmt = tot - dep;
+      }
     }
     setInstallmentAmt(instAmt > 0 ? instAmt.toFixed(2) : '0.00');
   }, [gridItems, depositAmount, amountPaid, paymentMode, tradeIn, mode]);
+
+  // Handle return parameters from Trade In screen if navigated back with trade-in result
+  useEffect(() => {
+    if (searchParams?.tradeInAmount) {
+      const returnedTradeIn = parseFloat(searchParams.tradeInAmount as string) || 0;
+      setTradeIn(returnedTradeIn.toFixed(2));
+      const totCost = parseFloat(totalAmount) || 0;
+
+      if (paymentMode === 'Both') {
+        setDepositAmount('0.00');
+        const bal = totCost - returnedTradeIn;
+        setInstallmentAmt(bal > 0 ? bal.toFixed(2) : '0.00');
+      } else if (paymentMode === 'Gold') {
+        setDepositAmount(returnedTradeIn.toFixed(2));
+        const bal = totCost - returnedTradeIn;
+        setInstallmentAmt(bal > 0 ? bal.toFixed(2) : '0.00');
+      }
+      showToast('Success', `Trade-In applied: $${returnedTradeIn.toFixed(2)}`);
+    }
+  }, [searchParams?.tradeInAmount]);
+
+  // Navigate to Trade-In screen following frmInstallment_AJ.vb btnTradeIn_Click logic
+  const handleNavigateToTradeIn = () => {
+    // Determine the invoice/order reference number to pass (sNextOrderNo or formatted invoiceNo)
+    let refNo = invoiceNo.trim();
+    if (!refNo) {
+      const nextNum = mode === 'Order' ? nextOrderNo : nextAgreementNo;
+      refNo = nextNum ? String(nextNum).padStart(8, '0') : '00000001';
+    }
+
+    // Determine sales amount (txtEstiTotalCost in Order mode, txtTotalCost in Installment mode)
+    const salesAmt = parseFloat(totalAmount) || 0;
+
+    // Collect all parameters exactly as in frmInstallment_AJ.vb
+    const params: Record<string, string> = {
+      calledFrom: 'ORDERFORM',
+      sCalledFrom: 'ORDERFORM',
+      invoiceNo: refNo,
+      sInvoiceNo: refNo,
+      customerCode: customerCode || '',
+      customerName: customerName || '',
+      customerType: customerType || 'Customer',
+      address1: address1 || '',
+      address2: address2 || '',
+      address3: address3 || '',
+      tradeInLimit: companyTradeInLimit || '0.00',
+      salesAmount: salesAmt.toFixed(2),
+      sSalesAmount: salesAmt.toFixed(2),
+      mode: mode,
+      paymentMode: paymentMode,
+    };
+
+    router.push({
+      pathname: '/tradeingold',
+      params,
+    });
+  };
 
   const clearForm = () => {
     setInvoiceNo('');
@@ -992,7 +1066,7 @@ export default function InstallmentOrderEntryScreen() {
                     />
                   </View>
 
-                  {/* Row 7: Payment Mode Pills & Trade IN in one row */}
+                  {/* Row 7: Payment Mode Pills, Trade IN & Trade In Button */}
                   <View style={[styles.inlineFieldRow, { flexWrap: 'wrap', gap: 12 }]}>
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                       <ThemedText style={styles.inlineFieldLabel}>Payment Mode</ThemedText>
@@ -1031,6 +1105,18 @@ export default function InstallmentOrderEntryScreen() {
                         placeholderTextColor="#9E8D77"
                       />
                     </View>
+
+                    {/* Trade In Button (Visible when paymentMode is 'Gold' or 'Both', as in frmInstallment_AJ.vb) */}
+                    {paymentMode !== 'Cash' && (
+                      <TouchableOpacity
+                        style={styles.tradeInBtn}
+                        onPress={handleNavigateToTradeIn}
+                        activeOpacity={0.8}
+                      >
+                        <Ionicons name="repeat" size={14} color="#5C4A28" />
+                        <ThemedText style={styles.tradeInBtnText}>Trade In</ThemedText>
+                      </TouchableOpacity>
+                    )}
                   </View>
 
                   {/* Order Mode Specific: GST Radios */}
@@ -2314,6 +2400,23 @@ const styles = StyleSheet.create({
   pillOptionTextSelected: {
     color: '#9E6D08',
     fontWeight: 'bold',
+  },
+
+  tradeInBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    height: 26,
+    paddingHorizontal: 8,
+    backgroundColor: '#FAF5EA',
+    borderWidth: 1,
+    borderColor: '#B8903B',
+    borderRadius: 4,
+  },
+  tradeInBtnText: {
+    fontSize: 11,
+    fontWeight: 'bold',
+    color: '#5C4A28',
   },
 
   rateTypeContainer: {

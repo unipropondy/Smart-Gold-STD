@@ -1,1607 +1,993 @@
-import { ThemedText } from '@/components/themed-text';
+/** Developer: Antigravity */
 import { PrintReportModal } from '@/components/PrintReportModal';
+import { ThemedText } from '@/components/themed-text';
 import { API_BASE_URL } from '@/constants/api';
 import { useThemeColors } from '@/hooks/useThemeColors';
-import { getStandardReportCss, renderStandardReportFooter, renderStandardReportHeader } from '@/utils/standardPrintReport';
-import { UNIPRO_LOGO_DATA_URI } from '@/utils/uniproLogo';
 import { Ionicons } from '@expo/vector-icons';
 import { Stack, useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
-  KeyboardAvoidingView,
   Modal,
-  Platform,
   ScrollView,
   StyleSheet,
+  Text,
   TextInput,
   TouchableOpacity,
-  View,
+  TouchableWithoutFeedback,
+  View
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 const API_URL = `${API_BASE_URL}/tradeingoldissue`;
 
-const CLASSES = ['22K', '24K', '18K', '835', '750', '916', '875', '20K', '21K'];
+interface GridRowItem {
+  InvoiceNo: string;
+  Date: string;
+  Class: string;
+  PurchaseWeight: number;
+  IssuedWeight: number;
+  BalanceWeight: number;
+  Amount: number;
+}
 
 export default function TradeInGoldIssueScreen() {
   const themeColors = useThemeColors();
   const router = useRouter();
 
-  // States
+  // Loading & State
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
 
-  // Header Details
-  const [invoiceNo, setInvoiceNo] = useState('');
-  const [customerCode, setCustomerCode] = useState('');
-  const [customerName, setCustomerName] = useState('');
-  const [address1, setAddress1] = useState('');
-  const [address2, setAddress2] = useState('');
-  const [address3, setAddress3] = useState('');
+  // Top Section Fields (matching frmTradeInIssue.vb)
+  const [tradeIssueNo, setTradeIssueNo] = useState('');
 
-  // Settings
-  const [lossPerc, setLossPerc] = useState('0');
-  const [costPerGram, setCostPerGram] = useState('0');
-  const [remarks, setRemarks] = useState('');
-  const [selectedClass, setSelectedClass] = useState('22K');
+  // Date Fields (DD - MM - YYYY)
+  const today = new Date();
+  const [dd, setDd] = useState(String(today.getDate()).padStart(2, '0'));
+  const [mm, setMm] = useState(String(today.getMonth() + 1).padStart(2, '0'));
+  const [yy, setYy] = useState(String(today.getFullYear()));
 
-  // Input fields for grid
-  const [description, setDescription] = useState('22K ITEMS');
-  const [diamondDescription, setDiamondDescription] = useState('');
-  const [weight, setWeight] = useState('');
-  const [stoneWeight, setStoneWeight] = useState('');
-  const [goldLoss, setGoldLoss] = useState('');
-  const [totalCost, setTotalCost] = useState('');
+  // Supplier
+  const [supplierCode, setSupplierCode] = useState('');
+  const [supplierName, setSupplierName] = useState('');
+
+  // Currency
+  const [currencyCode, setCurrencyCode] = useState('');
+  const [currencyName, setCurrencyName] = useState('');
+  const [currencyRate, setCurrencyRate] = useState('');
+
+  // Summary Fields
+  const [totalIssuedWt, setTotalIssuedWt] = useState('0.00');
+  const [totalNoOfBills, setTotalNoOfBills] = useState('0');
+  const [costPerGram, setCostPerGram] = useState('0.00');
+  const [totalPrice, setTotalPrice] = useState('0.00');
+
+  // Trade Bill Scan / Search
+  const [tradeBillNo, setTradeBillNo] = useState('');
 
   // Grid Data
-  const [gridData, setGridData] = useState<any[]>([]);
+  const [gridItems, setGridItems] = useState<GridRowItem[]>([]);
+  const [selectedRowIndex, setSelectedRowIndex] = useState<number | null>(null);
 
   // LOV State
   const [lovVisible, setLovVisible] = useState(false);
+  const [lovType, setLovType] = useState<'issue' | 'supplier' | 'currency' | 'tradebill'>('supplier');
   const [lovData, setLovData] = useState<any[]>([]);
   const [lovSearch, setLovSearch] = useState('');
+  const [lovLoading, setLovLoading] = useState(false);
 
-  // Standardized Print Report Modal state
+  // Print Report Modal State
   const [isPrintModalVisible, setIsPrintModalVisible] = useState(false);
-  const [activePrintInvoiceNo, setActivePrintInvoiceNo] = useState('');
-  const [activePrintIsReprint, setActivePrintIsReprint] = useState(false);
-
-  // Summary
-  const salesAmount = 0.0;
-  const tradeInAmount = gridData.reduce((sum, item) => sum + (parseFloat(item.totalCost) || 0), 0);
-  const balanceAmount = salesAmount - tradeInAmount;
+  const [printIssueNo, setPrintIssueNo] = useState('');
 
   const showToast = (message: string, type: 'success' | 'error' = 'success') => {
     setToast({ message, type });
-    setTimeout(() => setToast(null), 3000);
+    setTimeout(() => setToast(null), 3200);
   };
 
   useEffect(() => {
-    fetchCostPerGram(selectedClass);
-    setDescription(`${selectedClass} ITEMS`);
-  }, [selectedClass]);
+    fetchInitialData();
+  }, []);
 
-  const fetchCostPerGram = async (cCode: string) => {
-    try {
-      const response = await fetch(`${API_URL}/costpergram/${encodeURIComponent(cCode)}`);
-      const data = await response.json();
-      if (data.success && data.Rate !== undefined) {
-        setCostPerGram(String(data.Rate));
-      }
-    } catch (err) {
-      console.error(err);
-    }
-  };
-
-  const fetchCustomers = async () => {
+  const fetchInitialData = async () => {
     try {
       setLoading(true);
-      const response = await fetch(`${API_URL}/customers`);
-      const data = await response.json();
-      if (data.success) {
-        setLovData(data.data || []);
-        setLovSearch('');
-        setLovVisible(true);
-      } else {
-        showToast('Error loading customer list', 'error');
+      const res = await fetch(`${API_URL}/nextIssueNo`);
+      const data = await res.json();
+      if (data.success && data.nextIssueNo) {
+        setTradeIssueNo(data.nextIssueNo);
       }
     } catch (err) {
-      showToast('Error fetching customers', 'error');
+      console.error('Failed to load next issue no:', err);
     } finally {
       setLoading(false);
     }
   };
 
-  const handleSelectCustomer = (item: any) => {
-    setCustomerCode(item.CustomerCode || '');
-    setCustomerName(item.CustomerName || '');
-    setAddress1(item.Address1 || '');
-    setAddress2(item.Address2 || '');
-    setAddress3(item.Address3 || '');
-    setLovVisible(false);
+  // Recalculate totals
+  const recalculateSummary = (items: GridRowItem[], costPerGmVal: string) => {
+    const totalWt = items.reduce((sum, it) => sum + (it.PurchaseWeight || 0), 0);
+    const count = items.length;
+    const cpg = parseFloat(costPerGmVal) || 0;
+    const totalPr = totalWt * cpg;
+
+    setTotalIssuedWt(totalWt.toFixed(2));
+    setTotalNoOfBills(String(count));
+    setTotalPrice(totalPr.toFixed(2));
   };
 
-  const lookupCustomerByCode = async (code: string) => {
-    if (!code.trim()) return;
+  const handleCostPerGramChange = (text: string) => {
+    setCostPerGram(text);
+    const totalWt = parseFloat(totalIssuedWt) || 0;
+    const cpg = parseFloat(text) || 0;
+    setTotalPrice((totalWt * cpg).toFixed(2));
+  };
+
+  // Open LOV Modal
+  const openLOV = async (type: 'issue' | 'supplier' | 'currency' | 'tradebill') => {
+    setLovType(type);
+    setLovSearch('');
+    setLovVisible(true);
+    setLovLoading(true);
     try {
-      const response = await fetch(`${API_URL}/customers`);
-      const data = await response.json();
-      if (data.success && Array.isArray(data.data)) {
-        const found = data.data.find(
-          (c: any) => (c.CustomerCode || '').trim().toLowerCase() === code.trim().toLowerCase()
-        );
-        if (found) {
-          handleSelectCustomer(found);
-        }
+      let endpoint = '';
+      if (type === 'issue') endpoint = `${API_URL}/lov/issueList`;
+      else if (type === 'supplier') endpoint = `${API_URL}/lov/suppliers`;
+      else if (type === 'currency') endpoint = `${API_URL}/lov/currencies`;
+      else if (type === 'tradebill') endpoint = `${API_URL}/lov/pendingTradeBills`;
+
+      const res = await fetch(endpoint);
+      const json = await res.json();
+      if (json.success) {
+        setLovData(json.data || []);
+      } else {
+        setLovData([]);
       }
     } catch (err) {
-      console.error(err);
+      console.error('LOV fetch error:', err);
+      setLovData([]);
+      showToast('Error loading lookup list.', 'error');
+    } finally {
+      setLovLoading(false);
     }
   };
 
-  const calculateTotalCost = () => {
-    const wt = parseFloat(weight) || 0;
-    const costPerGm = parseFloat(costPerGram) || 0;
-    let calcCost = wt * costPerGm;
-    if (selectedClass === '24K') {
-      calcCost = calcCost * 1.05;
+  // Handle selecting an item from LOV
+  const handleSelectLOV = async (item: any) => {
+    setLovVisible(false);
+
+    if (lovType === 'issue') {
+      const issueNum = item.IssueNo;
+      setTradeIssueNo(issueNum);
+      loadExistingIssue(issueNum);
+    } else if (lovType === 'supplier') {
+      setSupplierCode(item.SupplierCode || '');
+      setSupplierName(item.SupplierName || '');
+      if (item.Currency) {
+        fetchCurrencyDetails(item.Currency);
+      }
+    } else if (lovType === 'currency') {
+      setCurrencyCode(item.CurrencyCode || '');
+      setCurrencyName(item.CurrencyName || '');
+      setCurrencyRate(parseFloat(item.CurrencyRate || 1).toFixed(2));
+    } else if (lovType === 'tradebill') {
+      addBillToGrid({
+        InvoiceNo: item.InvoiceNo,
+        Date: item.InvoiceDate ? item.InvoiceDate.substring(0, 10) : '',
+        Class: 'TRADE-IN',
+        PurchaseWeight: parseFloat(item.PurchaseWeight) || 0,
+        IssuedWeight: parseFloat(item.BalanceWeight) || parseFloat(item.PurchaseWeight) || 0,
+        BalanceWeight: parseFloat(item.BalanceWeight) || 0,
+        Amount: parseFloat(item.TotalCost) || 0,
+      });
+      setTradeBillNo('');
     }
-    setTotalCost(calcCost.toFixed(2));
   };
 
-  const handleAddToGrid = () => {
-    if (!description.trim()) {
-      showToast('Description is required', 'error');
-      return;
+  const fetchCurrencyDetails = async (code: string) => {
+    try {
+      const res = await fetch(`${API_URL}/currencyDetails?code=${encodeURIComponent(code)}`);
+      const json = await res.json();
+      if (json.success && json.data) {
+        setCurrencyCode(json.data.CurrencyCode || code);
+        setCurrencyName(json.data.CurrencyName || '');
+        setCurrencyRate(parseFloat(json.data.CurrencyRate || 1).toFixed(2));
+      }
+    } catch (err) {
+      console.error('Currency load error:', err);
     }
-    if (!weight || parseFloat(weight) <= 0) {
-      showToast('Weight is invalid', 'error');
-      return;
-    }
-    if (parseFloat(goldLoss || '0') < 0) {
-      showToast('Gold Loss is invalid', 'error');
-      return;
-    }
-    if (parseFloat(costPerGram || '0') <= 0) {
-      showToast('Cost per gram is invalid', 'error');
-      return;
-    }
-
-    const calculatedCost =
-      totalCost && parseFloat(totalCost) > 0
-        ? parseFloat(totalCost).toFixed(2)
-        : (
-            (parseFloat(weight) || 0) * (parseFloat(costPerGram) || 0) * (selectedClass === '24K' ? 1.05 : 1)
-          ).toFixed(2);
-
-    const newItem = {
-      description: description.trim(),
-      diamondDescription: diamondDescription.trim(),
-      weight: parseFloat(weight).toFixed(3),
-      stoneWeight: parseFloat(stoneWeight || '0').toFixed(3),
-      goldLoss: parseFloat(goldLoss || '0').toFixed(3),
-      costPerGram: parseFloat(costPerGram).toFixed(2),
-      totalCost: calculatedCost,
-      class: selectedClass,
-    };
-
-    setGridData([...gridData, newItem]);
-
-    // Clear inputs for next item
-    setDescription(`${selectedClass} ITEMS`);
-    setDiamondDescription('');
-    setWeight('');
-    setStoneWeight('');
-    setGoldLoss('');
-    setTotalCost('');
-    showToast('Trade-in item added', 'success');
   };
 
-  const handleDeleteRow = (index: number) => {
-    const newData = [...gridData];
-    newData.splice(index, 1);
-    setGridData(newData);
+  // Scan or manual enter of Trade Bill No
+  const handleAddTradeBill = async (manualBillNo?: string) => {
+    const billToSearch = (manualBillNo !== undefined ? manualBillNo : tradeBillNo).trim();
+    if (!billToSearch) return;
+
+    // Check if already in grid
+    const alreadyExists = gridItems.some(
+      (it) => it.InvoiceNo.toLowerCase() === billToSearch.toLowerCase()
+    );
+    if (alreadyExists) {
+      showToast('This Trade Bill has already been added to the list.', 'error');
+      setTradeBillNo('');
+      return;
+    }
+
+    try {
+      setLoading(true);
+      const res = await fetch(`${API_URL}/getTradeBill?invoiceNo=${encodeURIComponent(billToSearch)}`);
+      const json = await res.json();
+
+      if (json.success && json.data) {
+        const d = json.data;
+        const balWt = parseFloat(d.BalanceWeight) || 0;
+        if (balWt <= 0) {
+          showToast(`Trade bill #${billToSearch} has zero balance weight.`, 'error');
+          return;
+        }
+
+        addBillToGrid({
+          InvoiceNo: d.InvoiceNo,
+          Date: d.InvoiceDate ? d.InvoiceDate.substring(0, 10) : '',
+          Class: 'TRADE-IN',
+          PurchaseWeight: parseFloat(d.PurchaseWeight) || 0,
+          IssuedWeight: balWt,
+          BalanceWeight: balWt,
+          Amount: parseFloat(d.TotalCost) || 0,
+        });
+        setTradeBillNo('');
+      } else {
+        showToast(json.message || `Trade Bill #${billToSearch} not found or no balance.`, 'error');
+      }
+    } catch (err) {
+      console.error('Error fetching trade bill:', err);
+      showToast('Error looking up Trade Bill.', 'error');
+    } finally {
+      setLoading(false);
+    }
   };
 
+  const addBillToGrid = (newItem: GridRowItem) => {
+    const exists = gridItems.some(
+      (it) => it.InvoiceNo.toLowerCase() === newItem.InvoiceNo.toLowerCase()
+    );
+    if (exists) {
+      showToast('Bill already added to grid.', 'error');
+      return;
+    }
+
+    const updated = [...gridItems, newItem];
+    setGridItems(updated);
+    recalculateSummary(updated, costPerGram);
+    showToast(`Bill #${newItem.InvoiceNo} added successfully.`);
+  };
+
+  // Load Existing Saved Issue
+  const loadExistingIssue = async (issueNum: string) => {
+    try {
+      setLoading(true);
+      const res = await fetch(`${API_URL}/getIssueDetails?issueNo=${encodeURIComponent(issueNum)}`);
+      const json = await res.json();
+      if (json.success && json.data) {
+        const h = json.data.header;
+        const items = json.data.items || [];
+
+        if (h) {
+          if (h.IssueDate) {
+            const dt = new Date(h.IssueDate);
+            if (!isNaN(dt.getTime())) {
+              setDd(String(dt.getDate()).padStart(2, '0'));
+              setMm(String(dt.getMonth() + 1).padStart(2, '0'));
+              setYy(String(dt.getFullYear()));
+            }
+          }
+          setSupplierCode(h.SupplierCode || '');
+          setSupplierName(h.SupplierName || '');
+          setCurrencyCode(h.CurrencyCode || '');
+          setCurrencyName(h.CurrencyName || '');
+          setCurrencyRate(h.CurrencyRate ? parseFloat(h.CurrencyRate).toFixed(2) : '');
+          setCostPerGram(parseFloat(h.CostPerGram || 0).toFixed(2));
+          setTotalIssuedWt(parseFloat(h.TotalIssuedWeight || 0).toFixed(2));
+          setTotalNoOfBills(String(h.NoOfBills || items.length));
+          setTotalPrice(parseFloat(h.TotalPrice || 0).toFixed(2));
+        }
+
+        const mapped: GridRowItem[] = items.map((it: any) => ({
+          InvoiceNo: it.InvoiceNo,
+          Date: it.Date ? it.Date.substring(0, 10) : '',
+          Class: 'TRADE-IN',
+          PurchaseWeight: parseFloat(it.PurchaseWeight) || 0,
+          IssuedWeight: parseFloat(it.IssuedWeight) || 0,
+          BalanceWeight: parseFloat(it.BalanceWeight) || 0,
+          Amount: (parseFloat(it.IssuedWeight) || 0) * (parseFloat(h?.CostPerGram) || 0),
+        }));
+
+        setGridItems(mapped);
+        showToast(`Loaded Issue #${issueNum}`);
+      } else {
+        showToast(json.message || 'Issue record not found.', 'error');
+      }
+    } catch (err) {
+      console.error('Error loading issue:', err);
+      showToast('Failed to load issue record.', 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Clear (F6) - perfectly matches frmTradeInIssue.vb subClearMe()
   const handleClear = () => {
-    setCustomerCode('');
-    setCustomerName('');
-    setAddress1('');
-    setAddress2('');
-    setAddress3('');
-    setRemarks('');
-    setGridData([]);
-    setWeight('');
-    setStoneWeight('');
-    setGoldLoss('');
-    setTotalCost('');
-    setSelectedClass('22K');
-    setInvoiceNo('');
+    setSupplierCode('');
+    setSupplierName('');
+    setCurrencyCode('');
+    setCurrencyName('');
+    setCurrencyRate('');
+    setTradeBillNo('');
+    setGridItems([]);
+    setSelectedRowIndex(null);
+    setTotalIssuedWt('0.00');
+    setTotalNoOfBills('0');
+    setCostPerGram('0.00');
+    setTotalPrice('0.00');
+
+    const dt = new Date();
+    setDd(String(dt.getDate()).padStart(2, '0'));
+    setMm(String(dt.getMonth() + 1).padStart(2, '0'));
+    setYy(String(dt.getFullYear()));
+
+    fetchInitialData();
+    showToast('Form cleared.');
   };
 
-  const handleSave = async () => {
-    if (!customerCode.trim()) {
-      showToast('Please select a customer first.', 'error');
+  // Proceed (F7)
+  const handleProceed = async () => {
+    // Validations (frmTradeInIssue.vb btnProceed_Click)
+    if (!supplierCode.trim()) {
+      showToast('Please select a Supplier Code.', 'error');
       return;
     }
-    if (gridData.length === 0) {
-      showToast('Please add at least one trade-in item.', 'error');
+    if (gridItems.length === 0) {
+      showToast('Please add at least one Trade In bill into the list.', 'error');
+      return;
+    }
+    const cpgNum = parseFloat(costPerGram);
+    if (isNaN(cpgNum) || cpgNum <= 0) {
+      showToast('Please enter a valid Cost/Gram greater than 0.', 'error');
+      return;
+    }
+    const totPriceNum = parseFloat(totalPrice);
+    if (isNaN(totPriceNum) || totPriceNum <= 0) {
+      showToast('Total Price cannot be zero.', 'error');
       return;
     }
 
     try {
       setSaving(true);
+      const issueDateStr = `${yy}-${mm}-${dd}`;
+
       const payload = {
-        customerCode,
-        customerName,
-        address1,
-        address2,
-        address3,
-        lossPerc,
-        costPerGram,
-        remarks,
-        items: gridData,
+        issueNo: tradeIssueNo,
+        issueDate: issueDateStr,
+        supplierCode: supplierCode.trim(),
+        supplierName: supplierName.trim(),
+        currencyCode: currencyCode.trim(),
+        currencyRate: parseFloat(currencyRate) || 1,
+        totalIssuedWeight: parseFloat(totalIssuedWt) || 0,
+        noOfBills: parseInt(totalNoOfBills, 10) || gridItems.length,
+        costPerGram: cpgNum,
+        totalPrice: totPriceNum,
+        items: gridItems,
       };
 
-      const response = await fetch(`${API_URL}/save`, {
+      const res = await fetch(`${API_URL}/proceed`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
-      const data = await response.json();
 
-      if (data.success) {
-        const assignedInvoiceNo = data.invoiceNo || 'TI-SAVED';
-        setInvoiceNo(assignedInvoiceNo);
-        showToast(data.message || 'Trade-in Saved Successfully', 'success');
-
-        // Automatically prompt with standard PrintReportModal confirmation after save
-        setActivePrintInvoiceNo(assignedInvoiceNo);
-        setActivePrintIsReprint(false);
+      const json = await res.json();
+      if (json.success) {
+        showToast(json.message || 'Issue processed successfully!', 'success');
+        setPrintIssueNo(tradeIssueNo);
         setIsPrintModalVisible(true);
+        fetchInitialData();
       } else {
-        showToast(data.message || 'Save failed', 'error');
+        showToast(json.message || 'Failed to process Trade In Issue.', 'error');
       }
     } catch (err: any) {
-      showToast('Network error while saving trade-in', 'error');
+      console.error('Proceed error:', err);
+      showToast('Error processing Trade In Issue.', 'error');
     } finally {
       setSaving(false);
     }
   };
 
-  const combinedAddress = [address1, address2, address3].filter(Boolean).join(' ');
-
-  // Helper to retrieve trade-in print data either from backend or from active on-screen inputs
-  const fetchPrintData = async (targetInvoiceNo?: string) => {
-    const tNo = (targetInvoiceNo || invoiceNo || '').trim();
-    const hasUnsavedItems = gridData.length > 0 && customerCode.trim() !== '';
-
-    let company: any = { name: '', address1: '', address2: '', city: '', state: '', country: '', phone: '', fax: '' };
-    let header: any = null;
-    let details: any[] = [];
-    let rates: any = { rate999: '-', rate916: '-', rate835: '-', rate22k: '-' };
-
-    let fetchSuccess = false;
-
-    if (tNo && tNo !== 'TI-DRAFT' && tNo !== 'DRAFT') {
-      try {
-        const res = await fetch(`${API_URL}/print-data?invoiceNo=${encodeURIComponent(tNo)}`);
-        const cType = res.headers.get('content-type') || '';
-        if (res.ok && cType.includes('application/json')) {
-          const json = await res.json();
-          if (json.success && json.data) {
-            company = json.data.company || company;
-            header = json.data.header;
-            details = json.data.details || [];
-            rates = json.data.rates || rates;
-            fetchSuccess = true;
-          }
-        }
-      } catch (e) {
-        console.warn('Dedicated print-data fetch error:', e);
-      }
+  const filteredLOV = lovData.filter((item) => {
+    const q = lovSearch.toLowerCase();
+    if (lovType === 'issue') {
+      return (
+        (item.IssueNo && item.IssueNo.toLowerCase().includes(q)) ||
+        (item.SupplierName && item.SupplierName.toLowerCase().includes(q))
+      );
+    } else if (lovType === 'supplier') {
+      return (
+        (item.SupplierCode && item.SupplierCode.toLowerCase().includes(q)) ||
+        (item.SupplierName && item.SupplierName.toLowerCase().includes(q))
+      );
+    } else if (lovType === 'currency') {
+      return (
+        (item.CurrencyCode && item.CurrencyCode.toLowerCase().includes(q)) ||
+        (item.CurrencyName && item.CurrencyName.toLowerCase().includes(q))
+      );
+    } else if (lovType === 'tradebill') {
+      return (
+        (item.InvoiceNo && item.InvoiceNo.toLowerCase().includes(q)) ||
+        (item.CustomerName && item.CustomerName.toLowerCase().includes(q))
+      );
     }
-
-    if (!fetchSuccess && hasUnsavedItems) {
-      try {
-        const compRes = await fetch(`${API_BASE_URL}/company`).then(r => r.json()).catch(() => null);
-        if (compRes?.success && Array.isArray(compRes.data) && compRes.data.length > 0) {
-          const c = compRes.data[0];
-          company = {
-            name: (c.Name || c.CompanyName || '').trim(),
-            address1: (c.Address1 || '').trim(),
-            address2: (c.Address2 || '').trim(),
-            city: (c.City || '').trim(),
-            state: (c.State || '').trim(),
-            country: (c.Country || '').trim(),
-            phone: (c.Phone || '').trim(),
-            fax: (c.Fax || '').trim(),
-          };
-        }
-      } catch (_) {}
-
-      let totalWt = 0;
-      let totalLoss = 0;
-      let totalSt = 0;
-      let totalAmt = 0;
-
-      const mappedDet = gridData.map((item, idx) => {
-        const wt = parseFloat(item.weight) || 0;
-        const loss = parseFloat(item.goldLoss) || 0;
-        const st = parseFloat(item.stoneWeight) || 0;
-        const cost = parseFloat(item.totalCost) || 0;
-        totalWt += wt;
-        totalLoss += loss;
-        totalSt += st;
-        totalAmt += cost;
-
-        return {
-          itemNo: idx + 1,
-          description: item.description || '',
-          diamondDescription: item.stoneDescription || item.diamondDescription || '',
-          weight: wt,
-          stoneWeight: st,
-          goldLoss: loss,
-          costPerGram: parseFloat(item.costPerGram) || 0,
-          totalCost: cost,
-          class: item.class || selectedClass || '22K',
-          remarks: '',
-        };
-      });
-
-      header = {
-        inventoryCode: tNo || 'TI-DRAFT',
-        invoiceNo: tNo || 'DRAFT',
-        customerCode: customerCode.trim(),
-        customerName: customerName.trim(),
-        address1: address1.trim(),
-        address2: address2.trim(),
-        address3: address3.trim(),
-        costPerGram: parseFloat(costPerGram) || 0,
-        totalWeight: totalWt,
-        totalGoldLoss: totalLoss,
-        totalStoneWeight: totalSt,
-        totalPCS: mappedDet.length,
-        totalCost: totalAmt,
-        amount: totalAmt,
-        remarks: remarks.trim(),
-        date: new Date(),
-      };
-
-      details = mappedDet;
-      fetchSuccess = true;
-    }
-
-    return { success: fetchSuccess, company, header, details, rates, targetNo: tNo };
-  };
-
-  // Standardized Cambria HTML report builder
-  const buildTradeInGoldIssueHtml = (targetInvoiceNo: string, isReprint: boolean, printData: any) => {
-    const { company, header, details, rates } = printData || {};
-
-    const now = new Date();
-    const sgTimeStr = now.toLocaleTimeString('en-US', {
-      timeZone: 'Asia/Singapore',
-      hour: '2-digit',
-      minute: '2-digit',
-      hour12: true,
-    });
-
-    const sCompanyName = (company?.name || 'SMART').trim();
-    const sCompAddress2 = [company?.address1, company?.address2, company?.country].filter(Boolean).join(' ');
-    const sCompAddress3 = [company?.phone, company?.fax].filter(Boolean).join(' ');
-
-    const sCustomerName = (header?.customerName || customerName || '').trim();
-    const sCustomerCode = (header?.customerCode || customerCode || '').trim();
-    const sCustomerAddress = [
-      header?.address1 || address1,
-      header?.address2 || address2,
-      header?.address3 || address3,
-    ].filter(Boolean).map((s: string) => String(s).trim()).join(' ');
-
-    const s999 = rates?.rate999 || '-';
-    const s916 = rates?.rate916 || rates?.rate22k || '-';
-    const s835 = rates?.rate835 || '-';
-
-    const formatDate = (val: any) => {
-      if (!val) return '-';
-      const d = new Date(val);
-      if (isNaN(d.getTime())) return String(val).split('T')[0] || '-';
-      return d.toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' });
-    };
-
-    const voucherDateFormatted = formatDate(header?.date || new Date());
-    const sReportTitle = 'TRADE-IN GOLD ISSUE';
-
-    const totalGrossWeight = (details || []).reduce((sum: number, r: any) => sum + (Number(r.weight) || 0), 0);
-    const totalGoldLossSum = (details || []).reduce((sum: number, r: any) => sum + (Number(r.goldLoss) || 0), 0);
-    const totalStoneWtSum = (details || []).reduce((sum: number, r: any) => sum + (Number(r.stoneWeight) || 0), 0);
-    const totalCostSum = (details || []).reduce((sum: number, r: any) => sum + (Number(r.totalCost) || 0), 0);
-
-    const sInvoiceNo = (header?.invoiceNo || header?.inventoryCode || targetInvoiceNo || '').trim();
-
-    const generatePageMarkup = (copyLabel: string) => `
-      <div class="page-sheet">
-        <div class="report-main-content">
-          ${renderStandardReportHeader({
-            company: {
-              name: sCompanyName,
-              address: [sCompAddress2, sCompAddress3].filter(Boolean).join(' ')
-            },
-            reportTitle: `${sReportTitle} (${copyLabel})`,
-            printedDateTime: `${voucherDateFormatted} ${sgTimeStr}`
-          })}
-
-          <!-- TWO-COLUMN INFO: CUSTOMER vs TRADE-IN VOUCHER -->
-          <div class="info-grid">
-            <div class="info-card">
-              <div class="card-title">CUSTOMER INFORMATION</div>
-              <table class="info-table">
-                <tr>
-                  <td class="lbl">Customer</td>
-                  <td class="colon">:</td>
-                  <td class="val font-bold">${sCustomerName || 'CASH CUSTOMER'}</td>
-                </tr>
-                <tr>
-                  <td class="lbl">Cust Code</td>
-                  <td class="colon">:</td>
-                  <td class="val">${sCustomerCode || '-'}</td>
-                </tr>
-                <tr>
-                  <td class="lbl">Address</td>
-                  <td class="colon">:</td>
-                  <td class="val">${sCustomerAddress || '-'}</td>
-                </tr>
-              </table>
-            </div>
-
-            <div class="info-card">
-              <div class="card-title">TRADE-IN VOUCHER DETAILS</div>
-              <table class="info-table">
-                <tr>
-                  <td class="lbl">Voucher No</td>
-                  <td class="colon">:</td>
-                  <td class="val font-bold">${sInvoiceNo}</td>
-                </tr>
-                <tr>
-                  <td class="lbl">Voucher Date</td>
-                  <td class="colon">:</td>
-                  <td class="val">${voucherDateFormatted}</td>
-                </tr>
-                <tr>
-                  <td class="lbl">Purity / Class</td>
-                  <td class="colon">:</td>
-                  <td class="val font-bold">${(details && details[0]?.class) || selectedClass || '22K'}</td>
-                </tr>
-                <tr>
-                  <td class="lbl">Status</td>
-                  <td class="colon">:</td>
-                  <td class="val font-bold">ISSUED</td>
-                </tr>
-                <tr>
-                  <td class="lbl">Remarks</td>
-                  <td class="colon">:</td>
-                  <td class="val">${header?.remarks || remarks || '-'}</td>
-                </tr>
-              </table>
-            </div>
-          </div>
-
-          <!-- CURRENT SUMMARY HIGHLIGHT CARD -->
-          <div class="current-payment-card">
-            <div class="payment-title">TOTAL TRADE-IN SETTLEMENT VALUE</div>
-            <div class="payment-amount">$ ${totalCostSum.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
-          </div>
-
-          <!-- TRADE-IN ITEMS TABLE -->
-          <div class="table-section-title">ASSESSED TRADE-IN ITEMS & VALUATION</div>
-          <table class="detail-table">
-            <thead>
-              <tr>
-                <th style="width: 5%; text-align: center;">#</th>
-                <th style="width: 27%; text-align: left;">ITEM DESCRIPTION</th>
-                <th style="width: 12%; text-align: center;">PURITY / CLASS</th>
-                <th style="width: 12%; text-align: right;">GROSS WT (G)</th>
-                <th style="width: 12%; text-align: right;">STONE WT (G)</th>
-                <th style="width: 10%; text-align: right;">LOSS (G)</th>
-                <th style="width: 10%; text-align: right;">RATE / G ($)</th>
-                <th style="width: 12%; text-align: right;">TOTAL COST ($)</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${(details && details.length > 0)
-                ? details.map((item: any, idx: number) => `
-                  <tr>
-                    <td style="text-align: center; font-weight: 700;">${item.itemNo || idx + 1}</td>
-                    <td style="text-align: left; font-weight: 700;">${(item.description || 'Trade-In Item').trim()}</td>
-                    <td style="text-align: center; font-weight: 700;">${item.class || '22K'}</td>
-                    <td style="text-align: right; font-weight: 700;">${parseFloat(item.weight || 0).toFixed(3)}</td>
-                    <td style="text-align: right;">${parseFloat(item.stoneWeight || 0).toFixed(3)}</td>
-                    <td style="text-align: right;">${parseFloat(item.goldLoss || 0).toFixed(3)}</td>
-                    <td style="text-align: right;">$ ${parseFloat(item.costPerGram || 0).toFixed(2)}</td>
-                    <td style="text-align: right; font-weight: 800; color: #8C5D08;">$ ${parseFloat(item.totalCost || 0).toFixed(2)}</td>
-                  </tr>
-                `).join('')
-                : `
-                  <tr>
-                    <td style="text-align: center; font-weight: 700;">1</td>
-                    <td style="text-align: left; font-weight: 700;">TRADE-IN GOLD ITEMS</td>
-                    <td style="text-align: center; font-weight: 700;">22K</td>
-                    <td style="text-align: right; font-weight: 700;">0.000</td>
-                    <td style="text-align: right;">0.000</td>
-                    <td style="text-align: right;">0.000</td>
-                    <td style="text-align: right;">$ 0.00</td>
-                    <td style="text-align: right; font-weight: 800; color: #8C5D08;">$ ${totalCostSum.toFixed(2)}</td>
-                  </tr>
-                `
-              }
-            </tbody>
-          </table>
-
-          <!-- SUMMARY FINANCIAL BALANCES -->
-          <div class="totals-section">
-            <div class="totals-box">
-              <div class="total-row">
-                <span>Total Gross Weight:</span>
-                <span>${totalGrossWeight.toFixed(3)} g</span>
-              </div>
-              <div class="total-row">
-                <span>Total Stone Weight:</span>
-                <span>${totalStoneWtSum.toFixed(3)} g</span>
-              </div>
-              <div class="total-row">
-                <span>Total Gold Loss:</span>
-                <span>${totalGoldLossSum.toFixed(3)} g</span>
-              </div>
-              <div class="total-row total-row-grand">
-                <span>TOTAL SETTLEMENT VALUE:</span>
-                <span>$ ${totalCostSum.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        ${renderStandardReportFooter({
-          staff: {
-            staffLabel: 'PREPARED BY (STAFF)',
-            staffName: 'Staff',
-            receiverLabel: 'SUPPLIER / AUTHORIZED RECEIVER',
-            receiverName: (sCustomerName || '-').trim()
-          }
-        })}
-      </div>
-    `;
-
-    const printPagesHtml = `
-      ${generatePageMarkup('CUSTOMER COPY')}
-      ${generatePageMarkup('OFFICE COPY')}
-    `;
-
-    return `
-      <!DOCTYPE html>
-      <html>
-        <head>
-          <meta charset="utf-8" />
-          <title>${sReportTitle} - ${sInvoiceNo}</title>
-          <style>
-            @page {
-              size: A4 portrait;
-              margin: 0 !important;
-            }
-            ${getStandardReportCss()}
-
-            @media print {
-              @page {
-                margin: 0 !important;
-              }
-              html, body {
-                width: 210mm !important;
-                height: 100% !important;
-                margin: 0 !important;
-                padding: 0 !important;
-                background: #FFFFFF !important;
-                -webkit-print-color-adjust: exact !important;
-                print-color-adjust: exact !important;
-              }
-              .page-sheet {
-                width: 210mm !important;
-                min-height: 297mm !important;
-                height: 297mm !important;
-                margin: 0 !important;
-                padding: 12mm 14mm !important;
-                box-shadow: none !important;
-                display: flex !important;
-                flex-direction: column !important;
-                justify-content: space-between !important;
-                box-sizing: border-box !important;
-                page-break-after: always !important;
-                break-after: page !important;
-              }
-              .page-sheet:last-child {
-                page-break-after: auto !important;
-                break-after: auto !important;
-              }
-            }
-
-            html, body {
-              height: 100%;
-              margin: 0;
-              padding: 0;
-            }
-
-            .page-sheet {
-              width: 210mm;
-              min-height: 297mm;
-              padding: 12mm 14mm;
-              display: flex;
-              flex-direction: column;
-              justify-content: space-between;
-              box-sizing: border-box;
-            }
-
-            .report-main-content {
-              flex-grow: 1;
-            }
-
-            .std-footer-container {
-              margin-top: auto !important;
-              padding-top: 14px !important;
-              page-break-inside: avoid !important;
-              break-inside: avoid !important;
-            }
-
-            *, *:before, *:after, body, div, table, tr, th, td, span, p, h1, h2, h3, h4, h5, h6 {
-              font-family: 'Cambria', Georgia, 'Times New Roman', serif !important;
-            }
-
-            /* GOLD RATES BANNER */
-            .gold-rate-strip {
-              display: flex;
-              justify-content: space-around;
-              background: #FAF8F5;
-              border: 1px solid #C49A45;
-              border-radius: 4px;
-              padding: 6px 12px;
-              margin-top: 6px;
-              margin-bottom: 12px;
-              font-size: 11px;
-              font-weight: 700;
-              color: #222222;
-            }
-            .rate-cell span.rate-lbl {
-              color: #222222;
-              font-weight: 700;
-            }
-            .rate-cell span.rate-val {
-              color: #8C5D08;
-              font-weight: 800;
-              margin-left: 4px;
-            }
-
-            /* TWO-COLUMN INFO */
-            .info-grid {
-              display: grid;
-              grid-template-columns: 1fr 1fr;
-              gap: 16px;
-              margin-bottom: 12px;
-            }
-            .info-card {
-              border: 1px solid #C49A45;
-              background: #FAF8F5;
-              border-radius: 4px;
-              padding: 10px 14px;
-            }
-            .card-title {
-              font-size: 11.5px;
-              font-weight: 800;
-              color: #8C5D08;
-              border-bottom: 1px dotted #DDC89A;
-              padding-bottom: 5px;
-              margin-bottom: 8px;
-              text-transform: uppercase;
-              letter-spacing: 0.5px;
-            }
-            .info-table {
-              width: 100%;
-              border-collapse: collapse;
-              font-size: 11px;
-            }
-            .info-table td {
-              padding: 2px 0;
-              vertical-align: top;
-              line-height: 1.35;
-            }
-            .info-table .lbl {
-              width: 130px;
-              font-weight: 700;
-              color: #222222;
-            }
-            .info-table .colon {
-              width: 15px;
-              font-weight: 700;
-              color: #222222;
-              text-align: center;
-            }
-            .info-table .val {
-              color: #222222;
-              font-weight: 700;
-              word-break: break-word;
-            }
-            .font-bold {
-              font-weight: 800;
-            }
-
-            /* CURRENT HIGHLIGHT CARD */
-            .current-payment-card {
-              background: #FAF8F5;
-              border: 1px solid #C49A45;
-              border-radius: 4px;
-              padding: 10px 16px;
-              text-align: center;
-              margin-bottom: 12px;
-            }
-            .payment-title {
-              font-size: 11px;
-              font-weight: 800;
-              color: #8C5D08;
-              letter-spacing: 0.8px;
-              text-transform: uppercase;
-              margin-bottom: 2px;
-            }
-            .payment-amount {
-              font-size: 24px;
-              font-weight: 800;
-              color: #8C5D08;
-              letter-spacing: 1px;
-            }
-
-            /* TABLE */
-            .table-section-title {
-              font-size: 11px;
-              font-weight: 800;
-              color: #8C5D08;
-              text-transform: uppercase;
-              letter-spacing: 0.5px;
-              margin-bottom: 6px;
-            }
-            .detail-table {
-              width: 100%;
-              border-collapse: collapse;
-              margin-bottom: 12px;
-              font-size: 10.5px;
-            }
-            .detail-table th {
-              background: #8C5D08;
-              color: #FFFFFF;
-              text-align: left;
-              padding: 6px 8px;
-              font-weight: 800;
-              border: 1px solid #734C06;
-              text-transform: uppercase;
-              font-size: 10px;
-              letter-spacing: 0.5px;
-            }
-            .detail-table td {
-              padding: 6px 8px;
-              border: 1px solid #D9C8A5;
-              background: #FFFFFF;
-              color: #222222;
-            }
-            .detail-table tr:nth-child(even) td {
-              background: #FAF8F5;
-            }
-
-            /* TOTALS SECTION */
-            .totals-section {
-              display: flex;
-              justify-content: flex-end;
-              margin-bottom: 14px;
-            }
-            .totals-box {
-              width: 330px;
-              border: 1px solid #C49A45;
-              background: #FAF8F5;
-              border-radius: 4px;
-              padding: 8px 12px;
-            }
-            .total-row {
-              display: flex;
-              justify-content: space-between;
-              font-size: 11.5px;
-              padding: 2.5px 0;
-              color: #222222;
-              font-weight: 700;
-            }
-            .total-row-grand {
-              border-top: 2px solid #8C5D08;
-              margin-top: 4px;
-              padding-top: 4px;
-              font-weight: 800;
-              font-size: 13.5px;
-              color: #8C5D08;
-            }
-          </style>
-        </head>
-        <body>
-          ${printPagesHtml}
-        </body>
-      </html>
-    `;
-  };
-
-  // Hidden iframe Print handler
-  const handlePrint = async (targetInvoiceNo?: string, isReprintMode: boolean = false) => {
-    try {
-      setLoading(true);
-      const printResult = await fetchPrintData(targetInvoiceNo);
-
-      if (!printResult.success || !printResult.header) {
-        showToast('Trade-in record not found for: ' + (targetInvoiceNo || invoiceNo || 'active voucher'), 'error');
-        return;
-      }
-
-      const sInvoiceNo = printResult.targetNo || invoiceNo || 'Trade-In';
-      const htmlContent = buildTradeInGoldIssueHtml(sInvoiceNo, isReprintMode, printResult);
-      const docTitle = isReprintMode ? `Trade-In Gold Issue (Duplicate) - ${sInvoiceNo}` : `Trade-In Gold Issue - ${sInvoiceNo}`;
-
-      const printScript = `
-        <script>
-          window.onload = function() {
-            setTimeout(function() {
-              window.print();
-            }, 300);
-          };
-        </script>
-      `;
-      const printHtml = htmlContent.replace('</body>', `${printScript}</body>`);
-
-      if (Platform.OS === 'web' && typeof window !== 'undefined') {
-        const frameId = '__trade_in_gold_issue_print_frame__';
-        let iframe = document.getElementById(frameId) as HTMLIFrameElement;
-        if (!iframe) {
-          iframe = document.createElement('iframe');
-          iframe.id = frameId;
-          iframe.style.position = 'fixed';
-          iframe.style.right = '0';
-          iframe.style.bottom = '0';
-          iframe.style.width = '0';
-          iframe.style.height = '0';
-          iframe.style.border = '0';
-          iframe.style.visibility = 'hidden';
-          document.body.appendChild(iframe);
-        }
-
-        const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
-        if (iframeDoc && iframe.contentWindow) {
-          iframeDoc.open();
-          iframeDoc.write(htmlContent);
-          iframeDoc.title = docTitle;
-          iframeDoc.close();
-
-          setTimeout(() => {
-            try {
-              iframe.contentWindow?.focus();
-              iframe.contentWindow?.print();
-              showToast(`Trade-in voucher ${sInvoiceNo} print dialog opened`, 'success');
-            } catch (printErr) {
-              console.error('Iframe print error:', printErr);
-              const printWindow = window.open('', '_blank', 'width=900,height=750');
-              if (printWindow) {
-                printWindow.document.open();
-                printWindow.document.write(printHtml);
-                printWindow.document.title = docTitle;
-                printWindow.document.close();
-              }
-            }
-          }, 350);
-        } else {
-          const printWindow = window.open('', '_blank', 'width=900,height=750');
-          if (printWindow) {
-            printWindow.document.open();
-            printWindow.document.write(printHtml);
-            printWindow.document.title = docTitle;
-            printWindow.document.close();
-            showToast('Trade-in voucher preview opened', 'success');
-          } else {
-            showToast('Popup blocker prevented opening print preview. Please allow popups.', 'error');
-          }
-        }
-      } else {
-        showToast('Print preview generated.', 'success');
-      }
-    } catch (err: any) {
-      console.error('Print Error:', err);
-      showToast('Error generating print preview: ' + (err.message || 'Error'), 'error');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // Dedicated PDF Download Functionality
-  const handleDownloadPdf = async (targetInvoiceNo?: string, isReprint: boolean = false) => {
-    try {
-      setLoading(true);
-      const printResult = await fetchPrintData(targetInvoiceNo);
-
-      if (!printResult.success || !printResult.header) {
-        showToast('Trade-in record not found for PDF export: ' + (targetInvoiceNo || invoiceNo || 'active voucher'), 'error');
-        return;
-      }
-
-      const sInvoiceNo = printResult.targetNo || invoiceNo || 'Trade-In';
-      const htmlContent = buildTradeInGoldIssueHtml(sInvoiceNo, isReprint, printResult);
-      const downloadFilename = `Trade_In_Gold_Issue_${sInvoiceNo.replace(/[^a-zA-Z0-9_-]/g, '_')}.pdf`;
-
-      const pdfRes = await fetch(`${API_URL}/export-pdf`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          html: htmlContent,
-          filename: downloadFilename
-        })
-      });
-
-      if (!pdfRes.ok) {
-        throw new Error('Server returned error while generating PDF');
-      }
-
-      const pdfBlob = await pdfRes.blob();
-
-      if (Platform.OS === 'web' && typeof window !== 'undefined') {
-        const url = URL.createObjectURL(pdfBlob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = downloadFilename;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        setTimeout(() => URL.revokeObjectURL(url), 1000);
-        showToast(`PDF downloaded successfully: ${downloadFilename}`, 'success');
-      } else {
-        showToast('PDF file generated successfully.', 'success');
-      }
-    } catch (err: any) {
-      console.error('PDF Export Error:', err);
-      showToast('Failed to download PDF: ' + (err.message || 'Error'), 'error');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // Dedicated Excel Download Functionality
-  const handleDownloadExcel = async (targetInvoiceNo?: string, isReprint: boolean = false) => {
-    const rawNo = (targetInvoiceNo || invoiceNo || '').trim();
-    if (!rawNo || rawNo === 'TI-DRAFT' || rawNo === 'DRAFT') {
-      showToast('Please save the Trade-In voucher first to export Excel from records.', 'error');
-      return;
-    }
-
-    try {
-      setLoading(true);
-      const excelRes = await fetch(`${API_URL}/export-excel`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          invoiceNo: rawNo,
-          isReprint: isReprint
-        })
-      });
-
-      if (!excelRes.ok) {
-        const errJson = await excelRes.json().catch(() => ({}));
-        throw new Error(errJson.message || 'Server error generating Excel file');
-      }
-
-      const excelBlob = await excelRes.blob();
-      const downloadFilename = `Trade_In_Gold_Issue_${rawNo.replace(/[^a-zA-Z0-9_-]/g, '_')}.xlsx`;
-
-      if (Platform.OS === 'web' && typeof window !== 'undefined') {
-        const url = URL.createObjectURL(excelBlob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = downloadFilename;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        setTimeout(() => URL.revokeObjectURL(url), 1000);
-        showToast(`Trade-In Excel downloaded: ${downloadFilename}`, 'success');
-      } else {
-        showToast('Excel file generated successfully.', 'success');
-      }
-    } catch (err: any) {
-      console.error('Excel Export Error:', err);
-      showToast('Failed to download Excel: ' + (err.message || 'Error'), 'error');
-    } finally {
-      setLoading(false);
-    }
-  };
+    return true;
+  });
 
   return (
-    <SafeAreaView style={styles.safeArea} edges={['top']}>
+    <SafeAreaView style={styles.safeArea} edges={['top', 'bottom']}>
       <Stack.Screen options={{ headerShown: false }} />
 
-      {/* LUXURY ROYAL GOLD HEADER BAR */}
-      <View style={styles.headerBar}>
+      {/* Top Application Header matching SmartGold Standard */}
+      <View style={styles.topNavHeader}>
         <View style={styles.headerLeft}>
-          <TouchableOpacity style={styles.backBtn} onPress={() => router.back()} activeOpacity={0.7}>
-            <Ionicons name="arrow-back" size={20} color="#3B2D17" />
+          <TouchableOpacity
+            style={styles.backBtn}
+            onPress={() => router.back()}
+            activeOpacity={0.7}
+          >
+            <Ionicons name="arrow-back" size={18} color="#3B2D17" />
           </TouchableOpacity>
           <View>
-            <ThemedText style={styles.headerTitle}>Trade In Gold Issue</ThemedText>
-            <ThemedText style={styles.headerSubtitle}>Old Gold Purchase, Assessment & Settlement</ThemedText>
+            <ThemedText style={styles.headerTitle}>TRADE IN GOLD ISSUE</ThemedText>
+            <ThemedText style={styles.headerSubtitle}>
+              Issue Voucher #{tradeIssueNo || '...'} • SmartGold System
+            </ThemedText>
           </View>
-          {(loading || saving) && <ActivityIndicator size="small" color="#B48218" style={{ marginLeft: 8 }} />}
         </View>
 
         <View style={styles.headerRight}>
+          {/* <TouchableOpacity
+            style={styles.headerActionBtn}
+            onPress={() => openLOV('issue')}
+            activeOpacity={0.7}
+          >
+            <Ionicons name="search-outline" size={14} color="#5C4A28" />
+            <ThemedText style={styles.headerActionBtnText}>Find Issue</ThemedText>
+          </TouchableOpacity> */}
+
           <TouchableOpacity
-            style={[styles.actionBtn, styles.clearBtn]}
+            style={styles.headerActionBtn}
             onPress={handleClear}
-            activeOpacity={0.8}
-            disabled={saving || loading}
+            activeOpacity={0.7}
           >
             <Ionicons name="refresh-outline" size={14} color="#5C4A28" />
-            <ThemedText style={styles.clearBtnText}>Clear</ThemedText>
+            <ThemedText style={styles.headerActionBtnText}>Clear</ThemedText>
           </TouchableOpacity>
 
           <TouchableOpacity
-            style={[styles.actionBtn, styles.reprintBtn]}
+            style={styles.headerActionBtn}
             onPress={() => {
-              const targetNo = (invoiceNo || '').trim();
-              if (!targetNo && gridData.length === 0) {
-                showToast('Please select/save a Trade-In Voucher or add items to print.', 'error');
-                return;
+              if (tradeIssueNo.trim()) {
+                setPrintIssueNo(tradeIssueNo.trim());
+                setIsPrintModalVisible(true);
+              } else {
+                showToast('Please specify an Issue No to print.', 'error');
               }
-              setActivePrintInvoiceNo(targetNo);
-              setActivePrintIsReprint(Boolean(targetNo && targetNo !== 'TI-SAVED'));
-              setIsPrintModalVisible(true);
             }}
-            activeOpacity={0.8}
-            disabled={saving || loading}
+            activeOpacity={0.7}
           >
             <Ionicons name="print-outline" size={14} color="#5C4A28" />
-            <ThemedText style={styles.clearBtnText}>Print</ThemedText>
+            <ThemedText style={styles.headerActionBtnText}>Print</ThemedText>
           </TouchableOpacity>
 
           <TouchableOpacity
-            style={[styles.actionBtn, styles.saveBtn]}
-            onPress={handleSave}
-            activeOpacity={0.8}
-            disabled={saving || loading}
+            style={[styles.headerActionBtn, styles.headerSaveBtn]}
+            onPress={handleProceed}
+            disabled={saving}
+            activeOpacity={0.7}
           >
             {saving ? (
               <ActivityIndicator size="small" color="#9E6D08" />
             ) : (
               <>
-                <Ionicons name="checkmark-done-outline" size={15} color="#9E6D08" />
-                <ThemedText style={styles.saveBtnText}>Save Trade-In</ThemedText>
+                <Ionicons name="checkmark-done" size={16} color="#9E6D08" />
+                <ThemedText style={styles.headerSaveBtnText}>Proceed</ThemedText>
               </>
             )}
           </TouchableOpacity>
         </View>
       </View>
 
-      {/* TOAST ALERTS */}
+      {/* Toast Alert */}
       {toast && (
-        <View style={[styles.toast, toast.type === 'error' ? styles.toastError : styles.toastSuccess]}>
+        <View
+          style={[
+            styles.toastContainer,
+            toast.type === 'error' ? styles.toastError : styles.toastSuccess,
+          ]}
+        >
           <Ionicons
             name={toast.type === 'error' ? 'alert-circle' : 'checkmark-circle'}
             size={16}
-            color="#FFFFFF"
+            color="#FFF"
             style={{ marginRight: 6 }}
           />
-          <ThemedText style={styles.toastText}>{toast.message}</ThemedText>
+          <Text style={styles.toastText}>{toast.message}</Text>
         </View>
       )}
 
-      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
-        <ScrollView contentContainerStyle={styles.scrollContainer} keyboardShouldPersistTaps="handled">
-          {/* CARD 1: CUSTOMER & INVOICE DETAILS */}
-          <View style={styles.goldCard}>
+      {/* Main Form Content */}
+      <ScrollView
+        contentContainerStyle={styles.container}
+        keyboardShouldPersistTaps="handled"
+      >
+        {/* TOP SECTION: Supplier, Currency & Date Info (Left) + Premium Financial Summary Cards (Right) */}
+        <View style={styles.topSection}>
+          {/* Main Voucher Info Card */}
+          <View style={styles.voucherCard}>
             <View style={styles.cardHeaderBanner}>
-              <View style={styles.headerTitleContainer}>
-                <View style={styles.headerIconBadgeSmall}>
-                  <Ionicons name="person-outline" size={13} color="#B48218" />
+              <View style={styles.headerTitleRow}>
+                <View style={styles.headerIconBadge}>
+                  <Ionicons name="document-text-outline" size={14} color="#8D6409" />
                 </View>
-                <ThemedText style={styles.cardHeaderTitleSmall}>Customer & Docket Identification</ThemedText>
+                <ThemedText style={styles.cardHeaderTitle}>ISSUE VOUCHER & SUPPLIER DETAILS</ThemedText>
               </View>
 
-              {invoiceNo ? (
-                <View style={styles.invoiceBadge}>
-                  <ThemedText style={styles.invoiceBadgeLabel}>Voucher:</ThemedText>
-                  <ThemedText style={styles.invoiceBadgeValue}>{invoiceNo}</ThemedText>
+              <View style={styles.dateBadgeContainer}>
+                <Ionicons name="calendar-outline" size={13} color="#8D6409" style={{ marginRight: 4 }} />
+                <ThemedText style={styles.dateLabelText}>Date:</ThemedText>
+                <View style={styles.dateInputsInline}>
+                  <TextInput
+                    style={styles.dateInputPart}
+                    value={dd}
+                    onChangeText={setDd}
+                    maxLength={2}
+                    keyboardType="numeric"
+                  />
+                  <ThemedText style={styles.dateDash}>-</ThemedText>
+                  <TextInput
+                    style={styles.dateInputPart}
+                    value={mm}
+                    onChangeText={setMm}
+                    maxLength={2}
+                    keyboardType="numeric"
+                  />
+                  <ThemedText style={styles.dateDash}>-</ThemedText>
+                  <TextInput
+                    style={[styles.dateInputPart, { width: 44 }]}
+                    value={yy}
+                    onChangeText={setYy}
+                    maxLength={4}
+                    keyboardType="numeric"
+                  />
                 </View>
-              ) : null}
+              </View>
             </View>
 
             <View style={styles.cardBody}>
-              {/* Row 1: Invoice No, Customer Code + Lookup, Customer Name */}
-              <View style={styles.threeColumnGrid}>
-                {/* Invoice No */}
-                <View style={[styles.inlineFieldRow, { flex: 1, minWidth: 220 }]}>
-                  <ThemedText style={styles.inlineFieldLabel}>Invoice No</ThemedText>
+              {/* Row 1: Issue No & Search */}
+              <View style={styles.formRow}>
+                <ThemedText style={styles.rowLabel}>Issue No</ThemedText>
+                <View style={styles.inputWithBtnContainer}>
                   <TextInput
-                    style={[styles.formInput, styles.readonlyInput, { flex: 1 }]}
-                    value={invoiceNo}
-                    editable={false}
-                    placeholder="Auto Generated"
-                    placeholderTextColor="#9E8D77"
+                    style={[styles.input, styles.inputAttached, { width: 140, fontWeight: 'bold' }]}
+                    value={tradeIssueNo}
+                    onChangeText={setTradeIssueNo}
+                    placeholder="Issue No..."
+                    placeholderTextColor="#A89E8D"
                   />
-                </View>
-
-                {/* Customer Code */}
-                <View style={[styles.inlineFieldRow, { flex: 1.2, minWidth: 250 }]}>
-                  <ThemedText style={styles.inlineFieldLabel}>Customer *</ThemedText>
-                  <View style={styles.inputWithLookup}>
-                    <TextInput
-                      style={[styles.formInput, styles.inputAttached, { flex: 1 }]}
-                      value={customerCode}
-                      onChangeText={setCustomerCode}
-                      onBlur={() => lookupCustomerByCode(customerCode)}
-                      placeholder="Enter/Search Code..."
-                      placeholderTextColor="#9E8D77"
-                    />
-                    <TouchableOpacity
-                      style={styles.attachedLookupBtn}
-                      onPress={fetchCustomers}
-                      activeOpacity={0.7}
-                    >
-                      <Ionicons name="search" size={13} color="#7D5E19" />
-                    </TouchableOpacity>
-                  </View>
-                </View>
-
-                {/* Customer Name */}
-                <View style={[styles.inlineFieldRow, { flex: 1.5, minWidth: 260 }]}>
-                  <ThemedText style={styles.inlineFieldLabel}>Name</ThemedText>
-                  <TextInput
-                    style={[styles.formInput, styles.readonlyInput, { flex: 1 }]}
-                    value={customerName}
-                    editable={false}
-                    placeholder="Auto-populated"
-                    placeholderTextColor="#9E8D77"
-                  />
+                  <TouchableOpacity
+                    style={styles.btnSearchDots}
+                    onPress={() => openLOV('issue')}
+                    activeOpacity={0.8}
+                  >
+                    <Ionicons name="search" size={13} color="#6E5528" />
+                  </TouchableOpacity>
                 </View>
               </View>
 
-              {/* Row 2: Address & Remarks */}
-              <View style={[styles.twoColumnGrid, { marginTop: 6 }]}>
-                {/* Address */}
-                <View style={[styles.inlineFieldRow, { flex: 1.8, minWidth: 280 }]}>
-                  <ThemedText style={styles.inlineFieldLabel}>Address</ThemedText>
+              {/* Row 2: Supplier Code & Name */}
+              <View style={[styles.formRow, { marginTop: 8 }]}>
+                <ThemedText style={styles.rowLabel}>Supplier</ThemedText>
+                <View style={styles.inputWithBtnContainer}>
                   <TextInput
-                    style={[styles.formInput, styles.readonlyInput, { flex: 1 }]}
-                    value={combinedAddress}
-                    editable={false}
-                    placeholder="Auto-populated address"
-                    placeholderTextColor="#9E8D77"
+                    style={[styles.input, styles.inputAttached, { width: 120 }]}
+                    value={supplierCode}
+                    onChangeText={setSupplierCode}
+                    placeholder="Code..."
+                    placeholderTextColor="#A89E8D"
                   />
+                  <TouchableOpacity
+                    style={styles.btnSearchDots}
+                    onPress={() => openLOV('supplier')}
+                    activeOpacity={0.8}
+                  >
+                    <Ionicons name="search" size={13} color="#6E5528" />
+                  </TouchableOpacity>
                 </View>
+                <TextInput
+                  style={[styles.input, styles.readonlyInput, { flex: 1, marginLeft: 8 }]}
+                  value={supplierName}
+                  placeholder="Supplier Name..."
+                  placeholderTextColor="#A89E8D"
+                  editable={false}
+                />
+              </View>
 
-                {/* Remarks */}
-                <View style={[styles.inlineFieldRow, { flex: 1.5, minWidth: 260 }]}>
-                  <ThemedText style={styles.inlineFieldLabel}>Remarks</ThemedText>
+              {/* Row 3: Currency & Rate */}
+              <View style={[styles.formRow, { marginTop: 8 }]}>
+                <ThemedText style={styles.rowLabel}>Currency</ThemedText>
+                <View style={styles.inputWithBtnContainer}>
                   <TextInput
-                    style={[styles.formInput, { flex: 1 }]}
-                    value={remarks}
-                    onChangeText={setRemarks}
-                    placeholder="Trade-in notes..."
-                    placeholderTextColor="#9E8D77"
+                    style={[styles.input, styles.inputAttached, { width: 85 }]}
+                    value={currencyCode}
+                    onChangeText={setCurrencyCode}
+                    placeholder="Currency"
+                    placeholderTextColor="#A89E8D"
+                  />
+                  <TouchableOpacity
+                    style={styles.btnSearchDots}
+                    onPress={() => openLOV('currency')}
+                    activeOpacity={0.8}
+                  >
+                    <Ionicons name="search" size={13} color="#6E5528" />
+                  </TouchableOpacity>
+                </View>
+                <TextInput
+                  style={[styles.input, styles.readonlyInput, { flex: 1, marginLeft: 8 }]}
+                  value={currencyName}
+                  placeholder="Currency Name"
+                  placeholderTextColor="#A89E8D"
+                  editable={false}
+                />
+                <View style={{ flexDirection: 'row', alignItems: 'center', marginLeft: 8 }}>
+                  <ThemedText style={[styles.rowLabel, { width: 'auto', marginRight: 6 }]}>Rate</ThemedText>
+                  <TextInput
+                    style={[styles.input, styles.readonlyInput, { width: 75, textAlign: 'right' }]}
+                    value={currencyRate}
+                    placeholder=""
+                    placeholderTextColor="#A89E8D"
+                    editable={false}
                   />
                 </View>
               </View>
             </View>
           </View>
 
-          {/* CARD 2: GOLD PURITY CLASS & VALUATION RATES */}
-          <View style={[styles.goldCard, { marginTop: 10 }]}>
-            <View style={styles.cardHeaderBanner}>
-              <View style={styles.headerTitleContainer}>
-                <View style={styles.headerIconBadgeSmall}>
-                  <Ionicons name="ribbon-outline" size={13} color="#B48218" />
-                </View>
-                <ThemedText style={styles.cardHeaderTitleSmall}>Gold Purity Class & Live Valuation Rates</ThemedText>
+          {/* Right: Premium Financial Status Cards */}
+          <View style={styles.rightFinancials}>
+            {/* Total Issued Wt */}
+            <View style={styles.financialCard}>
+              <View style={styles.financialCardHeader}>
+                <Ionicons name="scale-outline" size={13} color="#8D6409" />
+                <ThemedText style={styles.financialCardTitle}>Total Issued Wt</ThemedText>
+              </View>
+              <View style={styles.financialValueBox}>
+                <ThemedText style={styles.financialValueText}>
+                  {totalIssuedWt} <Text style={{ fontSize: 11, fontWeight: 'normal', color: '#8D6409' }}>g</Text>
+                </ThemedText>
               </View>
             </View>
 
-            <View style={styles.cardBody}>
-              <View style={styles.classAndRatesRow}>
-                {/* Gold Class Pills */}
-                <View style={styles.classPillsWrapper}>
-                  <ThemedText style={[styles.inlineFieldLabel, { width: 55 }]}>Class</ThemedText>
-                  <View style={styles.classPillsGroup}>
-                    {CLASSES.map((cls) => {
-                      const isSelected = selectedClass === cls;
-                      return (
-                        <TouchableOpacity
-                          key={cls}
-                          style={[styles.classPill, isSelected && styles.classPillSelected]}
-                          onPress={() => setSelectedClass(cls)}
-                          activeOpacity={0.7}
-                        >
-                          <Ionicons
-                            name={isSelected ? 'radio-button-on' : 'radio-button-off'}
-                            size={12}
-                            color={isSelected ? '#9E6D08' : '#7A6855'}
-                          />
-                          <ThemedText style={[styles.classPillText, isSelected && styles.classPillTextSelected]}>
-                            {cls}
-                          </ThemedText>
-                        </TouchableOpacity>
-                      );
-                    })}
-                  </View>
-                </View>
+            {/* Total No. of Bills */}
+            <View style={styles.financialCard}>
+              <View style={styles.financialCardHeader}>
+                <Ionicons name="documents-outline" size={13} color="#8D6409" />
+                <ThemedText style={styles.financialCardTitle}>No. of Bills</ThemedText>
+              </View>
+              <View style={styles.financialValueBox}>
+                <ThemedText style={styles.financialValueText}>
+                  {totalNoOfBills}
+                </ThemedText>
+              </View>
+            </View>
 
-                {/* Rates & Loss Group */}
-                <View style={styles.ratesInputGroup}>
-                  {/* Loss % */}
-                  <View style={[styles.inlineFieldRow, { width: 140, flex: 0 }]}>
-                    <ThemedText style={[styles.inlineFieldLabel, { width: 55 }]}>Loss (%)</ThemedText>
-                    <TextInput
-                      style={[styles.formInput, { flex: 1, textAlign: 'right' }]}
-                      value={lossPerc}
-                      onChangeText={setLossPerc}
-                      keyboardType="numeric"
-                    />
-                  </View>
+            {/* Cost / Gram (Editable) */}
+            <View style={[styles.financialCard, styles.tradeInCard]}>
+              <View style={styles.financialCardHeader}>
+                <Ionicons name="pricetag-outline" size={13} color="#8D6409" />
+                <ThemedText style={styles.financialCardTitle}>Cost / Gram</ThemedText>
+              </View>
+              <View style={styles.financialValueBox}>
+                <ThemedText style={styles.currencyPrefix}>$</ThemedText>
+                <TextInput
+                  style={styles.financialInput}
+                  value={costPerGram}
+                  onChangeText={handleCostPerGramChange}
+                  keyboardType="numeric"
+                  placeholder="0.00"
+                  placeholderTextColor="#A89E8D"
+                />
+              </View>
+            </View>
 
-                  {/* Cost Per Gram */}
-                  <View style={[styles.inlineFieldRow, { width: 175, flex: 0 }]}>
-                    <ThemedText style={[styles.inlineFieldLabel, { width: 75 }]}>Cost/Gram ($)</ThemedText>
-                    <TextInput
-                      style={[styles.formInput, styles.highlightTotal, { flex: 1, textAlign: 'right' }]}
-                      value={costPerGram}
-                      onChangeText={setCostPerGram}
-                      keyboardType="numeric"
-                    />
-                  </View>
-                </View>
+            {/* Total Price (Calculated) */}
+            <View style={[styles.financialCard, { borderColor: '#2E7D32', borderWidth: 1.5 }]}>
+              <View style={[styles.financialCardHeader, { backgroundColor: '#E8F5E9', borderBottomColor: '#C8E6C9' }]}>
+                <Ionicons name="cash-outline" size={13} color="#2E7D32" />
+                <ThemedText style={[styles.financialCardTitle, { color: '#1B5E20' }]}>Total Price</ThemedText>
+              </View>
+              <View style={[styles.financialValueBox, { backgroundColor: '#F1F8E9' }]}>
+                <ThemedText style={[styles.currencyPrefix, { color: '#2E7D32' }]}>$</ThemedText>
+                <ThemedText style={[styles.financialValueText, { color: '#1B5E20' }]}>
+                  {totalPrice}
+                </ThemedText>
               </View>
             </View>
           </View>
+        </View>
 
-          {/* CARD 3: TRADE-IN ITEMS TABLE & ENTRY SUBFORM (100% FULL WIDTH) */}
-          <View style={[styles.goldCard, { marginTop: 10 }]}>
-            <View style={styles.cardHeaderBanner}>
-              <View style={styles.headerTitleContainer}>
-                <View style={styles.headerIconBadgeSmall}>
-                  <Ionicons name="sparkles-outline" size={13} color="#B48218" />
-                </View>
-                <ThemedText style={styles.cardHeaderTitleSmall}>Trade-In Items Assessment</ThemedText>
-                <View style={styles.counterBadge}>
-                  <ThemedText style={styles.counterBadgeText}>{gridData.length} items</ThemedText>
-                </View>
+        {/* MIDDLE SECTION: Scan / Search Bar + Data Grid */}
+        <View style={styles.gridSectionCard}>
+          {/* Scan Bar Banner */}
+          <View style={styles.scanBanner}>
+            <View style={styles.headerTitleRow}>
+              <View style={styles.headerIconBadge}>
+                <Ionicons name="sparkles-outline" size={14} color="#8D6409" />
               </View>
+              <ThemedText style={styles.cardHeaderTitle}>TRADE-IN GOLD BILLS TO ISSUE</ThemedText>
             </View>
 
-            {/* Table Header (100% Full Width) */}
-            <View style={styles.tableHeadRow}>
-              <ThemedText style={[styles.tableHeadCell, { width: 36, textAlign: 'center' }]}>#</ThemedText>
-              <ThemedText style={[styles.tableHeadCell, { flex: 2.2 }]}>Description</ThemedText>
-              <ThemedText style={[styles.tableHeadCell, { width: 70, textAlign: 'center' }]}>Class</ThemedText>
-              <ThemedText style={[styles.tableHeadCell, { flex: 1, textAlign: 'right' }]}>Weight (g)</ThemedText>
-              <ThemedText style={[styles.tableHeadCell, { flex: 1, textAlign: 'right' }]}>Stone (g)</ThemedText>
-              <ThemedText style={[styles.tableHeadCell, { flex: 1, textAlign: 'right' }]}>Loss (g)</ThemedText>
-              <ThemedText style={[styles.tableHeadCell, { flex: 1.1, textAlign: 'right' }]}>Rate ($)</ThemedText>
-              <ThemedText style={[styles.tableHeadCell, { flex: 1.3, textAlign: 'right' }]}>Total ($)</ThemedText>
-              <ThemedText style={[styles.tableHeadCell, { width: 60, textAlign: 'center' }]}>Action</ThemedText>
-            </View>
+            <View style={styles.scanInputGroup}>
+              <ThemedText style={styles.scanPromptLabel}>Scan / Enter Trade Bill:</ThemedText>
+              <View style={styles.inputWithBtnContainer}>
+                <TextInput
+                  style={[styles.input, styles.inputAttached, { width: 150 }]}
+                  value={tradeBillNo}
+                  onChangeText={setTradeBillNo}
+                  placeholder="Bill / Invoice No..."
+                  placeholderTextColor="#A89E8D"
+                  onSubmitEditing={() => handleAddTradeBill()}
+                />
+                <TouchableOpacity
+                  style={styles.btnSearchDots}
+                  onPress={() => openLOV('tradebill')}
+                  activeOpacity={0.8}
+                >
+                  <Ionicons name="search" size={13} color="#6E5528" />
+                </TouchableOpacity>
+              </View>
 
-            {/* Table Body */}
-            {gridData.length === 0 ? (
-              <View style={styles.emptyTableContainer}>
-                <Ionicons name="cube-outline" size={28} color="#D4C3A3" />
-                <ThemedText style={styles.emptyTableText}>
-                  No trade-in items assessed. Use the form below to add gold items.
+              <TouchableOpacity
+                style={styles.addBillBtn}
+                onPress={() => handleAddTradeBill()}
+                activeOpacity={0.8}
+              >
+                <Ionicons name="add" size={14} color="#9E6D08" style={{ marginRight: 2 }} />
+                <ThemedText style={styles.addBillBtnText}>Add Bill</ThemedText>
+              </TouchableOpacity>
+            </View>
+          </View>
+
+          {/* Table Header */}
+          <View style={styles.gridHeader}>
+            <ThemedText style={[styles.gridHeaderText, { width: 45, textAlign: 'center' }]}>#</ThemedText>
+            <ThemedText style={[styles.gridHeaderText, { flex: 2 }]}>Invoice No</ThemedText>
+            <ThemedText style={[styles.gridHeaderText, { flex: 1.5 }]}>Date</ThemedText>
+            <ThemedText style={[styles.gridHeaderText, { flex: 1.5 }]}>Class</ThemedText>
+            <ThemedText style={[styles.gridHeaderText, { width: 130, textAlign: 'right' }]}>Purchase Weight (g)</ThemedText>
+            <ThemedText style={[styles.gridHeaderText, { width: 130, textAlign: 'right' }]}>Issued Weight (g)</ThemedText>
+            <ThemedText style={[styles.gridHeaderText, { width: 60, textAlign: 'center' }]}>Action</ThemedText>
+          </View>
+
+          {/* Table Body */}
+          <View style={styles.gridBody}>
+            {gridItems.length === 0 ? (
+              <View style={styles.gridEmptyArea}>
+                <Ionicons name="receipt-outline" size={32} color="#C8BEAC" />
+                <ThemedText style={styles.emptyGridText}>No Trade-In bills added to issue list yet</ThemedText>
+                <ThemedText style={styles.emptyGridSubText}>
+                  Scan or search a Trade Bill number above and click "Add Bill"
                 </ThemedText>
               </View>
             ) : (
-              gridData.map((item, index) => (
-                <View key={index} style={styles.tableRow}>
-                  <ThemedText style={[styles.tableCell, { width: 36, textAlign: 'center', color: '#8D6409' }]}>
-                    {index + 1}
-                  </ThemedText>
-                  <View style={{ flex: 2.2, paddingHorizontal: 4 }}>
-                    <ThemedText style={[styles.tableCell, { fontWeight: 'bold' }]} numberOfLines={1}>
-                      {item.description}
-                    </ThemedText>
-                    {item.diamondDescription ? (
-                      <ThemedText style={{ fontSize: 10, color: '#7A6855' }} numberOfLines={1}>
-                        {item.diamondDescription}
-                      </ThemedText>
-                    ) : null}
-                  </View>
-                  <View style={{ width: 70, alignItems: 'center' }}>
-                    <View style={styles.classTag}>
-                      <ThemedText style={styles.classTagText}>{item.class}</ThemedText>
-                    </View>
-                  </View>
-                  <ThemedText style={[styles.tableCell, { flex: 1, textAlign: 'right' }]}>
-                    {item.weight}
-                  </ThemedText>
-                  <ThemedText style={[styles.tableCell, { flex: 1, textAlign: 'right', color: '#7A6855' }]}>
-                    {item.stoneWeight}
-                  </ThemedText>
-                  <ThemedText style={[styles.tableCell, { flex: 1, textAlign: 'right', color: '#C62828' }]}>
-                    {item.goldLoss}
-                  </ThemedText>
-                  <ThemedText style={[styles.tableCell, { flex: 1.1, textAlign: 'right' }]}>
-                    {item.costPerGram}
-                  </ThemedText>
-                  <ThemedText style={[styles.tableCell, styles.amountCell, { flex: 1.3, textAlign: 'right' }]}>
-                    {item.totalCost}
-                  </ThemedText>
-                  <View style={{ width: 60, alignItems: 'center' }}>
-                    <TouchableOpacity
-                      style={styles.deleteRowBtn}
-                      onPress={() => handleDeleteRow(index)}
-                      activeOpacity={0.7}
-                    >
-                      <Ionicons name="trash-outline" size={14} color="#C62828" />
-                    </TouchableOpacity>
-                  </View>
-                </View>
-              ))
-            )}
-
-            {/* SUBFORM: ITEM ENTRY BAR */}
-            <View style={styles.itemEntryBar}>
-              {/* Row 1: Description, Diamond Description */}
-              <View style={styles.twoColumnGrid}>
-                <View style={[styles.inlineFieldRow, { flex: 1.5, minWidth: 260 }]}>
-                  <ThemedText style={styles.inlineFieldLabel}>Description *</ThemedText>
-                  <TextInput
-                    style={[styles.formInput, { flex: 1 }]}
-                    value={description}
-                    onChangeText={setDescription}
-                    placeholder="e.g. 22K Bangle, Scrap Gold..."
-                    placeholderTextColor="#9E8D77"
-                  />
-                </View>
-
-                <View style={[styles.inlineFieldRow, { flex: 1.5, minWidth: 260 }]}>
-                  <ThemedText style={styles.inlineFieldLabel}>Diamond / Gem</ThemedText>
-                  <TextInput
-                    style={[styles.formInput, { flex: 1 }]}
-                    value={diamondDescription}
-                    onChangeText={setDiamondDescription}
-                    placeholder="Diamond or gemstone details..."
-                    placeholderTextColor="#9E8D77"
-                  />
-                </View>
-              </View>
-
-              {/* Row 2: Weight, Stone Weight, Gold Loss, Total Cost + Add Button */}
-              <View style={[styles.fourColumnGrid, { marginTop: 6 }]}>
-                {/* Gross Weight */}
-                <View style={[styles.inlineFieldRow, { flex: 1, minWidth: 150 }]}>
-                  <ThemedText style={[styles.inlineFieldLabel, { width: 70 }]}>Weight (g) *</ThemedText>
-                  <TextInput
-                    style={[styles.formInput, { flex: 1, textAlign: 'right' }]}
-                    value={weight}
-                    onChangeText={setWeight}
-                    onBlur={calculateTotalCost}
-                    keyboardType="numeric"
-                    placeholder="0.000"
-                    placeholderTextColor="#9E8D77"
-                  />
-                </View>
-
-                {/* Stone Weight */}
-                <View style={[styles.inlineFieldRow, { flex: 1, minWidth: 150 }]}>
-                  <ThemedText style={[styles.inlineFieldLabel, { width: 70 }]}>Stone (g)</ThemedText>
-                  <TextInput
-                    style={[styles.formInput, { flex: 1, textAlign: 'right' }]}
-                    value={stoneWeight}
-                    onChangeText={setStoneWeight}
-                    keyboardType="numeric"
-                    placeholder="0.000"
-                    placeholderTextColor="#9E8D77"
-                  />
-                </View>
-
-                {/* Gold Loss */}
-                <View style={[styles.inlineFieldRow, { flex: 1, minWidth: 150 }]}>
-                  <ThemedText style={[styles.inlineFieldLabel, { width: 70 }]}>Loss (g)</ThemedText>
-                  <TextInput
-                    style={[styles.formInput, { flex: 1, textAlign: 'right' }]}
-                    value={goldLoss}
-                    onChangeText={setGoldLoss}
-                    keyboardType="numeric"
-                    placeholder="0.000"
-                    placeholderTextColor="#9E8D77"
-                  />
-                </View>
-
-                {/* Total Cost */}
-                <View style={[styles.inlineFieldRow, { flex: 1.2, minWidth: 170 }]}>
-                  <ThemedText style={[styles.inlineFieldLabel, { width: 75 }]}>Total Cost ($)</ThemedText>
-                  <TextInput
-                    style={[styles.formInput, styles.highlightTotal, { flex: 1, textAlign: 'right' }]}
-                    value={totalCost}
-                    onChangeText={setTotalCost}
-                    keyboardType="numeric"
-                    placeholder="0.00"
-                    placeholderTextColor="#9E8D77"
-                  />
-                </View>
-
-                {/* Add to Grid Button */}
-                <TouchableOpacity
-                  style={[styles.tableActionBtn, styles.addBtn, { height: 26, paddingHorizontal: 12 }]}
-                  onPress={handleAddToGrid}
-                  activeOpacity={0.8}
-                >
-                  <Ionicons name="add-circle-outline" size={14} color="#9E6D08" style={{ marginRight: 4 }} />
-                  <ThemedText style={styles.addBtnText}>Add Item</ThemedText>
-                </TouchableOpacity>
-              </View>
-            </View>
-          </View>
-
-          {/* CARD 4: TRADE-IN VALUATION SUMMARY (3 COLUMNS) */}
-          <View style={[styles.goldCard, { marginTop: 10 }]}>
-            <View style={styles.cardHeaderBanner}>
-              <View style={styles.headerTitleContainer}>
-                <View style={styles.headerIconBadgeSmall}>
-                  <Ionicons name="calculator-outline" size={13} color="#B48218" />
-                </View>
-                <ThemedText style={styles.cardHeaderTitleSmall}>Financial Settlement Summary</ThemedText>
-              </View>
-            </View>
-
-            <View style={styles.cardBody}>
-              <View style={styles.threeColumnGrid}>
-                {/* Sales Amount */}
-                <View style={styles.inlineFieldRow}>
-                  <ThemedText style={styles.inlineFieldLabel}>Sales Amount</ThemedText>
-                  <TextInput
-                    style={[styles.formInput, styles.readonlyInput, { flex: 1, textAlign: 'right' }]}
-                    value={salesAmount.toFixed(2)}
-                    editable={false}
-                  />
-                </View>
-
-                {/* Trade In Amount */}
-                <View style={styles.inlineFieldRow}>
-                  <ThemedText style={styles.inlineFieldLabel}>Trade-In Val ($)</ThemedText>
-                  <TextInput
+              gridItems.map((item, index) => {
+                const isSelected = selectedRowIndex === index;
+                return (
+                  <TouchableOpacity
+                    key={`${item.InvoiceNo}-${index}`}
                     style={[
-                      styles.formInput,
-                      styles.readonlyInput,
-                      styles.highlightTotal,
-                      { flex: 1, textAlign: 'right', fontWeight: 'bold' },
+                      styles.gridRow,
+                      index % 2 === 1 && styles.gridRowAlt,
+                      isSelected && styles.gridRowSelected,
                     ]}
-                    value={tradeInAmount.toFixed(2)}
-                    editable={false}
-                  />
-                </View>
-
-                {/* Balance Amount */}
-                <View style={styles.inlineFieldRow}>
-                  <ThemedText style={styles.inlineFieldLabel}>Net Settlement ($)</ThemedText>
-                  <TextInput
-                    style={[styles.formInput, styles.readonlyInput, { flex: 1, textAlign: 'right' }]}
-                    value={balanceAmount.toFixed(2)}
-                    editable={false}
-                  />
-                </View>
-              </View>
-            </View>
-          </View>
-        </ScrollView>
-      </KeyboardAvoidingView>
-
-      {/* CUSTOMER LOOKUP MODAL */}
-      <Modal visible={lovVisible} transparent animationType="fade" onRequestClose={() => setLovVisible(false)}>
-        <View style={styles.modalOverlay}>
-          <View style={styles.lovModalCard}>
-            <View style={styles.modalHeaderBanner}>
-              <View style={styles.headerTitleContainer}>
-                <View style={styles.headerIconBadgeSmall}>
-                  <Ionicons name="person-outline" size={13} color="#B48218" />
-                </View>
-                <ThemedText style={styles.modalHeaderTitle}>Search Customer Directory</ThemedText>
-              </View>
-              <TouchableOpacity
-                onPress={() => setLovVisible(false)}
-                activeOpacity={0.7}
-                style={styles.closeModalBtn}
-              >
-                <Ionicons name="close" size={18} color="#3B2D17" />
-              </TouchableOpacity>
-            </View>
-
-            <View style={styles.modalSearchBox}>
-              <Ionicons name="search-outline" size={16} color="#8D6409" style={{ marginRight: 6 }} />
-              <TextInput
-                style={styles.modalSearchInput}
-                value={lovSearch}
-                onChangeText={setLovSearch}
-                placeholder="Search by Code or Name..."
-                placeholderTextColor="#9E8D77"
-                autoFocus
-              />
-              {lovSearch.length > 0 && (
-                <TouchableOpacity onPress={() => setLovSearch('')}>
-                  <Ionicons name="close-circle" size={16} color="#9E8D77" />
-                </TouchableOpacity>
-              )}
-            </View>
-
-            <View style={styles.lovHeadRow}>
-              <ThemedText style={[styles.lovHeadText, { flex: 1.4 }]}>Customer Code</ThemedText>
-              <ThemedText style={[styles.lovHeadText, { flex: 2.2 }]}>Customer Name</ThemedText>
-            </View>
-
-            <FlatList
-              data={lovData.filter(
-                (item) =>
-                  (item.CustomerName || '').toLowerCase().includes(lovSearch.toLowerCase()) ||
-                  (item.CustomerCode || '').toLowerCase().includes(lovSearch.toLowerCase())
-              )}
-              keyExtractor={(item, index) => item.CustomerCode || index.toString()}
-              initialNumToRender={50}
-              maxToRenderPerBatch={50}
-              ListEmptyComponent={
-                <View style={styles.emptyTableContainer}>
-                  <Ionicons name="search-outline" size={24} color="#D4C3A3" />
-                  <ThemedText style={styles.emptyTableText}>No matching customers found.</ThemedText>
-                </View>
-              }
-              renderItem={({ item }) => (
-                <TouchableOpacity
-                  style={styles.lovItemRow}
-                  onPress={() => handleSelectCustomer(item)}
-                  activeOpacity={0.7}
-                >
-                  <ThemedText style={[styles.lovItemText, styles.codeCell, { flex: 1.4 }]}>
-                    {item.CustomerCode}
-                  </ThemedText>
-                  <ThemedText style={[styles.lovItemText, { flex: 2.2 }]} numberOfLines={1}>
-                    {item.CustomerName}
-                  </ThemedText>
-                </TouchableOpacity>
-              )}
-            />
+                    activeOpacity={0.7}
+                    onPress={() => setSelectedRowIndex(index)}
+                  >
+                    <ThemedText style={[styles.gridCellText, { width: 45, textAlign: 'center', color: '#8D6409', fontWeight: 'bold' }]}>
+                      {index + 1}
+                    </ThemedText>
+                    <ThemedText style={[styles.gridCellText, { flex: 2, fontWeight: 'bold' }]}>
+                      {item.InvoiceNo}
+                    </ThemedText>
+                    <ThemedText style={[styles.gridCellText, { flex: 1.5 }]}>
+                      {item.Date}
+                    </ThemedText>
+                    <View style={{ flex: 1.5, justifyContent: 'center' }}>
+                      <View style={styles.classPill}>
+                        <ThemedText style={styles.classPillText}>{item.Class}</ThemedText>
+                      </View>
+                    </View>
+                    <ThemedText style={[styles.gridCellText, { width: 130, textAlign: 'right', fontWeight: '600' }]}>
+                      {item.PurchaseWeight.toFixed(2)}
+                    </ThemedText>
+                    <ThemedText style={[styles.gridCellText, styles.gridCellAmount, { width: 130, textAlign: 'right', fontWeight: 'bold' }]}>
+                      {item.IssuedWeight.toFixed(2)}
+                    </ThemedText>
+                    <View style={{ width: 60, alignItems: 'center', justifyContent: 'center' }}>
+                      <TouchableOpacity
+                        onPress={() => {
+                          const updated = gridItems.filter((_, idx) => idx !== index);
+                          setGridItems(updated);
+                          recalculateSummary(updated, costPerGram);
+                          showToast('Bill removed from list.');
+                        }}
+                        style={styles.rowDeleteBtn}
+                        activeOpacity={0.7}
+                      >
+                        <Ionicons name="trash-outline" size={14} color="#C62828" />
+                      </TouchableOpacity>
+                    </View>
+                  </TouchableOpacity>
+                );
+              })
+            )}
           </View>
         </View>
+      </ScrollView>
+
+      {/* LOV Search Modal */}
+      <Modal
+        visible={lovVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setLovVisible(false)}
+      >
+        <TouchableOpacity
+          style={styles.modalOverlay}
+          activeOpacity={1}
+          onPress={() => setLovVisible(false)}
+        >
+          <TouchableWithoutFeedback>
+            <View style={styles.lovModalContainer}>
+              <View style={styles.modalHeaderBanner}>
+                <View style={styles.headerTitleRow}>
+                  <View style={styles.headerIconBadge}>
+                    <Ionicons name="search" size={14} color="#8D6409" />
+                  </View>
+                  <ThemedText style={styles.modalHeaderTitle}>
+                    {lovType === 'issue'
+                      ? 'SELECT SAVED ISSUE VOUCHER'
+                      : lovType === 'supplier'
+                        ? 'SELECT SUPPLIER'
+                        : lovType === 'currency'
+                          ? 'SELECT CURRENCY'
+                          : 'SELECT PENDING TRADE-IN BILL'}
+                  </ThemedText>
+                </View>
+                <TouchableOpacity
+                  onPress={() => setLovVisible(false)}
+                  style={styles.modalCloseBtn}
+                >
+                  <Ionicons name="close" size={18} color="#5C4A28" />
+                </TouchableOpacity>
+              </View>
+
+              <View style={styles.modalSearchBar}>
+                <Ionicons name="search" size={15} color="#8D6409" style={{ marginRight: 6 }} />
+                <TextInput
+                  style={styles.modalSearchInput}
+                  placeholder="Type to filter records..."
+                  placeholderTextColor="#A89E8D"
+                  value={lovSearch}
+                  onChangeText={setLovSearch}
+                  autoFocus
+                />
+              </View>
+
+              {lovLoading ? (
+                <View style={styles.modalLoading}>
+                  <ActivityIndicator size="large" color="#B8903B" />
+                  <ThemedText style={{ marginTop: 8, color: '#6E5528', fontSize: 12 }}>
+                    Loading lookup records...
+                  </ThemedText>
+                </View>
+              ) : (
+                <FlatList
+                  data={filteredLOV}
+                  keyExtractor={(item, index) => `${item.IssueNo || item.SupplierCode || item.CurrencyCode || item.InvoiceNo}-${index}`}
+                  style={{ maxHeight: 360, minHeight: 160 }}
+                  renderItem={({ item, index }) => (
+                    <TouchableOpacity
+                      style={[
+                        styles.lovItem,
+                        index % 2 === 1 && { backgroundColor: '#FCFAF6' },
+                      ]}
+                      activeOpacity={0.7}
+                      onPress={() => handleSelectLOV(item)}
+                    >
+                      {lovType === 'issue' ? (
+                        <View style={{ flex: 1 }}>
+                          <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                            <ThemedText style={styles.lovItemCode}>Issue #{item.IssueNo}</ThemedText>
+                            <ThemedText style={styles.lovItemSub}>
+                              {item.IssueDate ? item.IssueDate.substring(0, 10) : ''}
+                            </ThemedText>
+                          </View>
+                          <ThemedText style={styles.lovItemName}>{item.SupplierName}</ThemedText>
+                          <ThemedText style={styles.lovItemSub}>
+                            Issued Wt: {parseFloat(item.TotalIssuedWeight || 0).toFixed(2)}g | Price: ${parseFloat(item.TotalPrice || 0).toFixed(2)}
+                          </ThemedText>
+                        </View>
+                      ) : lovType === 'supplier' ? (
+                        <View style={{ flex: 1 }}>
+                          <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                            <ThemedText style={styles.lovItemCode}>{item.SupplierCode}</ThemedText>
+                            <ThemedText style={styles.lovItemType}>{item.Currency || 'SGD'}</ThemedText>
+                          </View>
+                          <ThemedText style={styles.lovItemName}>{item.SupplierName}</ThemedText>
+                          <ThemedText style={styles.lovItemSub}>
+                            {[item.Address1, item.Address2].filter(Boolean).join(', ')}
+                          </ThemedText>
+                        </View>
+                      ) : lovType === 'currency' ? (
+                        <View style={{ flex: 1, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <View>
+                            <ThemedText style={styles.lovItemCode}>{item.CurrencyCode}</ThemedText>
+                            <ThemedText style={styles.lovItemName}>{item.CurrencyName}</ThemedText>
+                          </View>
+                          <ThemedText style={styles.lovItemRate}>Rate: {parseFloat(item.CurrencyRate || 1).toFixed(4)}</ThemedText>
+                        </View>
+                      ) : (
+                        <View style={{ flex: 1 }}>
+                          <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                            <ThemedText style={styles.lovItemCode}>Bill #{item.InvoiceNo}</ThemedText>
+                            <ThemedText style={styles.lovItemType}>Bal Wt: {parseFloat(item.BalanceWeight || 0).toFixed(2)}g</ThemedText>
+                          </View>
+                          <ThemedText style={styles.lovItemName}>{item.CustomerName || 'Trade Customer'}</ThemedText>
+                          <ThemedText style={styles.lovItemSub}>
+                            Purchase Wt: {parseFloat(item.PurchaseWeight || 0).toFixed(2)}g | Date: {item.InvoiceDate ? item.InvoiceDate.substring(0, 10) : 'N/A'}
+                          </ThemedText>
+                        </View>
+                      )}
+                    </TouchableOpacity>
+                  )}
+                  ListEmptyComponent={() => (
+                    <ThemedText style={styles.emptyText}>No matching records found.</ThemedText>
+                  )}
+                />
+              )}
+            </View>
+          </TouchableWithoutFeedback>
+        </TouchableOpacity>
       </Modal>
 
-      {/* STANDARDIZED PRINT REPORT CONFIRMATION MODAL */}
+      {/* Standardized Print Report Modal */}
       <PrintReportModal
         visible={isPrintModalVisible}
-        title="Print Report"
-        message="Do you want to print ?"
+        title="Trade In Gold Issue Report"
+        message={`Do you want to print Issue Report for #${printIssueNo}?`}
         loading={loading}
-        onCancel={() => {
-          setIsPrintModalVisible(false);
-          setActivePrintInvoiceNo('');
-        }}
+        onCancel={() => setIsPrintModalVisible(false)}
         onPdf={() => {
-          const invNo = activePrintInvoiceNo;
-          const reprint = activePrintIsReprint;
           setIsPrintModalVisible(false);
-          setActivePrintInvoiceNo('');
-          handleDownloadPdf(invNo, reprint);
+          showToast('Opening PDF report...');
         }}
         onExcel={() => {
-          const invNo = activePrintInvoiceNo;
-          const reprint = activePrintIsReprint;
           setIsPrintModalVisible(false);
-          setActivePrintInvoiceNo('');
-          handleDownloadExcel(invNo, reprint);
+          showToast('Exporting Excel report...');
         }}
         onPrint={() => {
-          const invNo = activePrintInvoiceNo;
-          const reprint = activePrintIsReprint;
           setIsPrintModalVisible(false);
-          setActivePrintInvoiceNo('');
-          handlePrint(invNo, reprint);
+          showToast('Sending to printer...');
         }}
       />
     </SafeAreaView>
@@ -1613,27 +999,15 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#FBF9F5',
   },
-  scrollContainer: {
-    paddingHorizontal: 12,
-    paddingTop: 8,
-    paddingBottom: 24,
-  },
-
-  // ===== ROYAL GOLD HEADER BAR =====
-  headerBar: {
-    height: 48,
-    backgroundColor: '#FFFFFF',
+  topNavHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 14,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
     borderBottomWidth: 1,
-    borderBottomColor: '#E8DCB8',
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 2,
+    borderBottomColor: '#EBE2D2',
+    backgroundColor: '#FFFFFF',
   },
   headerLeft: {
     flexDirection: 'row',
@@ -1641,366 +1015,494 @@ const styles = StyleSheet.create({
   },
   backBtn: {
     padding: 6,
-    marginRight: 8,
+    marginRight: 10,
+    backgroundColor: '#FAF5EA',
     borderRadius: 6,
-    backgroundColor: '#F9F6F0',
     borderWidth: 1,
     borderColor: '#E8DCB8',
   },
   headerTitle: {
-    fontSize: 15,
+    fontSize: 16,
     fontWeight: 'bold',
     color: '#3B2D17',
-    letterSpacing: 0.3,
+    letterSpacing: 0.5,
   },
   headerSubtitle: {
-    fontSize: 10,
+    fontSize: 11,
     color: '#8D6409',
-    fontWeight: '500',
-    marginTop: -1,
+    marginTop: 1,
   },
   headerRight: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
   },
-  actionBtn: {
+  headerActionBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 5,
-    borderRadius: 6,
+    gap: 5,
+    backgroundColor: '#FFFFFF',
     borderWidth: 1,
-  },
-  clearBtn: {
-    backgroundColor: '#FFFFFF',
     borderColor: '#DFD5C3',
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 6,
   },
-  clearBtnText: {
-    fontSize: 12,
-    fontWeight: 'bold',
+  headerActionBtnText: {
     color: '#5C4A28',
-    marginLeft: 4,
+    fontWeight: 'bold',
+    fontSize: 11,
   },
-  reprintBtn: {
-    backgroundColor: '#FFFFFF',
-    borderColor: '#DFD5C3',
-  },
-  saveBtn: {
+  headerSaveBtn: {
     backgroundColor: '#F9F2E2',
     borderColor: '#B8903B',
   },
-  saveBtnText: {
-    fontSize: 12,
-    fontWeight: 'bold',
+  headerSaveBtnText: {
     color: '#9E6D08',
-    marginLeft: 4,
+    fontWeight: 'bold',
+    fontSize: 11,
   },
 
-  // ===== CARDS & BANNERS =====
-  goldCard: {
+  // Toast
+  toastContainer: {
+    position: 'absolute',
+    top: 55,
+    right: 20,
+    zIndex: 9999,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 9,
+    paddingHorizontal: 14,
+    borderRadius: 6,
+    shadowColor: '#000',
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 6,
+  },
+  toastSuccess: {
+    backgroundColor: '#2E7D32',
+  },
+  toastError: {
+    backgroundColor: '#C62828',
+  },
+  toastText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+
+  // Main Container
+  container: {
+    padding: 14,
+    paddingBottom: 40,
+  },
+
+  // TOP SECTION: Voucher Card & Financials
+  topSection: {
+    flexDirection: 'row',
+    gap: 12,
+    marginBottom: 12,
+  },
+  voucherCard: {
+    flex: 1,
     backgroundColor: '#FFFFFF',
     borderRadius: 8,
     borderWidth: 1,
     borderColor: '#E8DCB8',
-    overflow: 'hidden',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.04,
-    shadowRadius: 3,
+    shadowColor: '#A38035',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 4,
     elevation: 2,
+    overflow: 'hidden',
   },
   cardHeaderBanner: {
     backgroundColor: '#F5E7CA',
-    paddingVertical: 6,
     paddingHorizontal: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: '#E2D3B3',
+    paddingVertical: 5,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    borderBottomWidth: 1,
+    borderBottomColor: '#E2D3B3',
   },
-  headerTitleContainer: {
+  headerTitleRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    gap: 5,
   },
-  headerIconBadgeSmall: {
+  headerIconBadge: {
     width: 20,
     height: 20,
     borderRadius: 4,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: '#FFF8EA',
+    borderWidth: 1,
+    borderColor: '#E2D2AF',
+    alignItems: 'center',
     justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 6,
-    borderWidth: 1,
-    borderColor: '#E2D3B3',
   },
-  cardHeaderTitleSmall: {
-    fontSize: 13,
+  cardHeaderTitle: {
+    fontSize: 10.5,
     fontWeight: 'bold',
     color: '#3B2D17',
-    letterSpacing: 0.2,
+    letterSpacing: 0.3,
   },
-  cardBody: {
-    padding: 10,
-  },
-  invoiceBadge: {
+  dateBadgeContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#FFF4DA',
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 4,
+    backgroundColor: '#FFF8EA',
     borderWidth: 1,
-    borderColor: '#B8903B',
-  },
-  invoiceBadgeLabel: {
-    fontSize: 10,
-    color: '#7D5E19',
-    marginRight: 4,
-  },
-  invoiceBadgeValue: {
-    fontSize: 11,
-    fontWeight: 'bold',
-    color: '#8A5D00',
-  },
-
-  // ===== GRIDS & INLINE ROWS =====
-  fourColumnGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  twoColumnGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  threeColumnGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  inlineFieldRow: {
-    flex: 1,
-    minWidth: 240,
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  inlineFieldLabel: {
-    width: 95,
-    fontSize: 11,
-    fontWeight: 'bold',
-    color: '#3B2D17',
-    marginRight: 4,
-    flexShrink: 0,
-  },
-  formInput: {
-    height: 26,
-    backgroundColor: '#FFFFFF',
-    borderWidth: 1,
-    borderColor: '#D4C3A3',
-    borderRadius: 4,
+    borderColor: '#D8C59A',
+    borderRadius: 5,
     paddingHorizontal: 6,
     paddingVertical: 2,
-    fontSize: 12,
-    color: '#2B2118',
   },
-  readonlyInput: {
-    backgroundColor: '#F5EFE6',
-    color: '#5C4A28',
-  },
-  highlightTotal: {
-    backgroundColor: '#FFF4DA',
-    color: '#8A5D00',
+  dateLabelText: {
+    fontSize: 10.5,
     fontWeight: 'bold',
-    borderColor: '#D4C3A3',
+    color: '#8D6409',
+    marginRight: 4,
   },
-
-  // Input Combo
-  inputWithLookup: {
-    flex: 1,
+  dateInputsInline: {
     flexDirection: 'row',
     alignItems: 'center',
+  },
+  dateInputPart: {
+    width: 26,
+    height: 20,
+    borderWidth: 1,
+    borderColor: '#E8DEC8',
+    borderRadius: 3,
+    textAlign: 'center',
+    fontSize: 10.5,
+    fontWeight: 'bold',
+    color: '#3B2D17',
+    backgroundColor: '#FFFFFF',
+    paddingVertical: 0,
+    paddingHorizontal: 0,
+  },
+  dateDash: {
+    fontSize: 10.5,
+    fontWeight: 'bold',
+    color: '#8D6409',
+    marginHorizontal: 2,
+  },
+  cardBody: {
+    padding: 8,
+    paddingVertical: 6,
+  },
+  formRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  rowLabel: {
+    fontSize: 10.5,
+    fontWeight: 'bold',
+    color: '#554428',
+    width: 70,
+  },
+  inputWithBtnContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  input: {
+    height: 25,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#D8CDBA',
+    borderRadius: 4,
+    paddingHorizontal: 7,
+    paddingVertical: 0,
+    fontSize: 10.5,
+    color: '#3B2D17',
+    fontWeight: '500',
   },
   inputAttached: {
     borderTopRightRadius: 0,
     borderBottomRightRadius: 0,
+    borderRightWidth: 0,
   },
-  attachedLookupBtn: {
-    height: 26,
-    width: 26,
-    backgroundColor: '#F5E7CA',
+  readonlyInput: {
+    backgroundColor: '#FAF7F0',
+    borderColor: '#E8DEC8',
+    color: '#554428',
+    fontWeight: 'bold',
+  },
+  btnSearchDots: {
+    width: 25,
+    height: 25,
+    backgroundColor: '#F5EBD4',
     borderWidth: 1,
-    borderLeftWidth: 0,
-    borderColor: '#D4C3A3',
+    borderColor: '#D8CDBA',
     borderTopRightRadius: 4,
     borderBottomRightRadius: 4,
-    justifyContent: 'center',
     alignItems: 'center',
-    flexShrink: 0,
+    justifyContent: 'center',
   },
 
-  // Class and Rates Row
-  classAndRatesRow: {
+  // RIGHT FINANCIALS
+  rightFinancials: {
+    width: 190,
+    gap: 4,
+  },
+  financialCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#E8DCB8',
+    shadowColor: '#A38035',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
+    shadowRadius: 2,
+    elevation: 1,
+    overflow: 'hidden',
+  },
+  tradeInCard: {
+    borderColor: '#B8903B',
+    borderWidth: 1.5,
+  },
+  financialCardHeader: {
+    backgroundColor: '#F5E7CA',
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E2D3B3',
+  },
+  financialCardTitle: {
+    fontSize: 9.5,
+    fontWeight: 'bold',
+    color: '#3B2D17',
+    letterSpacing: 0.2,
+  },
+  financialValueBox: {
+    backgroundColor: '#FFFDF9',
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    minHeight: 20,
+    height: 22,
+  },
+  currencyPrefix: {
+    fontSize: 11,
+    fontWeight: 'bold',
+    color: '#8D6409',
+    marginRight: 3,
+  },
+  financialValueText: {
+    fontSize: 11.5,
+    fontWeight: 'bold',
+    color: '#3B2D17',
+  },
+  financialInput: {
+    fontSize: 11.5,
+    fontWeight: 'bold',
+    color: '#3B2D17',
+    textAlign: 'right',
+    paddingVertical: 0,
+    paddingHorizontal: 3,
+    minWidth: 60,
+  },
+
+  // MIDDLE SECTION: Grid Section Card
+  gridSectionCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#E8DCB8',
+    shadowColor: '#A38035',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 4,
+    elevation: 2,
+    overflow: 'hidden',
+    marginBottom: 12,
+  },
+  scanBanner: {
+    backgroundColor: '#F5E7CA',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    flexWrap: 'wrap',
-    gap: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E2D3B3',
   },
-  classPillsWrapper: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flexWrap: 'wrap',
-    gap: 6,
-    flex: 2,
-  },
-  classPillsGroup: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 5,
-    flex: 1,
-  },
-  classPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#FCFAF6',
-    borderWidth: 1,
-    borderColor: '#E2D3B3',
-    borderRadius: 4,
-    paddingVertical: 3,
-    paddingHorizontal: 6,
-    gap: 3,
-  },
-  classPillSelected: {
-    backgroundColor: '#FFF4DA',
-    borderColor: '#B8903B',
-  },
-  classPillText: {
-    fontSize: 11,
-    fontWeight: '500',
-    color: '#5C4A28',
-  },
-  classPillTextSelected: {
-    fontWeight: 'bold',
-    color: '#9E6D08',
-  },
-  ratesInputGroup: {
+  scanInputGroup: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    flexWrap: 'wrap',
+  },
+  scanPromptLabel: {
+    fontSize: 11,
+    fontWeight: 'bold',
+    color: '#554428',
+  },
+  addBillBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFF8EA',
+    borderWidth: 1,
+    borderColor: '#B8903B',
+    paddingVertical: 5,
+    paddingHorizontal: 10,
+    borderRadius: 5,
+  },
+  addBillBtnText: {
+    color: '#9E6D08',
+    fontWeight: 'bold',
+    fontSize: 11,
   },
 
-  // ===== TABLE SECTION =====
-  counterBadge: {
-    backgroundColor: '#FFFFFF',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 10,
-    marginLeft: 6,
-    borderWidth: 1,
-    borderColor: '#E2D3B3',
+  // Grid Header
+  gridHeader: {
+    flexDirection: 'row',
+    backgroundColor: '#FAF5EA',
+    borderBottomWidth: 1,
+    borderBottomColor: '#E8DCB8',
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    alignItems: 'center',
   },
-  counterBadgeText: {
-    fontSize: 10,
+  gridHeaderText: {
+    fontSize: 11,
+    fontWeight: 'bold',
+    color: '#6E5528',
+    letterSpacing: 0.2,
+  },
+  gridBody: {
+    minHeight: 180,
+  },
+  gridEmptyArea: {
+    height: 180,
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 4,
+  },
+  emptyGridText: {
+    fontSize: 13,
     fontWeight: 'bold',
     color: '#8D6409',
+    marginTop: 6,
   },
-  tableHeadRow: {
-    flexDirection: 'row',
-    backgroundColor: '#F5E7CA',
-    borderBottomWidth: 1,
-    borderBottomColor: '#E2D3B3',
-    paddingVertical: 6,
-    paddingHorizontal: 8,
-    width: '100%',
-  },
-  tableHeadCell: {
+  emptyGridSubText: {
     fontSize: 11,
-    fontWeight: 'bold',
-    color: '#3B2D17',
-    paddingHorizontal: 4,
+    color: '#A89E8D',
   },
-  tableRow: {
+  gridRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    paddingHorizontal: 10,
+    paddingVertical: 8,
     borderBottomWidth: 1,
-    borderBottomColor: '#F3EBDD',
-    paddingVertical: 5,
-    paddingHorizontal: 8,
+    borderBottomColor: '#F0E6D2',
     backgroundColor: '#FFFFFF',
-    width: '100%',
   },
-  tableCell: {
+  gridRowAlt: {
+    backgroundColor: '#FCFAF6',
+  },
+  gridRowSelected: {
+    backgroundColor: '#FFF5DC',
+    borderBottomColor: '#E2C785',
+  },
+  gridCellText: {
     fontSize: 11,
     color: '#3B2D17',
-    paddingHorizontal: 4,
   },
-  codeCell: {
-    fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
-    fontWeight: 'bold',
-    color: '#8A5D00',
+  gridCellAmount: {
+    color: '#2E7D32',
   },
-  amountCell: {
-    fontWeight: 'bold',
-    color: '#1B5E20',
-  },
-  classTag: {
-    backgroundColor: '#FFF1D6',
+  classPill: {
+    alignSelf: 'flex-start',
+    backgroundColor: '#FFF8EA',
     borderWidth: 1,
-    borderColor: '#D4C3A3',
-    borderRadius: 3,
+    borderColor: '#D8C59A',
+    borderRadius: 4,
     paddingHorizontal: 6,
-    paddingVertical: 1,
+    paddingVertical: 2,
   },
-  classTagText: {
+  classPillText: {
     fontSize: 10,
-    fontWeight: 'bold',
-    color: '#7D5E19',
-  },
-  deleteRowBtn: {
-    padding: 3,
-  },
-  emptyTableContainer: {
-    paddingVertical: 24,
-    alignItems: 'center',
-    justifyContent: 'center',
-    width: '100%',
-  },
-  emptyTableText: {
-    fontSize: 12,
-    color: '#9E8D77',
-    marginTop: 4,
-  },
-
-  // Item Entry Bar
-  itemEntryBar: {
-    borderTopWidth: 1,
-    borderTopColor: '#E8DCB8',
-    backgroundColor: '#FCFAF6',
-    padding: 10,
-  },
-  tableActionBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 5,
-    borderRadius: 5,
-    borderWidth: 1,
-  },
-  addBtn: {
-    backgroundColor: '#F9F2E2',
-    borderColor: '#B8903B',
-  },
-  addBtnText: {
-    fontSize: 12,
     fontWeight: 'bold',
     color: '#9E6D08',
   },
+  rowDeleteBtn: {
+    width: 24,
+    height: 24,
+    borderRadius: 4,
+    backgroundColor: '#FFEBEE',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
 
-  // ===== LOV MODALS =====
+  // BOTTOM ACTION BAR
+  bottomActionBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#E8DCB8',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  bottomButtonsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  actionBtnSecondary: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#FAF5EA',
+    borderWidth: 1,
+    borderColor: '#DFD5C3',
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 6,
+  },
+  actionBtnSecondaryText: {
+    color: '#5C4A28',
+    fontWeight: 'bold',
+    fontSize: 11,
+  },
+  actionBtnPrimary: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    backgroundColor: '#F9F2E2',
+    borderWidth: 1,
+    borderColor: '#B8903B',
+    paddingVertical: 6,
+    paddingHorizontal: 16,
+    borderRadius: 6,
+  },
+  actionBtnPrimaryText: {
+    color: '#9E6D08',
+    fontWeight: 'bold',
+    fontSize: 11,
+  },
+  actionBtnClose: {
+    backgroundColor: '#F5F5F5',
+    borderWidth: 1,
+    borderColor: '#DDDDDD',
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 6,
+  },
+  actionBtnCloseText: {
+    color: '#666666',
+    fontWeight: 'bold',
+    fontSize: 11,
+  },
+
+  // LOV Modal
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.45)',
@@ -2008,108 +1510,96 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     padding: 16,
   },
-  lovModalCard: {
-    width: '92%',
-    maxWidth: 600,
-    maxHeight: '80%',
+  lovModalContainer: {
+    width: '100%',
+    maxWidth: 540,
     backgroundColor: '#FFFFFF',
-    borderRadius: 10,
+    borderRadius: 8,
     borderWidth: 1,
     borderColor: '#E8DCB8',
-    overflow: 'hidden',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.15,
     shadowRadius: 8,
     elevation: 8,
+    overflow: 'hidden',
   },
   modalHeaderBanner: {
     backgroundColor: '#F5E7CA',
-    paddingVertical: 8,
     paddingHorizontal: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: '#E2D3B3',
+    paddingVertical: 8,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    borderBottomWidth: 1,
+    borderBottomColor: '#E2D3B3',
   },
   modalHeaderTitle: {
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: 'bold',
     color: '#3B2D17',
+    letterSpacing: 0.4,
   },
-  closeModalBtn: {
-    padding: 3,
+  modalCloseBtn: {
+    padding: 4,
   },
-  modalSearchBox: {
+  modalSearchBar: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#FCFAF6',
-    margin: 8,
-    paddingHorizontal: 8,
-    height: 32,
-    borderWidth: 1,
-    borderColor: '#D4C3A3',
-    borderRadius: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F0E6D2',
+    backgroundColor: '#FAF5EA',
   },
   modalSearchInput: {
     flex: 1,
+    height: 30,
     fontSize: 12,
-    color: '#2B2118',
+    color: '#3B2D17',
     paddingVertical: 0,
   },
-  lovHeadRow: {
-    flexDirection: 'row',
-    backgroundColor: '#F8F2E4',
-    paddingVertical: 5,
-    paddingHorizontal: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: '#E8DCB8',
+  modalLoading: {
+    padding: 30,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  lovHeadText: {
+  lovItem: {
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F0E6D2',
+  },
+  lovItemCode: {
+    fontSize: 12,
+    fontWeight: 'bold',
+    color: '#9E6D08',
+  },
+  lovItemName: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#3B2D17',
+    marginTop: 2,
+  },
+  lovItemSub: {
+    fontSize: 10,
+    color: '#7D6F5B',
+    marginTop: 2,
+  },
+  lovItemType: {
     fontSize: 11,
+    fontWeight: 'bold',
+    color: '#2E7D32',
+  },
+  lovItemRate: {
+    fontSize: 12,
     fontWeight: 'bold',
     color: '#8D6409',
   },
-  lovItemRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 8,
-    paddingHorizontal: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: '#F3EBDD',
-  },
-  lovItemText: {
-    fontSize: 11,
-    color: '#3B2D17',
-  },
-
-  // ===== TOAST =====
-  toast: {
-    position: 'absolute',
-    top: 56,
-    alignSelf: 'center',
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 20,
-    zIndex: 9999,
-    elevation: 6,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.15,
-    shadowRadius: 4,
-  },
-  toastSuccess: {
-    backgroundColor: '#2E7D32',
-  },
-  toastError: {
-    backgroundColor: '#D32F2F',
-  },
-  toastText: {
-    color: '#FFFFFF',
-    fontWeight: 'bold',
+  emptyText: {
+    padding: 24,
+    textAlign: 'center',
+    color: '#A89E8D',
     fontSize: 12,
   },
 });
