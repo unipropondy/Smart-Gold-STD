@@ -78,7 +78,7 @@ export default function PurchaseTakeReportsScreen() {
 
   // Date filters (using standard DD/MM/YYYY matching Master Reports)
   const [fromDate, setFromDate] = useState<string>(getTodayDisp('/'));
-  const [toDate, setToDate] = useState<string>(getTodayDisp());
+  const [toDate, setToDate] = useState<string>(getTodayDisp('/'));
 
   // Native Date Picker State
   const [showDatePicker, setShowDatePicker] = useState<{

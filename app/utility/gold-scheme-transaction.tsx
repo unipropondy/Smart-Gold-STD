@@ -1,10 +1,10 @@
+import { API_BASE_URL } from '@/constants/api';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
-import { Stack, useRouter, useLocalSearchParams } from 'expo-router';
+import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
-  FlatList,
   Modal,
   Platform,
   ScrollView,
@@ -12,10 +12,9 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
-  View,
+  View
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { API_BASE_URL } from '@/constants/api';
 
 interface SchemeMasterItem {
   Code: string;
@@ -65,7 +64,7 @@ export default function GoldSchemeTransactionScreen() {
       // Reset scheme fields after successful transaction
       setSchemeCode('');
       setSchemeValue('');
-      const msg = savedInv 
+      const msg = savedInv
         ? `Scheme Transaction ${savedInv} saved successfully with payments!`
         : 'Scheme Transaction and payments saved successfully!';
       Platform.OS === 'web' ? window.alert(msg) : Alert.alert('Success', msg);
@@ -113,6 +112,18 @@ export default function GoldSchemeTransactionScreen() {
 
   // General Action State
   const [saving, setSaving] = useState(false);
+
+  // Toast Notification State
+  const [toastMessage, setToastMessage] = useState('');
+  const [toastType, setToastType] = useState<'success' | 'error' | 'info'>('info');
+
+  const showToast = (msg: string, type: 'success' | 'error' | 'info' = 'info') => {
+    setToastType(type);
+    setToastMessage(msg);
+    setTimeout(() => {
+      setToastMessage('');
+    }, 4000);
+  };
 
   // Modal Visibility States
   const [customerModalVisible, setCustomerModalVisible] = useState(false);
@@ -427,7 +438,7 @@ export default function GoldSchemeTransactionScreen() {
         setNewCustFax(d.Fax || '');
         setNewCustEmail(d.eMail || '');
         setNewCustReligion(d.DateType || '');
-        
+
         // DOB
         if (d.DOB) {
           const parts = d.DOB.split('-');
@@ -488,18 +499,15 @@ export default function GoldSchemeTransactionScreen() {
   // Save Customer to SQL Database (Insert or Update)
   const handleSaveCustomer = async () => {
     if (!newCustCode.trim()) {
-      const msg = 'Please enter Customer Code.';
-      Platform.OS === 'web' ? window.alert(msg) : Alert.alert('Validation Error', msg);
+      showToast('Please enter Customer Code.', 'error');
       return;
     }
     if (!newCustName.trim()) {
-      const msg = 'Please enter Customer Name.';
-      Platform.OS === 'web' ? window.alert(msg) : Alert.alert('Validation Error', msg);
+      showToast('Please enter Customer Name.', 'error');
       return;
     }
     if (!newCustType.trim()) {
-      const msg = 'Please select Customer Type.';
-      Platform.OS === 'web' ? window.alert(msg) : Alert.alert('Validation Error', msg);
+      showToast('Please select Customer Type.', 'error');
       return;
     }
 
@@ -546,8 +554,7 @@ export default function GoldSchemeTransactionScreen() {
       const json = await res.json();
 
       if (json.success) {
-        const msg = json.message || 'Customer saved successfully!';
-        Platform.OS === 'web' ? window.alert(msg) : Alert.alert('Success', msg);
+        showToast(json.message || 'Customer saved successfully!', 'success');
 
         // Fetch saved customer from SQL Server to display exact saved details
         const savedCode = newCustCode.trim();
@@ -558,13 +565,11 @@ export default function GoldSchemeTransactionScreen() {
         setCustomerCode(savedCode);
         fetchCustomerDetailsByCode(savedCode);
       } else {
-        const msg = json.message || 'Failed to save customer.';
-        Platform.OS === 'web' ? window.alert(msg) : Alert.alert('Error', msg);
+        showToast(json.message || 'Failed to save customer.', 'error');
       }
     } catch (err) {
       console.error('Error saving customer:', err);
-      const msg = 'Unable to connect to server.';
-      Platform.OS === 'web' ? window.alert(msg) : Alert.alert('Network Error', msg);
+      showToast('Unable to connect to server.', 'error');
     } finally {
       setSavingCustomer(false);
     }
@@ -573,8 +578,7 @@ export default function GoldSchemeTransactionScreen() {
   // Delete Customer from SQL Server
   const handleDeleteCustomer = () => {
     if (!newCustCode.trim()) {
-      const msg = 'No customer selected to delete.';
-      Platform.OS === 'web' ? window.alert(msg) : Alert.alert('Warning', msg);
+      showToast('No customer selected to delete.', 'error');
       return;
     }
 
@@ -586,17 +590,14 @@ export default function GoldSchemeTransactionScreen() {
         });
         const json = await res.json();
         if (json.success) {
-          const msg = 'Customer deleted successfully.';
-          Platform.OS === 'web' ? window.alert(msg) : Alert.alert('Success', msg);
+          showToast('Customer deleted successfully.', 'success');
           handleOpenNewCustomer();
         } else {
-          const msg = json.message || 'Failed to delete customer.';
-          Platform.OS === 'web' ? window.alert(msg) : Alert.alert('Cannot Delete', msg);
+          showToast(json.message || 'Failed to delete customer.', 'error');
         }
       } catch (err) {
         console.error('Delete customer error:', err);
-        const msg = 'Error connecting to server to delete customer.';
-        Platform.OS === 'web' ? window.alert(msg) : Alert.alert('Error', msg);
+        showToast('Error connecting to server to delete customer.', 'error');
       } finally {
         setDeletingCustomer(false);
       }
@@ -621,8 +622,7 @@ export default function GoldSchemeTransactionScreen() {
   // KYC Actions
   const handleOpenAddKycModal = () => {
     if (!newCustCode.trim()) {
-      const msg = 'Please select or save a customer first.';
-      Platform.OS === 'web' ? window.alert(msg) : Alert.alert('Notice', msg);
+      showToast('Please select or save a customer first.', 'info');
       return;
     }
     setKycData({
@@ -650,19 +650,16 @@ export default function GoldSchemeTransactionScreen() {
       });
       const json = await res.json();
       if (json.success) {
-        const msg = 'KYC details saved successfully.';
-        Platform.OS === 'web' ? window.alert(msg) : Alert.alert('Success', msg);
+        showToast('KYC details saved successfully.', 'success');
         setAddKycModalVisible(false);
         // Refresh customer form
         loadCustomerIntoDetailsForm(newCustCode);
       } else {
-        const msg = json.message || 'Failed to save KYC.';
-        Platform.OS === 'web' ? window.alert(msg) : Alert.alert('Error', msg);
+        showToast(json.message || 'Failed to save KYC.', 'error');
       }
     } catch (err) {
       console.error('Error saving KYC:', err);
-      const msg = 'Error connecting to server.';
-      Platform.OS === 'web' ? window.alert(msg) : Alert.alert('Error', msg);
+      showToast('Error connecting to server.', 'error');
     } finally {
       setSavingKyc(false);
     }
@@ -670,8 +667,7 @@ export default function GoldSchemeTransactionScreen() {
 
   const handleOpenShowKycModal = async () => {
     if (!newCustCode.trim()) {
-      const msg = 'Please select or save a customer first.';
-      Platform.OS === 'web' ? window.alert(msg) : Alert.alert('Notice', msg);
+      showToast('Please select or save a customer first.', 'info');
       return;
     }
     try {
@@ -681,8 +677,7 @@ export default function GoldSchemeTransactionScreen() {
         setKycData(json.data);
         setShowKycModalVisible(true);
       } else {
-        const msg = json.message || 'Customer KYC record not found.';
-        Platform.OS === 'web' ? window.alert(msg) : Alert.alert('Notice', msg);
+        showToast(json.message || 'Customer KYC record not found.', 'info');
       }
     } catch (err) {
       console.error('Error loading KYC:', err);
@@ -718,8 +713,7 @@ export default function GoldSchemeTransactionScreen() {
   // Validate Salesman Password
   const handleValidateSalesman = async () => {
     if (!salesmanPassword.trim()) {
-      const msg = 'Please enter Sales Man password.';
-      Platform.OS === 'web' ? window.alert(msg) : Alert.alert('Validation Error', msg);
+      showToast('Please enter Sales Man password.', 'error');
       return;
     }
 
@@ -735,16 +729,15 @@ export default function GoldSchemeTransactionScreen() {
       if (json.success) {
         setSalesmanName(json.salesManName);
         setSalesmanCode(json.salesmanCode);
+        showToast('Salesman validated.', 'success');
       } else {
         setSalesmanName('');
         setSalesmanCode('');
-        const msg = json.message || 'Invalid Password.';
-        Platform.OS === 'web' ? window.alert(msg) : Alert.alert('Validation Error', msg);
+        showToast(json.message || 'Invalid Password.', 'error');
       }
     } catch (err) {
       console.error('Error validating salesman:', err);
-      const msg = 'Unable to connect to server.';
-      Platform.OS === 'web' ? window.alert(msg) : Alert.alert('Error', msg);
+      showToast('Unable to connect to server.', 'error');
     } finally {
       setValidatingSalesman(false);
     }
@@ -753,8 +746,7 @@ export default function GoldSchemeTransactionScreen() {
   // Customer Lookup
   const handleSearchCustomer = async () => {
     if (!customerCode.trim()) {
-      const msg = 'Please enter Customer Code.';
-      Platform.OS === 'web' ? window.alert(msg) : Alert.alert('Validation', msg);
+      showToast('Please enter Customer Code.', 'error');
       return;
     }
 
@@ -777,8 +769,7 @@ export default function GoldSchemeTransactionScreen() {
       }
     } catch (err) {
       console.error('Error searching customer:', err);
-      const msg = 'Unable to connect to server.';
-      Platform.OS === 'web' ? window.alert(msg) : Alert.alert('Error', msg);
+      showToast('Unable to connect to server.', 'error');
     } finally {
       setSearchingCustomer(false);
     }
@@ -833,25 +824,21 @@ export default function GoldSchemeTransactionScreen() {
   // Save Transaction (F7) -> Navigates to existing Paying Mode Tender Full Screen (/payingmode)
   const handleSave = async () => {
     if (!salesmanCode) {
-      const msg = 'Please validate Sales Man password first.';
-      Platform.OS === 'web' ? window.alert(msg) : Alert.alert('Validation Error', msg);
+      showToast('Please validate Sales Man password first.', 'error');
       return;
     }
     if (!customerCode.trim()) {
-      const msg = 'Customer Code is required.';
-      Platform.OS === 'web' ? window.alert(msg) : Alert.alert('Validation Error', msg);
+      showToast('Customer Code is required.', 'error');
       return;
     }
     if (!schemeCode.trim()) {
-      const msg = 'Scheme Code is required.';
-      Platform.OS === 'web' ? window.alert(msg) : Alert.alert('Validation Error', msg);
+      showToast('Scheme Code is required.', 'error');
       return;
     }
 
     const valNum = parseFloat(schemeValue) || 0;
     if (valNum <= 0) {
-      const msg = 'Scheme Value must be greater than zero.';
-      Platform.OS === 'web' ? window.alert(msg) : Alert.alert('Validation Error', msg);
+      showToast('Scheme Value must be greater than zero.', 'error');
       return;
     }
 
@@ -931,21 +918,18 @@ export default function GoldSchemeTransactionScreen() {
 
       if (json.success) {
         setPayingModalVisible(false);
-        const msg = json.message || 'Scheme Transaction saved successfully!';
-        Platform.OS === 'web' ? window.alert(msg) : Alert.alert('Success', msg);
+        showToast(json.message || 'Scheme Transaction saved successfully!', 'success');
         fetchTransactionHistory(customerCode);
         fetchNextSchemeNo();
         // Reset scheme input fields after successful transaction
         setSchemeCode('');
         setSchemeValue('');
       } else {
-        const msg = json.message || 'Failed to save Scheme Transaction.';
-        Platform.OS === 'web' ? window.alert(msg) : Alert.alert('Error', msg);
+        showToast(json.message || 'Failed to save Scheme Transaction.', 'error');
       }
     } catch (err) {
       console.error('Error saving scheme transaction with paying modes:', err);
-      const msg = 'Unable to connect to server.';
-      Platform.OS === 'web' ? window.alert(msg) : Alert.alert('Error', msg);
+      showToast('Unable to connect to server.', 'error');
     } finally {
       setSaving(false);
     }
@@ -954,8 +938,7 @@ export default function GoldSchemeTransactionScreen() {
   // Cancel Transaction (F10)
   const handleCancel = async () => {
     if (!schemeNo) {
-      const msg = 'No active Scheme No to cancel.';
-      Platform.OS === 'web' ? window.alert(msg) : Alert.alert('Validation Error', msg);
+      showToast('No active Scheme No to cancel.', 'error');
       return;
     }
     try {
@@ -966,15 +949,14 @@ export default function GoldSchemeTransactionScreen() {
       });
       const json = await res.json();
       if (json.success) {
-        const msg = 'Scheme Transaction cancelled.';
-        Platform.OS === 'web' ? window.alert(msg) : Alert.alert('Success', msg);
+        showToast('Scheme Transaction cancelled.', 'success');
         handleClear();
       } else {
-        const msg = json.message || 'Failed to cancel scheme.';
-        Platform.OS === 'web' ? window.alert(msg) : Alert.alert('Error', msg);
+        showToast(json.message || 'Failed to cancel scheme.', 'error');
       }
     } catch (err) {
       console.error('Error cancelling scheme:', err);
+      showToast('Error cancelling scheme.', 'error');
     }
   };
 
@@ -994,8 +976,7 @@ export default function GoldSchemeTransactionScreen() {
     console.log("Reprint InvoiceNo requested:", targetInvoiceNo);
 
     if (!targetInvoiceNo || !targetInvoiceNo.trim()) {
-      const msg = 'Please select a transaction from the table to reprint.';
-      Platform.OS === 'web' ? window.alert(msg) : Alert.alert('Validation Error', msg);
+      showToast('Please select a transaction from the table to reprint.', 'error');
       return;
     }
     try {
@@ -1004,16 +985,13 @@ export default function GoldSchemeTransactionScreen() {
       if (json.success && json.data) {
         const inv = json.data.InvoiceNo || targetInvoiceNo;
         const amt = json.data.InvoiceAmount != null ? Number(json.data.InvoiceAmount).toFixed(2) : '0.00';
-        const msg = `Reprint Receipt Ready!\nInvoice No: ${inv}\nAmount: $${amt}\nDate: ${json.data.InvoiceDate || ''}`;
-        Platform.OS === 'web' ? window.alert(msg) : Alert.alert('Reprint Receipt', msg);
+        showToast(`Reprint Receipt Ready: Invoice ${inv} ($${amt})`, 'success');
       } else {
-        const msg = json.message || 'Transaction record not found for reprint.';
-        Platform.OS === 'web' ? window.alert(msg) : Alert.alert('Not Found', msg);
+        showToast(json.message || 'Transaction record not found for reprint.', 'error');
       }
     } catch (err) {
       console.error('Error during reprint:', err);
-      const msg = 'Unable to connect to server for reprint.';
-      Platform.OS === 'web' ? window.alert(msg) : Alert.alert('Error', msg);
+      showToast('Unable to connect to server for reprint.', 'error');
     }
   };
 
@@ -1029,7 +1007,50 @@ export default function GoldSchemeTransactionScreen() {
           </TouchableOpacity>
           <Text style={styles.headerTitle}>Gold Scheme Transaction Detail</Text>
         </View>
+
+        {/* HEADER ACTIONS (RIGHT SIDE) */}
+        <View style={styles.headerRightActions}>
+          <TouchableOpacity style={styles.secondaryBtn} onPress={handleReprint}>
+            <Text style={styles.secondaryBtnText}>RePrint</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.secondaryBtn} onPress={handleCancel}>
+            <Text style={styles.secondaryBtnText}>Cancel</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.secondaryBtn} onPress={handleClear}>
+            <Text style={styles.secondaryBtnText}>Clear</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.primaryBtn} onPress={handleSave} disabled={saving}>
+            {saving ? (
+              <ActivityIndicator size="small" color="#FFFFFF" />
+            ) : (
+              <Text style={styles.primaryBtnText}>Save</Text>
+            )}
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.secondaryBtn} onPress={() => router.back()}>
+            <Text style={styles.secondaryBtnText}>Close</Text>
+          </TouchableOpacity>
+        </View>
       </View>
+
+      {/* TOAST MESSAGE BANNER */}
+      {toastMessage ? (
+        <View style={[
+          styles.toastContainer,
+          toastType === 'error' ? styles.toastError : toastType === 'success' ? styles.toastSuccess : styles.toastInfo
+        ]}>
+          <Ionicons
+            name={toastType === 'error' ? 'alert-circle' : toastType === 'success' ? 'checkmark-circle' : 'information-circle'}
+            size={18}
+            color="#FFFFFF"
+            style={{ marginRight: 6 }}
+          />
+          <Text style={styles.toastText}>{toastMessage}</Text>
+        </View>
+      ) : null}
 
       <ScrollView contentContainerStyle={styles.scrollContainer} keyboardShouldPersistTaps="handled">
         <View style={styles.mainGrid}>
@@ -1119,63 +1140,58 @@ export default function GoldSchemeTransactionScreen() {
                 </View>
               </View>
 
-              {/* 3. Customer * */}
+              {/* 3. Customer * & Customer Name in one row */}
               <View style={styles.formRow}>
                 <Text style={styles.label}>
                   Customer <Text style={styles.requiredStar}>*</Text>
                 </Text>
-                <View style={styles.inputWrapperWithButton}>
+                <View style={styles.flexRow}>
+                  <View style={[styles.inputWrapperWithButton, { flex: 1 }]}>
+                    <TextInput
+                      style={styles.inputFlex}
+                      placeholder="Enter Customer Code"
+                      placeholderTextColor="#94A3B8"
+                      value={customerCode}
+                      onChangeText={setCustomerCode}
+                      onSubmitEditing={() => fetchCustomerDetailsByCode(customerCode)}
+                    />
+                    <TouchableOpacity style={styles.inlineSearchBtn} onPress={handleOpenCustomerModal} disabled={searchingCustomer}>
+                      {searchingCustomer ? (
+                        <ActivityIndicator size="small" color="#FFFFFF" />
+                      ) : (
+                        <Ionicons name="search" size={18} color="#FFFFFF" />
+                      )}
+                    </TouchableOpacity>
+                  </View>
+
+                  <Text style={[styles.inlineLabel, { marginLeft: 16, marginRight: 8 }]}>Customer Name</Text>
+                  <View style={[styles.readOnlyBox, { flex: 1.5 }]}>
+                    <Text style={styles.readOnlyText} numberOfLines={1}>{customerName || ''}</Text>
+                  </View>
+                </View>
+              </View>
+
+              {/* 5. Address & New Customer Button in one row */}
+              <View style={styles.formRow}>
+                <Text style={styles.label}>Address</Text>
+                <View style={styles.flexRow}>
                   <TextInput
-                    style={styles.inputFlex}
-                    placeholder="Enter Customer Code"
+                    style={[styles.inputFlex, { height: 32, borderRadius: 6, marginRight: 10 }]}
+                    placeholder="Enter Address"
                     placeholderTextColor="#94A3B8"
-                    value={customerCode}
-                    onChangeText={setCustomerCode}
-                    onSubmitEditing={() => fetchCustomerDetailsByCode(customerCode)}
+                    value={[address1, address2, address3].filter(Boolean).join(', ')}
+                    onChangeText={(text) => {
+                      const parts = text.split(',');
+                      setAddress1(parts[0]?.trim() || '');
+                      setAddress2(parts[1]?.trim() || '');
+                      setAddress3(parts.slice(2).join(', ').trim() || '');
+                    }}
                   />
-                  <TouchableOpacity style={styles.inlineSearchBtn} onPress={handleOpenCustomerModal} disabled={searchingCustomer}>
-                    {searchingCustomer ? (
-                      <ActivityIndicator size="small" color="#FFFFFF" />
-                    ) : (
-                      <Ionicons name="search" size={18} color="#FFFFFF" />
-                    )}
+                  <TouchableOpacity style={styles.newCustomerBtn} onPress={handleOpenNewCustomer}>
+                    <Ionicons name="add" size={16} color="#FFFFFF" style={{ marginRight: 4 }} />
+                    <Text style={styles.newCustomerBtnText}>New Customer</Text>
                   </TouchableOpacity>
                 </View>
-              </View>
-
-              {/* 4. Customer Name */}
-              <View style={styles.formRow}>
-                <Text style={styles.label}>Customer Name</Text>
-                <View style={styles.readOnlyBox}>
-                  <Text style={styles.readOnlyText}>{customerName || ''}</Text>
-                </View>
-              </View>
-
-              {/* 5. Address */}
-              <View style={styles.formRowTopAlign}>
-                <Text style={[styles.label, { marginTop: 8 }]}>Address</Text>
-                <TextInput
-                  style={styles.addressTextArea}
-                  placeholder="Enter Address"
-                  placeholderTextColor="#94A3B8"
-                  multiline
-                  numberOfLines={3}
-                  value={[address1, address2, address3].filter(Boolean).join('\n')}
-                  onChangeText={(text) => {
-                    const lines = text.split('\n');
-                    setAddress1(lines[0] || '');
-                    setAddress2(lines[1] || '');
-                    setAddress3(lines.slice(2).join(' ') || '');
-                  }}
-                />
-              </View>
-
-              {/* New Customer Button */}
-              <View style={{ flexDirection: 'row', marginTop: 4 }}>
-                <TouchableOpacity style={styles.newCustomerBtn} onPress={handleOpenNewCustomer}>
-                  <Ionicons name="add" size={18} color="#FFFFFF" style={{ marginRight: 6 }} />
-                  <Text style={styles.newCustomerBtnText}>New Customer</Text>
-                </TouchableOpacity>
               </View>
 
             </View>
@@ -1192,7 +1208,7 @@ export default function GoldSchemeTransactionScreen() {
 
             <View style={styles.cardBody}>
               <View style={styles.schemeRowLayout}>
-                
+
                 {/* Scheme Code */}
                 <View style={{ flexDirection: 'row', alignItems: 'center', marginRight: 24 }}>
                   <Text style={styles.schemeLabel}>
@@ -1338,7 +1354,7 @@ export default function GoldSchemeTransactionScreen() {
       <Modal visible={customerModalVisible} transparent animationType="fade" onRequestClose={() => setCustomerModalVisible(false)}>
         <View style={styles.legacyModalOverlay}>
           <View style={[styles.legacyModalContainer, { width: Platform.OS === 'web' ? 760 : '96%' }]}>
-            
+
             {/* Header: Icon & Close Only (Heading text removed) */}
             <View style={[styles.legacyModalHeader, { height: 40 }]}>
               <View style={{ flexDirection: 'row', alignItems: 'center' }}>
@@ -1357,8 +1373,8 @@ export default function GoldSchemeTransactionScreen() {
               <View style={[styles.legacySearchBoxRow, { zIndex: 50 }]}>
                 {/* Search Field Dropdown (CustomerName, CustomerCode, NricNo) */}
                 <View style={{ position: 'relative', zIndex: 60, marginRight: 8 }}>
-                  <TouchableOpacity 
-                    style={[styles.legacyDropdownSelect, { height: 34, minWidth: 130 }]} 
+                  <TouchableOpacity
+                    style={[styles.legacyDropdownSelect, { height: 34, minWidth: 130 }]}
                     onPress={() => setShowCustFieldDropdown(!showCustFieldDropdown)}
                   >
                     <Text style={styles.legacyDropdownText}>{custSearchField}</Text>
@@ -1401,8 +1417,8 @@ export default function GoldSchemeTransactionScreen() {
                 />
 
                 {/* Search Button */}
-                <TouchableOpacity 
-                  style={[styles.legacySearchExecuteBtn, { height: 34 }]} 
+                <TouchableOpacity
+                  style={[styles.legacySearchExecuteBtn, { height: 34 }]}
                   onPress={() => fetchCustomerSearchResults(custSearchField, custSearchText, custSearchMode)}
                 >
                   <Ionicons name="search" size={14} color="#FFFFFF" style={{ marginRight: 4 }} />
@@ -1473,7 +1489,7 @@ export default function GoldSchemeTransactionScreen() {
       <Modal visible={schemeModalVisible} transparent animationType="fade" onRequestClose={() => setSchemeModalVisible(false)}>
         <View style={styles.legacyModalOverlay}>
           <View style={styles.legacyModalContainer}>
-            
+
             {/* Modal Title & Close */}
             <View style={styles.legacyModalHeader}>
               <View style={{ flexDirection: 'row', alignItems: 'center' }}>
@@ -1487,14 +1503,14 @@ export default function GoldSchemeTransactionScreen() {
 
             {/* SubHeader Search Controls */}
             <View style={[styles.legacySearchControlArea, { paddingVertical: 10 }]}>
-              
+
               {/* Row 1: Search Field Dropdown on Left, Records Found on Right */}
               <View style={[styles.legacyTopMetaRow, { zIndex: 50, marginBottom: 4 }]}>
                 <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                   <Text style={styles.legacyLabelText}>Search Field </Text>
                   <View style={{ position: 'relative', zIndex: 60 }}>
-                    <TouchableOpacity 
-                      style={styles.legacyDropdownSelect} 
+                    <TouchableOpacity
+                      style={styles.legacyDropdownSelect}
                       onPress={() => setShowSchemeFieldDropdown(!showSchemeFieldDropdown)}
                     >
                       <Text style={styles.legacyDropdownText}>{schemeSearchField}</Text>
@@ -1544,8 +1560,8 @@ export default function GoldSchemeTransactionScreen() {
                     }}
                     onSubmitEditing={() => fetchSchemeSearchResults(schemeSearchField, schemeSearchText, schemeSearchMode)}
                   />
-                  <TouchableOpacity 
-                    style={styles.legacySearchExecuteBtn} 
+                  <TouchableOpacity
+                    style={styles.legacySearchExecuteBtn}
                     onPress={() => fetchSchemeSearchResults(schemeSearchField, schemeSearchText, schemeSearchMode)}
                   >
                     <Ionicons name="search" size={13} color="#FFFFFF" style={{ marginRight: 4 }} />
@@ -1594,34 +1610,6 @@ export default function GoldSchemeTransactionScreen() {
           </View>
         </View>
       </Modal>
-
-
-      {/* BOTTOM ACTION BAR */}
-      <View style={styles.bottomActionBar}>
-        <TouchableOpacity style={styles.secondaryBtn} onPress={handleReprint}>
-          <Text style={styles.secondaryBtnText}>RePrint</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity style={styles.secondaryBtn} onPress={handleCancel}>
-          <Text style={styles.secondaryBtnText}>Cancel</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity style={styles.secondaryBtn} onPress={handleClear}>
-          <Text style={styles.secondaryBtnText}>Clear</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity style={styles.primaryBtn} onPress={handleSave} disabled={saving}>
-          {saving ? (
-            <ActivityIndicator size="small" color="#FFFFFF" />
-          ) : (
-            <Text style={styles.primaryBtnText}>Save</Text>
-          )}
-        </TouchableOpacity>
-
-        <TouchableOpacity style={styles.secondaryBtn} onPress={() => router.back()}>
-          <Text style={styles.secondaryBtnText}>Close</Text>
-        </TouchableOpacity>
-      </View>
     </SafeAreaView>
   );
 }
@@ -1631,33 +1619,73 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#FBF9F5',
   },
+  toastContainer: {
+    position: 'absolute',
+    top: 14,
+    left: '50%',
+    transform: [{ translateX: -180 }],
+    width: 360,
+    maxWidth: '90%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 18,
+    borderRadius: 8,
+    zIndex: 99999,
+    elevation: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 10,
+  },
+  toastSuccess: {
+    backgroundColor: '#16A34A',
+  },
+  toastError: {
+    backgroundColor: '#DC2626',
+  },
+  toastInfo: {
+    backgroundColor: '#9E6D08',
+  },
+  toastText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '600',
+    textAlign: 'center',
+  },
   topHeader: {
-    height: 52,
+    height: 48,
     borderBottomWidth: 1,
     borderBottomColor: '#E8DCB8',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 16,
+    paddingHorizontal: 14,
     backgroundColor: '#FFFFFF',
   },
   headerLeft: {
     flexDirection: 'row',
     alignItems: 'center',
   },
+  headerRightActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
   backButton: {
-    width: 32,
-    height: 32,
-    borderRadius: 8,
+    width: 30,
+    height: 30,
+    borderRadius: 6,
     borderWidth: 1,
     borderColor: '#DFD5C3',
     justifyContent: 'center',
     alignItems: 'center',
     backgroundColor: '#FFFFFF',
-    marginRight: 12,
+    marginRight: 10,
   },
   headerTitle: {
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: '700',
     color: '#3B2D17',
     fontFamily: Platform.OS === 'web' ? 'Cambria, Georgia, serif' : undefined,
@@ -1681,15 +1709,15 @@ const styles = StyleSheet.create({
   },
 
   scrollContainer: {
-    padding: 12,
-    paddingBottom: 16,
+    padding: 8,
+    paddingBottom: 12,
   },
   mainGrid: {
-    gap: 12,
+    gap: 8,
   },
   cardSection: {
     backgroundColor: '#FFFFFF',
-    borderRadius: 8,
+    borderRadius: 6,
     borderWidth: 1,
     borderColor: '#E8DCB8',
     overflow: 'hidden',
@@ -1702,32 +1730,32 @@ const styles = StyleSheet.create({
   sectionHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
     backgroundColor: '#F5E7CA',
     borderBottomWidth: 1,
     borderBottomColor: '#E2D3B3',
   },
   headerIconBadge: {
-    width: 24,
-    height: 24,
-    borderRadius: 5,
+    width: 22,
+    height: 22,
+    borderRadius: 4,
     backgroundColor: '#FFF8EA',
     borderWidth: 1,
     borderColor: '#E2D2AF',
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 8,
+    marginRight: 6,
   },
   sectionTitle: {
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '700',
     color: '#3B2D17',
     fontFamily: Platform.OS === 'web' ? 'Cambria, Georgia, serif' : undefined,
   },
   cardBody: {
-    padding: 14,
-    gap: 8,
+    padding: 10,
+    gap: 6,
   },
 
   formRow: {
@@ -2010,8 +2038,8 @@ const styles = StyleSheet.create({
   secondaryBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 7,
+    paddingHorizontal: 12,
+    paddingVertical: 5,
     borderRadius: 6,
     borderWidth: 1,
     borderColor: '#DFD5C3',
@@ -2025,8 +2053,8 @@ const styles = StyleSheet.create({
   primaryBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingVertical: 7,
+    paddingHorizontal: 16,
+    paddingVertical: 5,
     borderRadius: 6,
     backgroundColor: '#9E6D08',
   },
@@ -2266,7 +2294,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     padding: 12,
   },
-  
+
   custDetailsModalHeaderBar: {
     flexDirection: 'row',
     justifyContent: 'space-between',

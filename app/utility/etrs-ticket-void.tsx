@@ -1,3 +1,4 @@
+import { API_BASE_URL } from '@/constants/api';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { Stack, useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
@@ -14,7 +15,6 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { API_BASE_URL } from '@/constants/api';
 
 export default function ETRSTicketVoidScreen() {
   const router = useRouter();
@@ -50,6 +50,18 @@ export default function ETRSTicketVoidScreen() {
   // States
   const [loadingInvoice, setLoadingInvoice] = useState(false);
   const [voiding, setVoiding] = useState(false);
+
+  // Toast State
+  const [toastMessage, setToastMessage] = useState('');
+  const [toastType, setToastType] = useState<'success' | 'error' | 'info'>('info');
+
+  const showToast = (msg: string, type: 'success' | 'error' | 'info' = 'info') => {
+    setToastType(type);
+    setToastMessage(msg);
+    setTimeout(() => {
+      setToastMessage('');
+    }, 4000);
+  };
 
   // Load Staff List on Mount
   useEffect(() => {
@@ -152,8 +164,7 @@ export default function ETRSTicketVoidScreen() {
         }
 
         if (h.JournalNo && String(h.JournalNo).trim() === 'N' && !etrsFound) {
-          const msg = 'This invoice does not have an active eTRS ticket, or it has already been voided.';
-          Platform.OS === 'web' ? window.alert(msg) : Alert.alert('eTRS Status', msg);
+          showToast('This invoice does not have an active eTRS ticket, or it has already been voided.', 'info');
         }
 
         if (h.CustomerCode) {
@@ -202,15 +213,14 @@ export default function ETRSTicketVoidScreen() {
               setInvoiceYear(parts[2]);
             }
           }
-          const msg = 'No eTRS statement exists for this invoice, or it has already been voided.';
-          Platform.OS === 'web' ? window.alert(msg) : Alert.alert('Not Found', msg);
+          showToast('No eTRS statement exists for this invoice, or it has already been voided.', 'info');
         } else {
-          Platform.OS === 'web' ? window.alert('Invoice not found.') : Alert.alert('Not Found', 'Invoice not found.');
+          showToast('Invoice not found.', 'error');
         }
       }
     } catch (err) {
       console.error('Error searching invoice:', err);
-      Platform.OS === 'web' ? window.alert('Failed to fetch invoice details.') : Alert.alert('Error', 'Failed to fetch invoice details.');
+      showToast('Failed to fetch invoice details.', 'error');
     } finally {
       setLoadingInvoice(false);
     }
@@ -234,7 +244,7 @@ export default function ETRSTicketVoidScreen() {
       };
       input.click();
     } else {
-      Alert.alert('Image Picker', 'Image upload is available on web platform.');
+      showToast('Image upload is available on web platform.', 'info');
     }
   };
 
@@ -261,13 +271,11 @@ export default function ETRSTicketVoidScreen() {
   // Void Action Handler
   const handleVoid = async () => {
     if (!invoiceNo.trim()) {
-      const msg = 'Invoice No is required.';
-      Platform.OS === 'web' ? window.alert(msg) : Alert.alert('Validation Error', msg);
+      showToast('Invoice No is required.', 'error');
       return;
     }
     if (!remarks.trim()) {
-      const msg = 'Remarks are required for voiding an eTRS Ticket.';
-      Platform.OS === 'web' ? window.alert(msg) : Alert.alert('Validation Error', msg);
+      showToast('Remarks are required for voiding an eTRS Ticket.', 'error');
       return;
     }
 
@@ -289,17 +297,14 @@ export default function ETRSTicketVoidScreen() {
       const json = await res.json();
 
       if (json.success) {
-        const msg = json.message || 'Invoice voided successfully';
-        Platform.OS === 'web' ? window.alert(msg) : Alert.alert('Success', msg);
+        showToast(json.message || 'Invoice voided successfully', 'success');
         handleClear();
       } else {
-        const msg = json.message || 'Failed to void eTRS Ticket.';
-        Platform.OS === 'web' ? window.alert(msg) : Alert.alert('Error', msg);
+        showToast(json.message || 'Failed to void eTRS Ticket.', 'error');
       }
     } catch (err) {
       console.error('Error voiding eTRS ticket:', err);
-      const msg = 'Error voiding eTRS Ticket.';
-      Platform.OS === 'web' ? window.alert(msg) : Alert.alert('Error', msg);
+      showToast('Error voiding eTRS Ticket.', 'error');
     } finally {
       setVoiding(false);
     }
@@ -317,12 +322,46 @@ export default function ETRSTicketVoidScreen() {
           </TouchableOpacity>
           <Text style={styles.headerTitle}>eTRS Ticket Void</Text>
         </View>
+
+        {/* HEADER RIGHT ACTIONS */}
+        <View style={styles.actionButtonsRow}>
+          {/* CLEAR (F6) */}
+          <TouchableOpacity style={styles.clearButton} onPress={handleClear}>
+            <Text style={styles.clearButtonText}>Clear</Text>
+          </TouchableOpacity>
+
+          {/* VOID (F7) */}
+          <TouchableOpacity style={styles.voidButton} onPress={handleVoid} disabled={voiding}>
+            {voiding && (
+              <ActivityIndicator size="small" color="#FFFFFF" style={{ marginRight: 6 }} />
+            )}
+            <Text style={styles.voidButtonText}>Void</Text>
+          </TouchableOpacity>
+
+
+        </View>
       </View>
+
+      {/* FLOATING TOP-CENTER TOAST */}
+      {toastMessage ? (
+        <View style={[
+          styles.toastContainer,
+          toastType === 'error' ? styles.toastError : toastType === 'success' ? styles.toastSuccess : styles.toastInfo
+        ]}>
+          <Ionicons
+            name={toastType === 'error' ? 'alert-circle' : toastType === 'success' ? 'checkmark-circle' : 'information-circle'}
+            size={18}
+            color="#FFFFFF"
+            style={{ marginRight: 6 }}
+          />
+          <Text style={styles.toastText}>{toastMessage}</Text>
+        </View>
+      ) : null}
 
       {/* MAIN TWO-COLUMN CONTENT */}
       <View style={styles.mainGridContainer}>
         <View style={styles.mainGrid}>
-          
+
           {/* LEFT SECTION: Invoice Details */}
           <View style={styles.cardSection}>
             <View style={styles.sectionHeader}>
@@ -333,7 +372,7 @@ export default function ETRSTicketVoidScreen() {
             </View>
 
             <View style={styles.cardBody}>
-              
+
               {/* 1. Invoice No * */}
               <View style={styles.formRow}>
                 <Text style={styles.label}>
@@ -657,32 +696,6 @@ export default function ETRSTicketVoidScreen() {
 
         </View>
       </View>
-
-      {/* BOTTOM ACTION BAR */}
-      <View style={styles.bottomActionBar}>
-        <View style={styles.actionButtonsRow}>
-          
-          {/* CLEAR (F6) */}
-          <TouchableOpacity style={styles.clearButton} onPress={handleClear}>
-            <Text style={styles.clearButtonText}>Clear</Text>
-          </TouchableOpacity>
-
-          {/* VOID (F7) */}
-          <TouchableOpacity style={styles.voidButton} onPress={handleVoid} disabled={voiding}>
-            {voiding && (
-              <ActivityIndicator size="small" color="#FFFFFF" style={{ marginRight: 6 }} />
-            )}
-            <Text style={styles.voidButtonText}>Void</Text>
-          </TouchableOpacity>
-
-          {/* CLOSE (Esc) */}
-          <TouchableOpacity style={styles.closeButton} onPress={() => router.back()}>
-            <Text style={styles.closeButtonText}>Close</Text>
-          </TouchableOpacity>
-
-        </View>
-      </View>
-
     </SafeAreaView>
   );
 }
@@ -691,6 +704,41 @@ const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
     backgroundColor: '#FBF9F5',
+  },
+  toastContainer: {
+    position: 'absolute',
+    top: 14,
+    left: '50%',
+    transform: [{ translateX: -180 }],
+    width: 360,
+    maxWidth: '90%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 18,
+    borderRadius: 8,
+    zIndex: 99999,
+    elevation: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 10,
+  },
+  toastSuccess: {
+    backgroundColor: '#16A34A',
+  },
+  toastError: {
+    backgroundColor: '#DC2626',
+  },
+  toastInfo: {
+    backgroundColor: '#9E6D08',
+  },
+  toastText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '600',
+    textAlign: 'center',
   },
   topHeader: {
     height: 52,
@@ -1038,48 +1086,49 @@ const styles = StyleSheet.create({
   },
   actionButtonsRow: {
     flexDirection: 'row',
-    gap: 10,
+    alignItems: 'center',
+    gap: 8,
   },
   clearButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 18,
-    height: 36,
+    paddingHorizontal: 14,
+    height: 32,
     borderRadius: 6,
     borderWidth: 1,
     borderColor: '#DFD5C3',
     backgroundColor: '#FFFFFF',
   },
   clearButtonText: {
-    fontSize: 12.5,
+    fontSize: 12,
     fontWeight: 'bold',
     color: '#3B2D17',
   },
   voidButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 22,
-    height: 36,
+    paddingHorizontal: 16,
+    height: 32,
     borderRadius: 6,
     backgroundColor: '#9E6D08',
   },
   voidButtonText: {
-    fontSize: 12.5,
+    fontSize: 12,
     fontWeight: 'bold',
     color: '#FFFFFF',
   },
   closeButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 18,
-    height: 36,
+    paddingHorizontal: 14,
+    height: 32,
     borderRadius: 6,
     borderWidth: 1,
     borderColor: '#DFD5C3',
     backgroundColor: '#FFFFFF',
   },
   closeButtonText: {
-    fontSize: 12.5,
+    fontSize: 12,
     fontWeight: 'bold',
     color: '#3B2D17',
   },

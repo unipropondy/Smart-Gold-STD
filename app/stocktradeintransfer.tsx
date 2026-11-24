@@ -1,7 +1,7 @@
+import { PrintReportModal } from '@/components/PrintReportModal';
 import { ThemedText } from '@/components/themed-text';
 import { API_BASE_URL } from '@/constants/api';
 import { useThemeColors } from '@/hooks/useThemeColors';
-import { PrintReportModal } from '@/components/PrintReportModal';
 import { getStandardReportCss, renderStandardReportFooter, renderStandardReportHeader } from '@/utils/standardPrintReport';
 import { UNIPRO_LOGO_DATA_URI } from '@/utils/uniproLogo';
 import { Ionicons } from '@expo/vector-icons';
@@ -658,16 +658,16 @@ export default function StockTradeInTransferScreen() {
           <div class="page-sheet">
             <div class="report-main-content">
               ${renderStandardReportHeader({
-                company: {
-                  name: (company?.name || 'SMART').trim(),
-                  address: compAddress,
-                  phone: company?.phone,
-                  fax: company?.fax,
-                  logoUrl: company?.logo || (company?.logoBase64 ? `data:image/png;base64,${company.logoBase64}` : '') || UNIPRO_LOGO_DATA_URI,
-                },
-                reportTitle: sReportTitle,
-                printedDateTime: printTimestamp,
-              })}
+      company: {
+        name: (company?.name || 'SMART').trim(),
+        address: compAddress,
+        phone: company?.phone,
+        fax: company?.fax,
+        logoUrl: company?.logo || (company?.logoBase64 ? `data:image/png;base64,${company.logoBase64}` : '') || UNIPRO_LOGO_DATA_URI,
+      },
+      reportTitle: sReportTitle,
+      printedDateTime: printTimestamp,
+    })}
 
               <!-- TWO-COLUMN INFO: TRANSFER DETAILS vs DISPATCH DETAILS -->
               <div class="info-grid">
@@ -781,13 +781,13 @@ export default function StockTradeInTransferScreen() {
             </div>
 
             ${renderStandardReportFooter({
-              staff: {
-                staffLabel: 'PREPARED BY (STAFF)',
-                staffName: (header.salesManCode || 'Staff').trim(),
-                receiverLabel: 'AUTHORIZED RECEIVER',
-                receiverName: '-'
-              }
-            })}
+      staff: {
+        staffLabel: 'PREPARED BY (STAFF)',
+        staffName: (header.salesManCode || 'Staff').trim(),
+        receiverLabel: 'AUTHORIZED RECEIVER',
+        receiverName: '-'
+      }
+    })}
           </div>
         </body>
       </html>
@@ -981,7 +981,7 @@ export default function StockTradeInTransferScreen() {
             disabled={saving || loading}
           >
             <Ionicons name="refresh-outline" size={14} color="#5C4A28" />
-            <ThemedText style={styles.clearBtnText}>Clear (F6)</ThemedText>
+            <ThemedText style={styles.clearBtnText}>Clear</ThemedText>
           </TouchableOpacity>
 
           <TouchableOpacity

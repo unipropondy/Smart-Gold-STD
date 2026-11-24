@@ -1418,16 +1418,6 @@ export default function WholeSalePOSScreen() {
             <ThemedText style={styles.headerBtnSecondaryText}>Re Print / Find</ThemedText>
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.headerBtnSecondary} onPress={() => handleDownloadPdf()} disabled={loading}>
-            <Ionicons name="document-text-outline" size={14} color="#554428" style={{ marginRight: 4 }} />
-            <ThemedText style={styles.headerBtnSecondaryText}>PDF</ThemedText>
-          </TouchableOpacity>
-
-          <TouchableOpacity style={styles.headerBtnSecondary} onPress={() => handleDownloadExcel()} disabled={loading}>
-            <Ionicons name="download-outline" size={14} color="#554428" style={{ marginRight: 4 }} />
-            <ThemedText style={styles.headerBtnSecondaryText}>Excel</ThemedText>
-          </TouchableOpacity>
-
           <TouchableOpacity
             testID="btn-net-total-save"
             style={[styles.headerBtnPrimary, loading && { opacity: 0.7 }]}

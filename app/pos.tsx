@@ -1766,17 +1766,6 @@ export default function PosScreen() {
         </View>
 
         <View style={styles.headerRight}>
-          {/* Clear */}
-          <TouchableOpacity
-            style={[styles.actionBtn, styles.clearBtn]}
-            onPress={clearForm}
-            activeOpacity={0.8}
-            disabled={loading}
-          >
-            <Ionicons name="refresh-outline" size={14} color="#5C4A28" />
-            <ThemedText style={styles.clearBtnText}>Clear</ThemedText>
-          </TouchableOpacity>
-
           {/* Save */}
           <TouchableOpacity
             style={[styles.actionBtn, styles.saveBtn]}
@@ -1803,28 +1792,6 @@ export default function PosScreen() {
           >
             <Ionicons name="print-outline" size={14} color="#5C4A28" />
             <ThemedText style={styles.clearBtnText}>RePrint</ThemedText>
-          </TouchableOpacity>
-
-          {/* PDF */}
-          <TouchableOpacity
-            style={[styles.actionBtn, styles.clearBtn]}
-            onPress={() => handleDownloadPdf()}
-            activeOpacity={0.8}
-            disabled={loading}
-          >
-            <Ionicons name="document-text-outline" size={14} color="#5C4A28" />
-            <ThemedText style={styles.clearBtnText}>PDF</ThemedText>
-          </TouchableOpacity>
-
-          {/* Excel */}
-          <TouchableOpacity
-            style={[styles.actionBtn, styles.clearBtn]}
-            onPress={() => handleDownloadExcel()}
-            activeOpacity={0.8}
-            disabled={loading}
-          >
-            <Ionicons name="download-outline" size={14} color="#5C4A28" />
-            <ThemedText style={styles.clearBtnText}>Excel</ThemedText>
           </TouchableOpacity>
 
           {/* Net Total */}

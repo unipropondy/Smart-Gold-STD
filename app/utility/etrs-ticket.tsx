@@ -1,9 +1,9 @@
+import { API_BASE_URL } from '@/constants/api';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { Stack, useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   Image,
   Platform,
   ScrollView,
@@ -11,10 +11,9 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
-  View,
+  View
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { API_BASE_URL } from '@/constants/api';
 
 export default function ETRSTicketScreen() {
   const router = useRouter();
@@ -28,12 +27,12 @@ export default function ETRSTicketScreen() {
   const [netAmount, setNetAmount] = useState('');
   const [gstAmount, setGstAmount] = useState('');
   const [etrsDocId, setEtrsDocId] = useState('');
-  
+
   // Date & Time pickers
   const today = new Date();
   const defaultDateStr = `${today.getDate()} ${today.toLocaleString('default', { month: 'long' })} ${today.getFullYear()}`;
   const defaultTimeStr = today.toTimeString().split(' ')[0]; // HH:MM:SS
-  
+
   const [issueDate, setIssueDate] = useState(defaultDateStr);
   const [issueTime, setIssueTime] = useState(defaultTimeStr);
   const [remarks, setRemarks] = useState('');
@@ -50,6 +49,18 @@ export default function ETRSTicketScreen() {
   // States
   const [loadingInvoice, setLoadingInvoice] = useState(false);
   const [saving, setSaving] = useState(false);
+
+  // Toast State
+  const [toastMessage, setToastMessage] = useState('');
+  const [toastType, setToastType] = useState<'success' | 'error' | 'info'>('info');
+
+  const showToast = (msg: string, type: 'success' | 'error' | 'info' = 'info') => {
+    setToastType(type);
+    setToastMessage(msg);
+    setTimeout(() => {
+      setToastMessage('');
+    }, 4000);
+  };
 
   // Load Staff List on Mount
   useEffect(() => {
@@ -94,11 +105,7 @@ export default function ETRSTicketScreen() {
   // Search Invoice
   const handleSearchInvoice = async () => {
     if (!invoiceNo.trim()) {
-      if (Platform.OS === 'web') {
-        window.alert('Please enter an Invoice No.');
-      } else {
-        Alert.alert('Validation', 'Please enter an Invoice No.');
-      }
+      showToast('Please enter an Invoice No.', 'error');
       return;
     }
 
@@ -216,20 +223,12 @@ export default function ETRSTicketScreen() {
             }
           }
         } else if (!existingEtrsFound) {
-          if (Platform.OS === 'web') {
-            window.alert('Invoice not found.');
-          } else {
-            Alert.alert('Not Found', 'Invoice not found.');
-          }
+          showToast('Invoice not found.', 'error');
         }
       }
     } catch (err) {
       console.error('Error searching invoice:', err);
-      if (Platform.OS === 'web') {
-        window.alert('Failed to fetch invoice details.');
-      } else {
-        Alert.alert('Error', 'Failed to fetch invoice details.');
-      }
+      showToast('Failed to fetch invoice details.', 'error');
     } finally {
       setLoadingInvoice(false);
     }
@@ -253,7 +252,7 @@ export default function ETRSTicketScreen() {
       };
       input.click();
     } else {
-      Alert.alert('Image Picker', 'Image upload is available on web platform.');
+      showToast('Image upload is available on web platform.', 'info');
     }
   };
 
@@ -280,18 +279,15 @@ export default function ETRSTicketScreen() {
   // Save Form
   const handleSave = async () => {
     if (!invoiceNo.trim()) {
-      const msg = 'Invoice No is required.';
-      Platform.OS === 'web' ? window.alert(msg) : Alert.alert('Validation Error', msg);
+      showToast('Invoice No is required.', 'error');
       return;
     }
     if (!passportNo.trim()) {
-      const msg = 'Please enter Passport No';
-      Platform.OS === 'web' ? window.alert(msg) : Alert.alert('Validation Error', msg);
+      showToast('Please enter Passport No', 'error');
       return;
     }
     if (!etrsDocId.trim()) {
-      const msg = 'eTRS Ticket Doc ID is required.';
-      Platform.OS === 'web' ? window.alert(msg) : Alert.alert('Validation Error', msg);
+      showToast('eTRS Ticket Doc ID is required.', 'error');
       return;
     }
 
@@ -336,16 +332,13 @@ export default function ETRSTicketScreen() {
         } catch (vErr) {
           console.warn('Post-save verification query error:', vErr);
         }
-        const msg = 'eTRS Statement saved successfully!';
-        Platform.OS === 'web' ? window.alert(msg) : Alert.alert('Success', msg);
+        showToast('eTRS Statement saved successfully!', 'success');
       } else {
-        const msg = json.message || 'Failed to save eTRS Statement.';
-        Platform.OS === 'web' ? window.alert(msg) : Alert.alert('Error', msg);
+        showToast(json.message || 'Failed to save eTRS Statement.', 'error');
       }
     } catch (err) {
       console.error('Error saving eTRS statement:', err);
-      const msg = 'Error saving eTRS Statement.';
-      Platform.OS === 'web' ? window.alert(msg) : Alert.alert('Error', msg);
+      showToast('Error saving eTRS Statement.', 'error');
     } finally {
       setSaving(false);
     }
@@ -363,12 +356,46 @@ export default function ETRSTicketScreen() {
           </TouchableOpacity>
           <Text style={styles.headerTitle}>eTRS Statement</Text>
         </View>
+
+        {/* HEADER RIGHT ACTIONS */}
+        <View style={styles.actionButtonsRow}>
+          {/* CLEAR (F6) */}
+          <TouchableOpacity style={styles.clearButton} onPress={handleClear}>
+            <Text style={styles.clearButtonText}>Clear</Text>
+          </TouchableOpacity>
+
+          {/* SAVE (F7) */}
+          <TouchableOpacity style={styles.saveButton} onPress={handleSave} disabled={saving}>
+            {saving && (
+              <ActivityIndicator size="small" color="#FFFFFF" style={{ marginRight: 6 }} />
+            )}
+            <Text style={styles.saveButtonText}>Save</Text>
+          </TouchableOpacity>
+
+
+        </View>
       </View>
+
+      {/* FLOATING TOP-CENTER TOAST */}
+      {toastMessage ? (
+        <View style={[
+          styles.toastContainer,
+          toastType === 'error' ? styles.toastError : toastType === 'success' ? styles.toastSuccess : styles.toastInfo
+        ]}>
+          <Ionicons
+            name={toastType === 'error' ? 'alert-circle' : toastType === 'success' ? 'checkmark-circle' : 'information-circle'}
+            size={18}
+            color="#FFFFFF"
+            style={{ marginRight: 6 }}
+          />
+          <Text style={styles.toastText}>{toastMessage}</Text>
+        </View>
+      ) : null}
 
       {/* MAIN TWO-COLUMN CONTENT */}
       <View style={styles.mainGridContainer}>
         <View style={styles.mainGrid}>
-          
+
           {/* LEFT SECTION: Invoice Details */}
           <View style={styles.cardSection}>
             <View style={styles.sectionHeader}>
@@ -379,7 +406,7 @@ export default function ETRSTicketScreen() {
             </View>
 
             <View style={styles.cardBody}>
-              
+
               {/* 1. Invoice No * */}
               <View style={styles.formRow}>
                 <Text style={styles.label}>
@@ -701,32 +728,6 @@ export default function ETRSTicketScreen() {
 
         </View>
       </View>
-
-      {/* BOTTOM ACTION BAR */}
-      <View style={styles.bottomActionBar}>
-        <View style={styles.actionButtonsRow}>
-          
-          {/* CLEAR (F6) */}
-          <TouchableOpacity style={styles.clearButton} onPress={handleClear}>
-            <Text style={styles.clearButtonText}>Clear</Text>
-          </TouchableOpacity>
-
-          {/* SAVE (F7) */}
-          <TouchableOpacity style={styles.saveButton} onPress={handleSave} disabled={saving}>
-            {saving && (
-              <ActivityIndicator size="small" color="#FFFFFF" style={{ marginRight: 6 }} />
-            )}
-            <Text style={styles.saveButtonText}>Save</Text>
-          </TouchableOpacity>
-
-          {/* CLOSE (Esc) */}
-          <TouchableOpacity style={styles.closeButton} onPress={() => router.back()}>
-            <Text style={styles.closeButtonText}>Close</Text>
-          </TouchableOpacity>
-
-        </View>
-      </View>
-
     </SafeAreaView>
   );
 }
@@ -735,6 +736,41 @@ const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
     backgroundColor: '#FBF9F5',
+  },
+  toastContainer: {
+    position: 'absolute',
+    top: 14,
+    left: '50%',
+    transform: [{ translateX: -180 }],
+    width: 360,
+    maxWidth: '90%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 18,
+    borderRadius: 8,
+    zIndex: 99999,
+    elevation: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 10,
+  },
+  toastSuccess: {
+    backgroundColor: '#16A34A',
+  },
+  toastError: {
+    backgroundColor: '#DC2626',
+  },
+  toastInfo: {
+    backgroundColor: '#9E6D08',
+  },
+  toastText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '600',
+    textAlign: 'center',
   },
   topHeader: {
     height: 52,
@@ -1082,48 +1118,49 @@ const styles = StyleSheet.create({
   },
   actionButtonsRow: {
     flexDirection: 'row',
-    gap: 10,
+    alignItems: 'center',
+    gap: 8,
   },
   clearButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 18,
-    height: 36,
+    paddingHorizontal: 14,
+    height: 32,
     borderRadius: 6,
     borderWidth: 1,
     borderColor: '#DFD5C3',
     backgroundColor: '#FFFFFF',
   },
   clearButtonText: {
-    fontSize: 12.5,
+    fontSize: 12,
     fontWeight: 'bold',
     color: '#3B2D17',
   },
   saveButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 22,
-    height: 36,
+    paddingHorizontal: 16,
+    height: 32,
     borderRadius: 6,
     backgroundColor: '#9E6D08',
   },
   saveButtonText: {
-    fontSize: 12.5,
+    fontSize: 12,
     fontWeight: 'bold',
     color: '#FFFFFF',
   },
   closeButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 18,
-    height: 36,
+    paddingHorizontal: 14,
+    height: 32,
     borderRadius: 6,
     borderWidth: 1,
     borderColor: '#DFD5C3',
     backgroundColor: '#FFFFFF',
   },
   closeButtonText: {
-    fontSize: 12.5,
+    fontSize: 12,
     fontWeight: 'bold',
     color: '#3B2D17',
   },

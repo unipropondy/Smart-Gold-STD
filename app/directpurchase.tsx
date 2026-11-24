@@ -1808,7 +1808,11 @@ export default function DirectPurchaseScreen() {
   };
 
   const handleClearForm = () => {
-    setHeaderState(getInitialHeaderState());
+    const currentGSTPercent = headerState.GSTPercent;
+    setHeaderState({
+      ...getInitialHeaderState(),
+      GSTPercent: currentGSTPercent,
+    });
     setDetails([]);
     setCurrentDetail(getInitialDetailState());
     setSelectedIndex(null);

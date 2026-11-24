@@ -6,6 +6,7 @@ import { router } from 'expo-router';
 import React, { useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   Image,
   Keyboard,
   KeyboardAvoidingView,
@@ -107,12 +108,28 @@ export default function LoginScreen() {
         const uCode = data.user?.userCode || username;
         const uName = data.user?.userName || username;
         const uGroup = data.user?.userGroupCode || '';
+        const companyData = data.company || {};
+        const terminalData = data.terminal || {};
+
         try {
           await AsyncStorage.setItem('@logged_user', JSON.stringify(data.user || { userCode: uCode, userName: uName, userGroupCode: uGroup }));
           await AsyncStorage.setItem('@user_id', uCode);
           await AsyncStorage.setItem('@user_name', uName);
           await AsyncStorage.setItem('@user_group', uGroup);
+          if (companyData && Object.keys(companyData).length > 0) {
+            await AsyncStorage.setItem('@company_config', JSON.stringify(companyData));
+            if (companyData.companyId) await AsyncStorage.setItem('@company_id', String(companyData.companyId));
+            if (companyData.companyName) await AsyncStorage.setItem('@company_name', companyData.companyName);
+            if (companyData.gstPercentage !== undefined) await AsyncStorage.setItem('@company_gst_percentage', String(companyData.gstPercentage));
+            if (companyData.locationCode) await AsyncStorage.setItem('@user_location', companyData.locationCode);
+            if (companyData.defaultCurrency) await AsyncStorage.setItem('@default_currency', companyData.defaultCurrency);
+          }
+          if (terminalData && Object.keys(terminalData).length > 0) {
+            await AsyncStorage.setItem('@terminal_info', JSON.stringify(terminalData));
+            if (terminalData.terminalCode) await AsyncStorage.setItem('@terminal_code', terminalData.terminalCode);
+          }
         } catch (_) { }
+
         if (Platform.OS === 'web' && typeof window !== 'undefined') {
           try {
             window.localStorage.setItem('userCode', uCode);
@@ -120,12 +137,29 @@ export default function LoginScreen() {
             window.localStorage.setItem('userName', uName);
             window.localStorage.setItem('userGroup', uGroup);
             window.localStorage.setItem('user', JSON.stringify(data.user || { userCode: uCode, userName: uName, userGroupCode: uGroup }));
+            if (companyData && Object.keys(companyData).length > 0) {
+              window.localStorage.setItem('companyConfig', JSON.stringify(companyData));
+              if (companyData.gstPercentage !== undefined) window.localStorage.setItem('gstPercentage', String(companyData.gstPercentage));
+              if (companyData.locationCode) window.localStorage.setItem('locationCode', companyData.locationCode);
+            }
+            if (terminalData && Object.keys(terminalData).length > 0) {
+              window.localStorage.setItem('terminalInfo', JSON.stringify(terminalData));
+            }
+
             window.sessionStorage.setItem('userCode', uCode);
             window.sessionStorage.setItem('userId', uCode);
             window.sessionStorage.setItem('userName', uName);
             window.sessionStorage.setItem('userGroup', uGroup);
             window.sessionStorage.setItem('user', JSON.stringify(data.user || { userCode: uCode, userName: uName, userGroupCode: uGroup }));
+            if (companyData && Object.keys(companyData).length > 0) {
+              window.sessionStorage.setItem('companyConfig', JSON.stringify(companyData));
+            }
           } catch (_) { }
+        }
+
+        // Handle prompt to set password if new user flag is set
+        if (data.changePasswordPrompt) {
+          Alert.alert('Notice', 'Please set your password in settings.');
         }
 
         // Immediately update permissions context with newly authenticated user data before navigating

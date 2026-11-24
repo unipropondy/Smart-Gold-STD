@@ -346,7 +346,7 @@ export default function TradeInWholeSalesScreen() {
               items = fallbackData.data;
             }
           }
-        } catch (_) {}
+        } catch (_) { }
       }
 
       const listWithSelection = items.map((item: any) => ({
@@ -627,7 +627,7 @@ export default function TradeInWholeSalesScreen() {
             activeOpacity={0.7}
           >
             <Ionicons name="refresh-outline" size={14} color="#5C4A28" />
-            <ThemedText style={styles.headerActionBtnText}>Clear (F6)</ThemedText>
+            <ThemedText style={styles.headerActionBtnText}>Clear</ThemedText>
           </TouchableOpacity>
 
           <TouchableOpacity
@@ -636,7 +636,7 @@ export default function TradeInWholeSalesScreen() {
             activeOpacity={0.7}
           >
             <Ionicons name="print-outline" size={14} color="#5C4A28" />
-            <ThemedText style={styles.headerActionBtnText}>Print (F9)</ThemedText>
+            <ThemedText style={styles.headerActionBtnText}>Print</ThemedText>
           </TouchableOpacity>
 
           <TouchableOpacity
@@ -650,7 +650,7 @@ export default function TradeInWholeSalesScreen() {
             ) : (
               <>
                 <Ionicons name="checkmark-done" size={16} color="#9E6D08" />
-                <ThemedText style={styles.headerSaveBtnText}>Proceed (F7)</ThemedText>
+                <ThemedText style={styles.headerSaveBtnText}>Proceed</ThemedText>
               </>
             )}
           </TouchableOpacity>
