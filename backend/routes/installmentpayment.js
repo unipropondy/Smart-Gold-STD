@@ -37,15 +37,27 @@ router.get("/next-number", async (req, res) => {
   }
 });
 
-// 1.5 GET all agreements for LOV lookup matching original VB filter (DepositAmt + AmtPaid <> TotalCost)
+// 1.5 GET all agreements for LOV lookup matching original VB filter (DepositAmt+AmtPaid<>TotalCost)
+// VB.NET reference: frmHelpSearch(0, 0, "tblInstallmentEntryHeader", "L", 4, "InsAgreementNo", "DepositAmt+AmtPaid<>TotalCost", "InsAgreementNo", "InsAgreementNo", 100, "LocationCode", "LocationCode", 60, "CustomerCode", "CustomerCode", 80, "Name", "Name", 80)
 router.get("/agreements", async (req, res) => {
   try {
     const pool = await getPool(req);
     const { search } = req.query;
     let query = `
-      SELECT InsAgreementNo, CustomerCode, MemberCode, Name, TotalCost, DepositAmt, AmtPaid, InstallmentAmt, InsTotal, InsPaid, LocationCode
+      SELECT 
+        RTRIM(LTRIM(InsAgreementNo)) AS InsAgreementNo, 
+        RTRIM(LTRIM(ISNULL(LocationCode, ''))) AS LocationCode, 
+        RTRIM(LTRIM(ISNULL(CustomerCode, ''))) AS CustomerCode, 
+        RTRIM(LTRIM(ISNULL(MemberCode, ''))) AS MemberCode, 
+        RTRIM(LTRIM(ISNULL(Name, ''))) AS Name, 
+        ISNULL(TotalCost, 0) AS TotalCost, 
+        ISNULL(DepositAmt, 0) AS DepositAmt, 
+        ISNULL(AmtPaid, 0) AS AmtPaid, 
+        ISNULL(InstallmentAmt, 0) AS InstallmentAmt, 
+        ISNULL(InsTotal, 0) AS InsTotal, 
+        ISNULL(InsPaid, 0) AS InsPaid
       FROM tblInstallmentEntryHeader
-      WHERE (ISNULL(DepositAmt, 0) + ISNULL(AmtPaid, 0)) < ISNULL(TotalCost, 0)
+      WHERE ISNULL(DepositAmt, 0) + ISNULL(AmtPaid, 0) <> ISNULL(TotalCost, 0)
     `;
 
     if (search) {
@@ -53,7 +65,7 @@ router.get("/agreements", async (req, res) => {
       query += ` AND (InsAgreementNo LIKE '%${safeSearch}%' OR CustomerCode LIKE '%${safeSearch}%' OR Name LIKE '%${safeSearch}%')`;
     }
 
-    query += " ORDER BY CreateDate DESC";
+    query += " ORDER BY InsAgreementNo ASC";
 
     const result = await pool.request().query(query);
     res.json({ success: true, data: result.recordset });

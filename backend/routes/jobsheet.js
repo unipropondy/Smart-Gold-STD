@@ -211,8 +211,6 @@ router.get("/:jobSheetNo", async (req, res) => {
       return res.status(404).json({ success: false, message: "JobSheet not found" });
     }
 
-    console.log("👉 ACTUAL DB COLUMNS FOR HEADER:", Object.keys(headerResult.recordset[0]));
-
     const detailsResult = await pool.request()
       .input("JobSheetNo", sql.VarChar, jobSheetNo)
       .query(`

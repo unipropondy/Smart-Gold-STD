@@ -250,45 +250,64 @@ router.post("/", async (req, res) => {
     // Insert into tblSales Header
     let useDirectInsert = false;
     try {
+      // Query parameters of sp_SalesHeader dynamically to pass exact matching parameters
+      const spParamsRes = await new sql.Request(transaction).query(`
+        SELECT PARAMETER_NAME 
+        FROM INFORMATION_SCHEMA.PARAMETERS 
+        WHERE SPECIFIC_NAME = 'sp_SalesHeader'
+      `);
+      const validParams = (spParamsRes.recordset || []).map(p => p.PARAMETER_NAME.replace('@', '').toLowerCase());
+
       const insHeaderReq = new sql.Request(transaction);
-      await insHeaderReq
-          .input("InvoiceNo", sql.VarChar, invNo)
-          .input("Date", sql.SmallDateTime, header.InvoiceDate || curDate)
-          .input("CompanyCode", sql.VarChar, header.CompanyCode || "1")
-          .input("LocationCode", sql.VarChar, header.LocationCode || "HQ")
-          .input("TerminalCode", sql.VarChar, header.TerminalCode || "T1")
-          .input("CustomerCode", sql.VarChar, header.CustomerCode || "CASH")
-          .input("Membercode", sql.VarChar, header.MemberCode || "")
-          .input("CustomerName", sql.VarChar, header.CustomerName || "CASH CUSTOMER")
-          .input("Address1", sql.VarChar, header.CustomerAddress || header.Address1 || "")
-          .input("Address2", sql.VarChar, header.Address2 || "")
-          .input("Address3", sql.VarChar, header.Address3 || "")
-          .input("SalesManCode", sql.VarChar, header.SalesManCode || "")
-          .input("SalesType", sql.VarChar, salesTypeStr)
-          .input("TotalWeight", sql.Numeric(18, 3), totalWeight || parseFloat(header.TotalQty) || 0)
-          .input("TotalStoneWeight", sql.Numeric(18, 3), totalStoneWeight || parseFloat(header.TotalStoneWeight) || 0)
-          .input("TotalGoldLoss", sql.Numeric(18, 3), totalGoldLoss || parseFloat(header.TotalGoldLoss) || 0)
-          .input("TotalSMC", sql.Numeric(18, 2), totalSMC || parseFloat(header.TotalSMC) || 0)
-          .input("TotalPCS", sql.Numeric(18, 0), totalPCS || parseFloat(header.TotalQty) || 0)
-          .input("GST", sql.Numeric(18, 2), parseFloat(header.Tax) || 0)
-          .input("GSTType", sql.VarChar, gstTypeChar)
-          .input("DetailDiscount", sql.Numeric(18, 2), totalDetailDiscount || parseFloat(header.DetailDiscount) || 0)
-          .input("NetDiscount", sql.Numeric(18, 2), parseFloat(header.NetDiscount) || 0)
-          .input("Discount", sql.Numeric(18, 2), parseFloat(header.Discount) || 0)
-          .input("NetTotal", sql.Numeric(18, 2), parseFloat(header.GrandTotal) || 0)
-          .input("PaidAmt", sql.Numeric(18, 2), reqPaidAmt)
-          .input("BalanceAmt", sql.Numeric(18, 2), reqBalanceAmt)
-          .input("TotalValue", sql.Numeric(18, 2), parseFloat(header.TotalSalesAmt) || 0)
-          .input("TotalCost", sql.Numeric(18, 2), totalCost || parseFloat(header.TotalCost) || 0)
-          .input("TradeInAmt", sql.Numeric(18, 2), tradeInAmt || parseFloat(header.TradeInAmt) || 0)
-          .input("DepositAmt", sql.Numeric(18, 2), parseFloat(header.DepositAmt) || 0)
-          .input("InsAgreementNo", sql.VarChar, header.InsAgreementNo || "")
-          .input("Commission", sql.Numeric(18, 2), reqCommissionAmt)
-          .input("Remarks", sql.VarChar, header.Remarks || "")
-          .input("TradeInGst", sql.Numeric(18, 2), tradeInGst || parseFloat(header.TradeInGst) || 0)
-          .input("eTRSType", sql.VarChar, eTRSTypeChar)
-          .input("UserID", sql.VarChar, sysUser)
-          .execute("sp_SalesHeader");
+      const invoiceDateVal = header.InvoiceDate || curDate;
+
+      const allHeaderInputs = [
+        { name: "InvoiceNo", type: sql.VarChar, val: invNo },
+        { name: "Date", type: sql.SmallDateTime, val: invoiceDateVal },
+        { name: "InvoiceDate", type: sql.SmallDateTime, val: invoiceDateVal },
+        { name: "CompanyCode", type: sql.VarChar, val: header.CompanyCode || "1" },
+        { name: "LocationCode", type: sql.VarChar, val: header.LocationCode || "HQ" },
+        { name: "TerminalCode", type: sql.VarChar, val: header.TerminalCode || "T1" },
+        { name: "CustomerCode", type: sql.VarChar, val: header.CustomerCode || "CASH" },
+        { name: "Membercode", type: sql.VarChar, val: header.MemberCode || "" },
+        { name: "CustomerName", type: sql.VarChar, val: header.CustomerName || "CASH CUSTOMER" },
+        { name: "Address1", type: sql.VarChar, val: header.CustomerAddress || header.Address1 || "" },
+        { name: "Address2", type: sql.VarChar, val: header.Address2 || "" },
+        { name: "Address3", type: sql.VarChar, val: header.Address3 || "" },
+        { name: "SalesManCode", type: sql.VarChar, val: header.SalesManCode || "" },
+        { name: "SalesType", type: sql.VarChar, val: salesTypeStr },
+        { name: "TotalWeight", type: sql.Numeric(18, 3), val: totalWeight || parseFloat(header.TotalQty) || 0 },
+        { name: "TotalStoneWeight", type: sql.Numeric(18, 3), val: totalStoneWeight || parseFloat(header.TotalStoneWeight) || 0 },
+        { name: "TotalGoldLoss", type: sql.Numeric(18, 3), val: totalGoldLoss || parseFloat(header.TotalGoldLoss) || 0 },
+        { name: "TotalSMC", type: sql.Numeric(18, 2), val: totalSMC || parseFloat(header.TotalSMC) || 0 },
+        { name: "TotalPCS", type: sql.Numeric(18, 0), val: totalPCS || parseFloat(header.TotalQty) || 0 },
+        { name: "GST", type: sql.Numeric(18, 2), val: parseFloat(header.Tax) || 0 },
+        { name: "GSTType", type: sql.VarChar, val: gstTypeChar },
+        { name: "DetailDiscount", type: sql.Numeric(18, 2), val: totalDetailDiscount || parseFloat(header.DetailDiscount) || 0 },
+        { name: "NetDiscount", type: sql.Numeric(18, 2), val: parseFloat(header.NetDiscount) || 0 },
+        { name: "Discount", type: sql.Numeric(18, 2), val: parseFloat(header.Discount) || 0 },
+        { name: "NetTotal", type: sql.Numeric(18, 2), val: parseFloat(header.GrandTotal) || 0 },
+        { name: "PaidAmt", type: sql.Numeric(18, 2), val: reqPaidAmt },
+        { name: "BalanceAmt", type: sql.Numeric(18, 2), val: reqBalanceAmt },
+        { name: "TotalValue", type: sql.Numeric(18, 2), val: parseFloat(header.TotalSalesAmt) || 0 },
+        { name: "TotalCost", type: sql.Numeric(18, 2), val: totalCost || parseFloat(header.TotalCost) || 0 },
+        { name: "TradeInAmt", type: sql.Numeric(18, 2), val: tradeInAmt || parseFloat(header.TradeInAmt) || 0 },
+        { name: "DepositAmt", type: sql.Numeric(18, 2), val: parseFloat(header.DepositAmt) || 0 },
+        { name: "InsAgreementNo", type: sql.VarChar, val: header.InsAgreementNo || "" },
+        { name: "Commission", type: sql.Numeric(18, 2), val: reqCommissionAmt },
+        { name: "Remarks", type: sql.VarChar, val: header.Remarks || "" },
+        { name: "TradeInGst", type: sql.Numeric(18, 2), val: tradeInGst || parseFloat(header.TradeInGst) || 0 },
+        { name: "eTRSType", type: sql.VarChar, val: eTRSTypeChar },
+        { name: "UserID", type: sql.VarChar, val: sysUser }
+      ];
+
+      for (const item of allHeaderInputs) {
+        if (validParams.length === 0 || validParams.includes(item.name.toLowerCase())) {
+          insHeaderReq.input(item.name, item.type, item.val);
+        }
+      }
+
+      await insHeaderReq.execute("sp_SalesHeader");
     } catch (spErr) {
       console.warn("⚠️ sp_SalesHeader execution failed, falling back to direct INSERT:", spErr.message);
       useDirectInsert = true;
@@ -413,105 +432,71 @@ router.post("/", async (req, res) => {
 
       const pcsVal = (typeof d.PCS === 'number' ? d.PCS : parseInt(d.PCS, 10)) || 1;
 
-      if (!useDirectInsert) {
-        try {
-          const insertReq = new sql.Request(transaction);
-          await insertReq
-            .input("InvoiceNo", sql.VarChar, invNo)
-            .input("InventoryCode", sql.VarChar, d.InventoryCode || "")
-            .input("Description", sql.VarChar, d.Description || "")
-            .input("LocationCode", sql.VarChar, header.LocationCode || locCode)
-            .input("Weight", sql.Numeric(18, 3), parseFloat(d.Weight) || 0)
-            .input("StoneWeight", sql.Numeric(18, 3), parseFloat(d.StoneWeight) || 0)
-            .input("GoldLoss", sql.Numeric(18, 3), parseFloat(d.GoldLoss) || 0)
-            .input("Rate", sql.Numeric(18, 2), parseFloat(d.CostPerGram) || 0) 
-            .input("SMC", sql.Numeric(18, 2), parseFloat(d.SMC) || 0)
-            .input("PCS", sql.Numeric(18, 0), pcsVal)
-            .input("GST", sql.Numeric(18, 2), lineGst)
-            .input("DetailDiscount", sql.Numeric(18, 2), parseFloat(d.DetailDiscount) || 0)
-            .input("NetDiscount", sql.Numeric(18, 2), lineNetDiscount)
-            .input("NetAmount", sql.Numeric(18, 2), Number(netAmount.toFixed(2)))
-            .input("ActualSales", sql.Numeric(18, 2), Number(actualSales.toFixed(2)))
-            .input("TotalValue", sql.Numeric(18, 2), itemVal)
-            .input("TotalCost", sql.Numeric(18, 2), parseFloat(d.TotalCost) || 0)
-            .input("Commission", sql.Numeric(18, 2), lineCommission)
-            .input("Remarks", sql.VarChar, d.Remarks || header.Remarks || "")
-            .input("DailyClassRate", sql.Numeric(18, 2), parseFloat(d.DailyClassRate || d.DailyRate || d.CostPerGram) || 0)
-            .input("SortCode", sql.Int, i + 1)
-            .input("SalesType", sql.VarChar, d.SalesType || salesTypeStr)
-            .input("TradeInGst", sql.Numeric(18, 2), parseFloat(d.TradeInGst) || 0)
-            .input("UserID", sql.VarChar, sysUser)
-            .execute("sp_SalesDetail");
-        } catch (spDetErr) {
-          console.warn("⚠️ sp_SalesDetail failed, falling back to direct INSERT:", spDetErr.message);
-          useDirectInsert = true;
-        }
-      }
+      // Always use clean Direct Insert into tblSalesDetail matching exact table columns to prevent legacy SP Raiserror ('ERROR IN SAVE')
+      const directDetReq = new sql.Request(transaction);
 
-      if (useDirectInsert) {
-        const directDetReq = new sql.Request(transaction);
-
-        let salesDetCols = [];
-        try {
-          const colRes = await new sql.Request(transaction).query(`
-            SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'tblSalesDetail'
-          `);
-          salesDetCols = colRes.recordset.map(c => c.COLUMN_NAME);
-        } catch (colErr) {}
-
-        const hasDetCol = (name) => salesDetCols.length === 0 || salesDetCols.some(c => c.toLowerCase() === name.toLowerCase());
-
-        const dCols = [];
-        const dVals = [];
-
-        const addDetField = (colName, sqlType, value) => {
-          if (hasDetCol(colName)) {
-            dCols.push(colName);
-            dVals.push(`@${colName}`);
-            directDetReq.input(colName, sqlType, value);
-          }
-        };
-
-        addDetField("InvoiceNo", sql.VarChar, invNo);
-        addDetField("InventoryCode", sql.VarChar, d.InventoryCode || "");
-        addDetField("Description", sql.VarChar, d.Description || "");
-        addDetField("LocationCode", sql.VarChar, header.LocationCode || locCode);
-        addDetField("Weight", sql.Numeric(18, 3), parseFloat(d.Weight) || 0);
-        addDetField("StoneWeight", sql.Numeric(18, 3), parseFloat(d.StoneWeight) || 0);
-        addDetField("GoldLoss", sql.Numeric(18, 3), parseFloat(d.GoldLoss) || 0);
-        addDetField("Rate", sql.Numeric(18, 2), parseFloat(d.CostPerGram) || 0);
-        addDetField("DailyClassRate", sql.Numeric(18, 2), parseFloat(d.DailyClassRate || d.DailyRate || d.CostPerGram) || 0);
-        addDetField("DailyRate", sql.Numeric(18, 2), parseFloat(d.DailyRate || d.DailyClassRate || d.CostPerGram) || 0);
-        addDetField("SMC", sql.Numeric(18, 2), parseFloat(d.SMC) || 0);
-        addDetField("PCS", sql.Numeric(18, 0), pcsVal);
-        addDetField("GST", sql.Numeric(18, 2), lineGst);
-        addDetField("DetailDiscount", sql.Numeric(18, 2), parseFloat(d.DetailDiscount) || 0);
-        addDetField("NetDiscount", sql.Numeric(18, 2), lineNetDiscount);
-        addDetField("NetAmount", sql.Numeric(18, 2), Number(netAmount.toFixed(2)));
-        addDetField("ActualSales", sql.Numeric(18, 2), Number(actualSales.toFixed(2)));
-        addDetField("TotalValue", sql.Numeric(18, 2), itemVal);
-        addDetField("TotalCost", sql.Numeric(18, 2), parseFloat(d.TotalCost) || 0);
-        addDetField("Remarks", sql.VarChar, d.Remarks || header.Remarks || "");
-        addDetField("SortCode", sql.Int, i + 1);
-        addDetField("SalesType", sql.VarChar, d.SalesType || salesTypeStr);
-
-        addDetField("CreateUser", sql.VarChar, sysUser);
-        addDetField("CreatedBy", sql.VarChar, sysUser);
-        addDetField("ModifyUser", sql.VarChar, sysUser);
-        if (hasDetCol("CreateDate")) {
-          dCols.push("CreateDate");
-          dVals.push("GETDATE()");
-        }
-        if (hasDetCol("ModifyDate")) {
-          dCols.push("ModifyDate");
-          dVals.push("GETDATE()");
-        }
-
-        await directDetReq.query(`
-          INSERT INTO tblSalesDetail (${dCols.join(', ')})
-          VALUES (${dVals.join(', ')})
+      let salesDetCols = [];
+      try {
+        const colRes = await new sql.Request(transaction).query(`
+          SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'tblSalesDetail'
         `);
+        salesDetCols = colRes.recordset.map(c => c.COLUMN_NAME);
+      } catch (colErr) {}
+
+      const hasDetCol = (name) => salesDetCols.length === 0 || salesDetCols.some(c => c.toLowerCase() === name.toLowerCase());
+
+      const dCols = [];
+      const dVals = [];
+
+      const addDetField = (colName, sqlType, value) => {
+        if (hasDetCol(colName)) {
+          dCols.push(colName);
+          dVals.push(`@${colName}`);
+          directDetReq.input(colName, sqlType, value);
+        }
+      };
+
+      addDetField("InvoiceNo", sql.VarChar, invNo);
+      addDetField("InventoryCode", sql.VarChar, d.InventoryCode || "");
+      addDetField("Description", sql.VarChar, d.Description || "");
+      addDetField("LocationCode", sql.VarChar, header.LocationCode || locCode);
+      addDetField("Weight", sql.Numeric(18, 3), parseFloat(d.Weight) || 0);
+      addDetField("StoneWeight", sql.Numeric(18, 3), parseFloat(d.StoneWeight) || 0);
+      addDetField("GoldLoss", sql.Numeric(18, 3), parseFloat(d.GoldLoss) || 0);
+      addDetField("Rate", sql.Numeric(18, 2), parseFloat(d.CostPerGram) || 0);
+      addDetField("DailyClassRate", sql.Numeric(18, 2), parseFloat(d.DailyClassRate || d.DailyRate || d.CostPerGram) || 0);
+      addDetField("DailyRate", sql.Numeric(18, 2), parseFloat(d.DailyRate || d.DailyClassRate || d.CostPerGram) || 0);
+      addDetField("SMC", sql.Numeric(18, 2), parseFloat(d.SMC) || 0);
+      addDetField("PCS", sql.Numeric(18, 0), pcsVal);
+      addDetField("GST", sql.Numeric(18, 2), lineGst);
+      addDetField("DetailDiscount", sql.Numeric(18, 2), parseFloat(d.DetailDiscount) || 0);
+      addDetField("NetDiscount", sql.Numeric(18, 2), lineNetDiscount);
+      addDetField("NetAmount", sql.Numeric(18, 2), Number(netAmount.toFixed(2)));
+      addDetField("ActualSales", sql.Numeric(18, 2), Number(actualSales.toFixed(2)));
+      addDetField("TotalValue", sql.Numeric(18, 2), itemVal);
+      addDetField("TotalCost", sql.Numeric(18, 2), parseFloat(d.TotalCost) || 0);
+      addDetField("Commission", sql.Numeric(18, 2), lineCommission);
+      addDetField("Remarks", sql.VarChar, d.Remarks || header.Remarks || "");
+      addDetField("SortCode", sql.Int, i + 1);
+      addDetField("SalesType", sql.VarChar, d.SalesType || salesTypeStr);
+      addDetField("TradeInGst", sql.Numeric(18, 2), parseFloat(d.TradeInGst) || 0);
+
+      addDetField("CreateUser", sql.VarChar, sysUser);
+      addDetField("CreatedBy", sql.VarChar, sysUser);
+      addDetField("ModifyUser", sql.VarChar, sysUser);
+      if (hasDetCol("CreateDate")) {
+        dCols.push("CreateDate");
+        dVals.push("GETDATE()");
       }
+      if (hasDetCol("ModifyDate")) {
+        dCols.push("ModifyDate");
+        dVals.push("GETDATE()");
+      }
+
+      await directDetReq.query(`
+        INSERT INTO tblSalesDetail (${dCols.join(', ')})
+        VALUES (${dVals.join(', ')})
+      `);
 
       // Update tblInventory to mark as sold
       const invReq = new sql.Request(transaction);
@@ -614,17 +599,40 @@ router.post("/", async (req, res) => {
             let pmSuccess = false;
             if (!useDirectInsert) {
               try {
+                let spPmParams = [];
+                try {
+                  const spPmParamsRes = await new sql.Request(transaction).query(`
+                    SELECT PARAMETER_NAME 
+                    FROM INFORMATION_SCHEMA.PARAMETERS 
+                    WHERE SPECIFIC_NAME = 'sp_PayModeDetail'
+                  `);
+                  spPmParams = (spPmParamsRes.recordset || []).map(p => p.PARAMETER_NAME.replace('@', '').toLowerCase());
+                } catch (_) {}
+
                 const pmReq = new sql.Request(transaction);
-                await pmReq
-                    .input("InvoiceNo", sql.VarChar, invNo)
-                    .input("Date", sql.SmallDateTime, header.InvoiceDate || curDate)
-                    .input("Paymode", sql.VarChar, pmMode)
-                    .input("Amount", sql.Numeric(18, 2), pmAmt)
-                    .input("Commission", sql.Numeric(18, 2), pmComm)
-                    .input("SlipNo", sql.VarChar, pmSlip)
-                    .input("SalesType", sql.VarChar, salesTypeStr)
-                    .input("UserID", sql.VarChar, sysUser)
-                    .execute("sp_PayModeDetail");
+                const payDateVal = header.InvoiceDate || curDate;
+
+                const allPmInputs = [
+                  { name: "InvoiceNo", type: sql.VarChar, val: invNo },
+                  { name: "Date", type: sql.SmallDateTime, val: payDateVal },
+                  { name: "sDate", type: sql.SmallDateTime, val: payDateVal },
+                  { name: "InvoiceDate", type: sql.SmallDateTime, val: payDateVal },
+                  { name: "Paymode", type: sql.VarChar, val: pmMode },
+                  { name: "Amount", type: sql.Numeric(18, 2), val: pmAmt },
+                  { name: "Commission", type: sql.Numeric(18, 2), val: pmComm },
+                  { name: "Commision", type: sql.Numeric(18, 2), val: pmComm },
+                  { name: "SlipNo", type: sql.VarChar, val: pmSlip },
+                  { name: "SalesType", type: sql.VarChar, val: salesTypeStr },
+                  { name: "UserID", type: sql.VarChar, val: sysUser }
+                ];
+
+                for (const item of allPmInputs) {
+                  if (spPmParams.length === 0 || spPmParams.includes(item.name.toLowerCase())) {
+                    pmReq.input(item.name, item.type, item.val);
+                  }
+                }
+
+                await pmReq.execute("sp_PayModeDetail");
                 pmSuccess = true;
               } catch (pmErr) {
                 console.warn("⚠️ sp_PayModeDetail execution failed, falling back to direct INSERT:", pmErr.message);

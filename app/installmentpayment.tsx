@@ -1535,9 +1535,10 @@ export default function InstallmentPaymentScreen() {
             </View>
 
             <View style={styles.lovHeadRow}>
-              <ThemedText style={[styles.lovHeadText, { flex: 1.8 }]}>Agreement No</ThemedText>
-              <ThemedText style={[styles.lovHeadText, { flex: 1.3 }]}>Cust Code</ThemedText>
-              <ThemedText style={[styles.lovHeadText, { flex: 2 }]}>Customer Name</ThemedText>
+              <ThemedText style={[styles.lovHeadText, { flex: 1.8 }]}>InsAgreementNo</ThemedText>
+              <ThemedText style={[styles.lovHeadText, { flex: 1.0 }]}>LocationC</ThemedText>
+              <ThemedText style={[styles.lovHeadText, { flex: 1.5 }]}>CustomerCode</ThemedText>
+              <ThemedText style={[styles.lovHeadText, { flex: 2 }]}>Name</ThemedText>
             </View>
 
             <FlatList
@@ -1545,7 +1546,8 @@ export default function InstallmentPaymentScreen() {
                 (a) =>
                   (a.InsAgreementNo || '').toLowerCase().includes(agreementSearchQuery.toLowerCase()) ||
                   (a.Name || '').toLowerCase().includes(agreementSearchQuery.toLowerCase()) ||
-                  (a.CustomerCode || '').toLowerCase().includes(agreementSearchQuery.toLowerCase())
+                  (a.CustomerCode || '').toLowerCase().includes(agreementSearchQuery.toLowerCase()) ||
+                  (a.LocationCode || '').toLowerCase().includes(agreementSearchQuery.toLowerCase())
               )}
               keyExtractor={(item, index) => item.InsAgreementNo || index.toString()}
               initialNumToRender={50}
@@ -1565,7 +1567,10 @@ export default function InstallmentPaymentScreen() {
                   <ThemedText style={[styles.lovItemText, styles.codeCell, { flex: 1.8 }]}>
                     {item.InsAgreementNo}
                   </ThemedText>
-                  <ThemedText style={[styles.lovItemText, { flex: 1.3 }]}>{item.CustomerCode}</ThemedText>
+                  <ThemedText style={[styles.lovItemText, { flex: 1.0 }]}>
+                    {item.LocationCode || ''}
+                  </ThemedText>
+                  <ThemedText style={[styles.lovItemText, { flex: 1.5 }]}>{item.CustomerCode}</ThemedText>
                   <ThemedText style={[styles.lovItemText, { flex: 2 }]} numberOfLines={1}>
                     {item.Name || ''}
                   </ThemedText>

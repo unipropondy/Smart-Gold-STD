@@ -74,8 +74,8 @@ export default function TradeInWholeSalesScreen() {
   const [totalWt, setTotalWt] = useState('0.00');
 
   // Purity
-  const [purityList, setPurityList] = useState<string[]>(['750', '835', '875', '916', '999', '999.9', '22K']);
-  const [selectedPurity, setSelectedPurity] = useState('999.9');
+  const [purityList, setPurityList] = useState<string[]>([]);
+  const [selectedPurity, setSelectedPurity] = useState('');
   const [showPurityPicker, setShowPurityPicker] = useState(false);
 
   // Remarks
@@ -154,6 +154,7 @@ export default function TradeInWholeSalesScreen() {
       const data = await res.json();
       if (data.success && Array.isArray(data.data) && data.data.length > 0) {
         setPurityList(data.data);
+        setSelectedPurity((prev) => (prev ? prev : (data.data.includes('999.9') ? '999.9' : data.data[0])));
       }
     } catch (e) {
       // defaults
@@ -216,10 +217,20 @@ export default function TradeInWholeSalesScreen() {
     try {
       const res = await fetch(`${API_URL}/supplier/${encodeURIComponent(code.trim())}`);
       const data = await res.json();
-      if (data.success && data.data) {
-        setSupplierName(data.data.SupplierName || '');
+      const supp = data?.data || data?.supplier;
+      if (data.success && supp) {
+        setSupplierName(supp.SupplierName || '');
       } else {
-        setSupplierName('');
+        // Fallback: check general suppliers list
+        const sListRes = await fetch(`${API_URL}/suppliers`);
+        const sListData = await sListRes.json();
+        const list = Array.isArray(sListData?.data) ? sListData.data : Array.isArray(sListData) ? sListData : [];
+        const found = list.find((s: any) => String(s.SupplierCode || '').trim().toLowerCase() === code.trim().toLowerCase());
+        if (found) {
+          setSupplierName(found.SupplierName || '');
+        } else {
+          setSupplierName('');
+        }
       }
     } catch (e) {
       console.error('Error fetching supplier details:', e);
@@ -230,13 +241,18 @@ export default function TradeInWholeSalesScreen() {
     if (isProduction) return;
     try {
       setLoading(true);
+      setSupplierModalVisible(true);
       const res = await fetch(`${API_URL}/suppliers`);
       const data = await res.json();
-      if (data.success && data.data) {
-        setSupplierList(data.data);
-        setSupplierSearchQuery('');
-        setSupplierModalVisible(true);
-      }
+      const list = Array.isArray(data?.data)
+        ? data.data
+        : Array.isArray(data?.suppliers)
+        ? data.suppliers
+        : Array.isArray(data)
+        ? data
+        : [];
+      setSupplierList(list);
+      setSupplierSearchQuery('');
     } catch (e: any) {
       showToast('Error loading suppliers: ' + e.message, 'error');
     } finally {
@@ -257,7 +273,13 @@ export default function TradeInWholeSalesScreen() {
       const res = await fetch(`${API_URL}/history`);
       if (res.ok) {
         const data = await res.json();
-        const records = (data && data.success && Array.isArray(data.data)) ? data.data : (Array.isArray(data) ? data : []);
+        const records = Array.isArray(data?.data)
+          ? data.data
+          : Array.isArray(data?.history)
+          ? data.history
+          : Array.isArray(data)
+          ? data
+          : [];
         setIssueList(records);
       } else {
         setIssueList([]);
@@ -276,6 +298,14 @@ export default function TradeInWholeSalesScreen() {
     setIssueModalVisible(false);
     if (!selectedNo) return;
 
+    // Immediately set issue number and supplier from selected LOV row (matching VB.NET txtTradeIssueNo.Text = frmHelp.Var1.Trim)
+    setTradeIssueNo(selectedNo);
+    if (issueItem.SupplierCode) {
+      setSupplierCode(issueItem.SupplierCode);
+      setSupplierName(issueItem.SupplierName || issueItem.SupplierCode);
+    }
+    setIsHistoryViewMode(true);
+
     try {
       setLoading(true);
       const res = await fetch(`${API_URL}/history/${encodeURIComponent(selectedNo)}`);
@@ -285,8 +315,12 @@ export default function TradeInWholeSalesScreen() {
         const items = data.items || (data.data && data.data.items) || [];
 
         setTradeIssueNo(selectedNo);
-        setSupplierCode(header.SupplierCode || issueItem.SupplierCode || '');
-        setSupplierName(header.SupplierName || issueItem.SupplierName || '');
+        if (header.SupplierCode || issueItem.SupplierCode) {
+          setSupplierCode(header.SupplierCode || issueItem.SupplierCode || '');
+        }
+        if (header.SupplierName || issueItem.SupplierName) {
+          setSupplierName(header.SupplierName || issueItem.SupplierName || '');
+        }
         if (header.CostPerGram) setCostPerGram(parseFloat(header.CostPerGram).toFixed(2));
         if (header.TotalIssuedWeight || header.IssuedWeight) {
           setTotalIssuedWt(parseFloat(header.TotalIssuedWeight || header.IssuedWeight).toFixed(2));
@@ -311,9 +345,12 @@ export default function TradeInWholeSalesScreen() {
         setGridItems(loadedItems);
         setIsHistoryViewMode(true);
         showToast(`Loaded issue ${selectedNo}`, 'success');
+      } else {
+        showToast(`Selected issue ${selectedNo}`, 'success');
       }
     } catch (e: any) {
-      showToast('Error loading issue details: ' + e.message, 'error');
+      console.warn('Error loading issue details:', e.message);
+      showToast(`Selected issue ${selectedNo}`, 'success');
     } finally {
       setLoading(false);
     }
@@ -322,32 +359,20 @@ export default function TradeInWholeSalesScreen() {
   const openPendingTradeBillsModal = async () => {
     try {
       setLoading(true);
-      // Query trade bills for the selected purity (and fallback/all open trade bills)
-      const url = `${API_URL}/tradebills${selectedPurity ? `?purity=${encodeURIComponent(selectedPurity)}` : ''}`;
-      const res = await fetch(url);
+      setBillModalVisible(true);
+      // Fetch all eligible pending trade bills from backend
+      const res = await fetch(`${API_URL}/tradebills`);
       if (!res.ok) {
         showToast('Server returned status ' + res.status, 'error');
         setPendingBills([]);
         setSelectedWeightSum('0.00');
-        setBillModalVisible(true);
         return;
       }
       const data = await res.json();
 
-      let items = data.success && Array.isArray(data.data) ? data.data : [];
-
-      // If purity filtered endpoint returned empty or 1 item, also query without purity to ensure all available trade bills are listed
-      if (items.length <= 1 && selectedPurity) {
-        try {
-          const fallbackRes = await fetch(`${API_URL}/tradebills`);
-          if (fallbackRes.ok) {
-            const fallbackData = await fallbackRes.json();
-            if (fallbackData.success && Array.isArray(fallbackData.data) && fallbackData.data.length > items.length) {
-              items = fallbackData.data;
-            }
-          }
-        } catch (_) { }
-      }
+      let items = (data.success && Array.isArray(data.data))
+        ? data.data
+        : (Array.isArray(data) ? data : []);
 
       const listWithSelection = items.map((item: any) => ({
         InvoiceNo: item.InvoiceNo || '',
@@ -364,7 +389,6 @@ export default function TradeInWholeSalesScreen() {
       setPendingBills(listWithSelection);
       setSelectAllBills(false);
       setSelectedWeightSum('0.00');
-      setBillModalVisible(true);
 
       if (listWithSelection.length === 0) {
         showToast(`No pending trade bills found`, 'error');
@@ -405,21 +429,21 @@ export default function TradeInWholeSalesScreen() {
       return;
     }
 
-    let sumPurchaseWt = 0;
-    let sumIssuedWt = 0;
+    let sumWeight = 0;
+    let sumIssuedWeight = 0;
     let sumTotalPrice = 0;
 
     const newGridRows: GridRowItem[] = [];
 
     selected.forEach((bill) => {
       const pWeight = bill.TotalWeight || bill.BalanceWeight || 0;
-      const iWeight = bill.BalanceWeight || bill.TotalWeight || 0;
+      const iWeight = bill.IssuedWeight || bill.BalanceWeight || bill.TotalWeight || 0;
       const bWeight = Math.max(0, pWeight - iWeight);
       const avgCost = bill.AvgCost || (pWeight > 0 ? (bill.TotalPrice || 0) / pWeight : 0);
 
-      sumPurchaseWt += pWeight;
-      sumIssuedWt += iWeight;
-      sumTotalPrice += avgCost * iWeight;
+      sumWeight += pWeight;
+      sumIssuedWeight += iWeight;
+      sumTotalPrice += bill.TotalPrice || (avgCost * iWeight);
 
       newGridRows.push({
         InvoiceNo: bill.InvoiceNo,
@@ -433,17 +457,22 @@ export default function TradeInWholeSalesScreen() {
 
     setGridItems(newGridRows);
 
-    const formattedIssuedWt = sumIssuedWt.toFixed(2);
-    const formattedTotalWt = (companyShortCode === 'MJ' ? sumIssuedWt : sumPurchaseWt).toFixed(2);
-    setTotalIssuedWt(formattedIssuedWt);
-    setTotalWt(formattedTotalWt);
-
-    const avgCostPerGm = sumIssuedWt > 0 ? sumTotalPrice / sumIssuedWt : 0;
-    if (avgCostPerGm > 0 && parseFloat(costPerGram) === 0) {
-      setCostPerGram(avgCostPerGm.toFixed(2));
-      calculateTotalPrice(avgCostPerGm.toFixed(2), formattedTotalWt, isExport);
+    if (companyShortCode === 'MJ') {
+      const formattedIssued = sumIssuedWeight.toFixed(2);
+      setTotalIssuedWt(formattedIssued);
+      setTotalWt(formattedIssued);
+      calculateTotalPrice(costPerGram, formattedIssued, isExport);
     } else {
-      calculateTotalPrice(costPerGram, formattedTotalWt, isExport);
+      const avgPrice = selected.length > 0 ? sumTotalPrice / selected.length : 0;
+      setTotalWt(sumWeight.toFixed(2));
+      setTotalIssuedWt(sumIssuedWeight.toFixed(2));
+      
+      if (parseFloat(costPerGram) > 0) {
+        calculateTotalPrice(costPerGram, sumWeight.toFixed(2), isExport);
+      } else {
+        const calculatedTotal = (sumIssuedWeight * avgPrice).toFixed(2);
+        setTotalPrice(calculatedTotal);
+      }
     }
 
     setBillModalVisible(false);
@@ -508,7 +537,7 @@ export default function TradeInWholeSalesScreen() {
     setTotalWt('0.00');
     setCostPerGram('0.00');
     setTotalPrice('0.00');
-    setSelectedPurity('999.9');
+    setSelectedPurity(purityList.length > 0 ? (purityList.includes('999.9') ? '999.9' : purityList[0]) : '');
     setRemarks('');
     setTradeBillNo('');
     setGridItems([]);
@@ -1060,10 +1089,17 @@ export default function TradeInWholeSalesScreen() {
 
                   {/* VB grdInvoice Table Body */}
                   <ScrollView style={{ maxHeight: 360, minHeight: 180 }}>
-                    {pendingBills.length === 0 ? (
+                    {loading ? (
+                      <View style={{ padding: 30, alignItems: 'center' }}>
+                        <ActivityIndicator size="small" color="#9E6D08" />
+                        <ThemedText style={{ color: '#8D6409', marginTop: 8, fontSize: 11 }}>
+                          Loading pending trade bills...
+                        </ThemedText>
+                      </View>
+                    ) : pendingBills.length === 0 ? (
                       <View style={{ padding: 25, alignItems: 'center' }}>
                         <ThemedText style={{ color: '#555', fontStyle: 'italic', fontSize: 11 }}>
-                          No pending trade bills found for purity {selectedPurity}.
+                          No pending trade bills found.
                         </ThemedText>
                       </View>
                     ) : (
@@ -1239,10 +1275,11 @@ export default function TradeInWholeSalesScreen() {
               <FlatList
                 data={supplierList.filter(
                   (s) =>
-                    s.SupplierCode?.toLowerCase().includes(supplierSearchQuery.toLowerCase()) ||
-                    s.SupplierName?.toLowerCase().includes(supplierSearchQuery.toLowerCase())
+                    !supplierSearchQuery.trim() ||
+                    (s.SupplierCode && String(s.SupplierCode).toLowerCase().includes(supplierSearchQuery.toLowerCase())) ||
+                    (s.SupplierName && String(s.SupplierName).toLowerCase().includes(supplierSearchQuery.toLowerCase()))
                 )}
-                keyExtractor={(item) => item.SupplierCode}
+                keyExtractor={(item, idx) => item.SupplierCode || String(idx)}
                 renderItem={({ item, index }) => (
                   <TouchableOpacity
                     style={[styles.lovItemRow, index % 2 === 1 && { backgroundColor: '#FCFAF6' }]}
@@ -1252,7 +1289,16 @@ export default function TradeInWholeSalesScreen() {
                     <ThemedText style={styles.lovItemName}>{item.SupplierName}</ThemedText>
                   </TouchableOpacity>
                 )}
-                ListEmptyComponent={<ThemedText style={{ padding: 15, color: '#8D6409', textAlign: 'center' }}>No suppliers found</ThemedText>}
+                ListEmptyComponent={
+                  loading ? (
+                    <View style={{ padding: 20, alignItems: 'center' }}>
+                      <ActivityIndicator size="small" color="#9E6D08" />
+                      <ThemedText style={{ color: '#8D6409', marginTop: 6, fontSize: 11 }}>Loading suppliers...</ThemedText>
+                    </View>
+                  ) : (
+                    <ThemedText style={{ padding: 15, color: '#8D6409', textAlign: 'center' }}>No suppliers found</ThemedText>
+                  )
+                }
               />
             </View>
           </TouchableWithoutFeedback>
@@ -1289,37 +1335,74 @@ export default function TradeInWholeSalesScreen() {
                 <Ionicons name="search" size={14} color="#8D6409" style={{ marginRight: 6 }} />
                 <TextInput
                   style={styles.lovSearchInput}
-                  placeholder="Search by Issue No or Supplier..."
+                  placeholder="Search by TradeIssueNo, Supplier, Customer, Invoice..."
                   placeholderTextColor="#A89E8D"
                   value={issueSearchQuery}
                   onChangeText={setIssueSearchQuery}
                 />
               </View>
 
+              {/* Exact Table Header matching frmTradeInWholeSales.vb frmHelpSearch: TradeIssueNo, SupplierCode, CustomerCode, InvoiceNo */}
+              <View style={[styles.vbGrdHeaderRow, { height: 32, marginBottom: 4, borderRadius: 4 }]}>
+                <View style={[styles.vbGrdHeaderCell, { flex: 1.4 }]}>
+                  <ThemedText style={[styles.vbGrdHeaderText, { fontSize: 11 }]}>TradeIssueNo</ThemedText>
+                </View>
+                <View style={[styles.vbGrdHeaderCell, { flex: 1.1 }]}>
+                  <ThemedText style={[styles.vbGrdHeaderText, { fontSize: 11 }]}>SupplierCode</ThemedText>
+                </View>
+                <View style={[styles.vbGrdHeaderCell, { flex: 1.1 }]}>
+                  <ThemedText style={[styles.vbGrdHeaderText, { fontSize: 11 }]}>CustomerCode</ThemedText>
+                </View>
+                <View style={[styles.vbGrdHeaderCell, { flex: 1.1 }]}>
+                  <ThemedText style={[styles.vbGrdHeaderText, { fontSize: 11 }]}>InvoiceNo</ThemedText>
+                </View>
+              </View>
+
               <FlatList
                 data={issueList.filter(
                   (h) =>
-                    (h.TradeIssueNo || h.IssueNo)?.toLowerCase().includes(issueSearchQuery.toLowerCase()) ||
-                    h.SupplierCode?.toLowerCase().includes(issueSearchQuery.toLowerCase()) ||
-                    h.SupplierName?.toLowerCase().includes(issueSearchQuery.toLowerCase())
+                    !issueSearchQuery.trim() ||
+                    (h.TradeIssueNo && String(h.TradeIssueNo).toLowerCase().includes(issueSearchQuery.toLowerCase())) ||
+                    (h.IssueNo && String(h.IssueNo).toLowerCase().includes(issueSearchQuery.toLowerCase())) ||
+                    (h.SupplierCode && String(h.SupplierCode).toLowerCase().includes(issueSearchQuery.toLowerCase())) ||
+                    (h.CustomerCode && String(h.CustomerCode).toLowerCase().includes(issueSearchQuery.toLowerCase())) ||
+                    (h.InvoiceNo && String(h.InvoiceNo).toLowerCase().includes(issueSearchQuery.toLowerCase())) ||
+                    (h.SupplierName && String(h.SupplierName).toLowerCase().includes(issueSearchQuery.toLowerCase()))
                 )}
                 keyExtractor={(item, index) => item.TradeIssueNo || item.IssueNo || String(index)}
                 renderItem={({ item, index }) => (
                   <TouchableOpacity
-                    style={[styles.lovItemRow, index % 2 === 1 && { backgroundColor: '#FCFAF6' }]}
+                    style={[
+                      styles.lovItemRow,
+                      { paddingVertical: 6 },
+                      index % 2 === 1 && { backgroundColor: '#FCFAF6' }
+                    ]}
                     onPress={() => selectHistoryIssue(item)}
                   >
-                    <ThemedText style={styles.lovItemCode}>{item.TradeIssueNo || item.IssueNo}</ThemedText>
-                    <View style={{ flex: 1, paddingHorizontal: 8 }}>
-                      <ThemedText style={styles.lovItemName}>{item.SupplierName || item.SupplierCode}</ThemedText>
-                      <ThemedText style={{ fontSize: 10, color: '#8D6409' }}>Date: {item.IssueDate}</ThemedText>
-                    </View>
-                    <ThemedText style={styles.lovItemWeight}>
-                      {parseFloat(item.IssuedWeight || 0).toFixed(2)} g
+                    <ThemedText style={[styles.lovItemCode, { flex: 1.4, width: undefined }]}>
+                      {item.TradeIssueNo || item.IssueNo}
+                    </ThemedText>
+                    <ThemedText style={[styles.lovItemName, { flex: 1.1 }]}>
+                      {item.SupplierCode || '-'}
+                    </ThemedText>
+                    <ThemedText style={[styles.lovItemName, { flex: 1.1, color: '#6E5528' }]}>
+                      {item.CustomerCode || '-'}
+                    </ThemedText>
+                    <ThemedText style={[styles.lovItemName, { flex: 1.1, color: '#6E5528' }]}>
+                      {item.InvoiceNo || '-'}
                     </ThemedText>
                   </TouchableOpacity>
                 )}
-                ListEmptyComponent={<ThemedText style={{ padding: 15, color: '#8D6409', textAlign: 'center' }}>No records found</ThemedText>}
+                ListEmptyComponent={
+                  loading ? (
+                    <View style={{ padding: 20, alignItems: 'center' }}>
+                      <ActivityIndicator size="small" color="#9E6D08" />
+                      <ThemedText style={{ color: '#8D6409', marginTop: 6, fontSize: 11 }}>Loading history...</ThemedText>
+                    </View>
+                  ) : (
+                    <ThemedText style={{ padding: 15, color: '#8D6409', textAlign: 'center' }}>No records found</ThemedText>
+                  )
+                }
               />
             </View>
           </TouchableWithoutFeedback>
