@@ -558,26 +558,6 @@ export default function OrderInventoryScreen() {
 
         {/* CARD 2: MAPPED ITEMS DATA TABLE (100% FULL WIDTH) */}
         <View style={[styles.goldCard, { marginTop: 10 }]}>
-          <View style={styles.cardHeaderBanner}>
-            <View style={styles.headerTitleContainer}>
-              <View style={styles.headerIconBadgeSmall}>
-                <Ionicons name="git-network-outline" size={13} color="#B48218" />
-              </View>
-              <ThemedText style={styles.cardHeaderTitleSmall}>Mapped Inventory Allocations</ThemedText>
-              <View style={styles.counterBadge}>
-                <ThemedText style={styles.counterBadgeText}>{gridItems.length} mapped</ThemedText>
-              </View>
-            </View>
-
-            {selectedGridIndex !== null && (
-              <View style={styles.selectedRowPill}>
-                <ThemedText style={styles.selectedRowPillText}>
-                  Selected Row #{selectedGridIndex + 1}
-                </ThemedText>
-              </View>
-            )}
-          </View>
-
           {/* Table Header (100% Full Width) */}
           <View style={styles.tableHeadRow}>
             <ThemedText style={[styles.tableHeadCell, { flex: 1.4 }]}>Order Inv Code</ThemedText>
@@ -631,12 +611,6 @@ export default function OrderInventoryScreen() {
 
           {/* CARD SUBFORM: DETAIL MAPPING DUAL-COLUMN ENTRY */}
           <View style={styles.mappingSection}>
-            <View style={styles.mappingSectionHeader}>
-              <ThemedText style={styles.mappingSectionTitle}>
-                {selectedGridIndex !== null ? `Edit Mapping Row #${selectedGridIndex + 1}` : 'Create Inventory Link'}
-              </ThemedText>
-            </View>
-
             <View style={styles.dualMappingContainer}>
               {/* Left Column: Order Item Details */}
               <View style={[styles.mappingSubCard, { marginRight: 6 }]}>

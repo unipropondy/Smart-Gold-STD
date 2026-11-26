@@ -480,12 +480,12 @@ export default function SupplierPaymentScreen() {
 
         <View style={styles.headerActions}>
           <TouchableOpacity style={styles.headerBtnSecondary} onPress={handleReprint}>
-            <Ionicons name="print-outline" size={14} color="#7D6F5B" style={{ marginRight: 4 }} />
+            <Ionicons name="print-outline" size={14} color="#5C4A28" style={{ marginRight: 4 }} />
             <ThemedText style={styles.headerBtnSecondaryText}>RePrint</ThemedText>
           </TouchableOpacity>
 
           <TouchableOpacity style={styles.headerBtnSecondary} onPress={handleClearAll}>
-            <Ionicons name="refresh-outline" size={14} color="#7D6F5B" style={{ marginRight: 4 }} />
+            <Ionicons name="refresh-outline" size={14} color="#5C4A28" style={{ marginRight: 4 }} />
             <ThemedText style={styles.headerBtnSecondaryText}>Clear</ThemedText>
           </TouchableOpacity>
 
@@ -498,7 +498,7 @@ export default function SupplierPaymentScreen() {
               <ActivityIndicator size="small" color="#9E6D08" />
             ) : (
               <>
-                <Ionicons name="checkmark-circle-outline" size={14} color="#7D5800" style={{ marginRight: 4 }} />
+                <Ionicons name="checkmark-circle-outline" size={14} color="#9E6D08" style={{ marginRight: 4 }} />
                 <ThemedText style={styles.headerBtnPrimaryText}>Update</ThemedText>
               </>
             )}
@@ -699,18 +699,6 @@ export default function SupplierPaymentScreen() {
 
         {/* MIDDLE SECTION: JobSheet List Grid (dgvSupplier matching frmSupplierPayment.vb) */}
         <View style={styles.goldCard}>
-          <View style={styles.cardHeaderBanner}>
-            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-              <View style={styles.headerIconBadge}>
-                <Ionicons name="list" size={14} color="#B48218" />
-              </View>
-              <ThemedText style={styles.cardHeaderTitle}>Supplier JobSheets To Pay</ThemedText>
-              <View style={styles.counterBadge}>
-                <ThemedText style={styles.counterBadgeText}>{payments.length} Records</ThemedText>
-              </View>
-            </View>
-          </View>
-
           <View style={{ width: '100%' }}>
             {/* Table Header */}
             <View style={styles.tableHeader}>
@@ -806,15 +794,6 @@ export default function SupplierPaymentScreen() {
 
         {/* BOTTOM SECTION: Payment Settlement Entry Card (GroupBox4 matching frmSupplierPayment.vb) */}
         <View style={styles.goldCard}>
-          <View style={styles.cardHeaderBanner}>
-            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-              <View style={styles.headerIconBadge}>
-                <Ionicons name="cash-outline" size={14} color="#B48218" />
-              </View>
-              <ThemedText style={styles.cardHeaderTitle}>Payment Settlement Entry</ThemedText>
-            </View>
-          </View>
-
           <View style={styles.cardBody}>
             {/* Selected Jobsheet Summary Info Row (JobSheetNo, InvoiceNo, InvoiceDate, TotalAmount, PaidAmount, BalanceAmount) */}
             <View style={styles.row}>
@@ -1176,32 +1155,32 @@ const styles = StyleSheet.create({
   headerBtnSecondary: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    borderRadius: 6,
+    paddingVertical: 5,
+    paddingHorizontal: 10,
+    borderRadius: 4,
     borderWidth: 1,
     borderColor: '#DFD5C3',
     backgroundColor: '#FFFFFF',
   },
   headerBtnSecondaryText: {
-    fontSize: 12,
-    fontWeight: '600',
+    fontSize: 11,
+    fontWeight: 'bold',
     color: '#5C4A28',
   },
   headerBtnPrimary: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 6,
-    paddingHorizontal: 14,
-    borderRadius: 6,
-    backgroundColor: '#F5C842',
+    paddingVertical: 5,
+    paddingHorizontal: 12,
+    borderRadius: 4,
+    backgroundColor: '#F5E7CA',
     borderWidth: 1,
-    borderColor: '#D4A41B',
+    borderColor: '#D4C3A3',
   },
   headerBtnPrimaryText: {
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: 'bold',
-    color: '#3D2C04',
+    color: '#9E6D08',
   },
   headerBtnClose: {
     paddingVertical: 6,

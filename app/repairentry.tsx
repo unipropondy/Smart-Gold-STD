@@ -1604,7 +1604,7 @@ export default function RepairEntryScreen() {
                 {/* Row 3: Supplier Code, Remarks, Trade IN */}
                 <View style={[styles.threeColumnGrid, { marginTop: 6 }]}>
                   {/* Supplier Code */}
-                  <View style={styles.inlineFieldRow}>
+                  <View style={[styles.inlineFieldRow, { flex: 0.9, minWidth: 200 }]}>
                     <ThemedText style={styles.inlineFieldLabel}>Supplier Code</ThemedText>
                     <View style={styles.inputWithLookup}>
                       <TextInput
@@ -1625,7 +1625,7 @@ export default function RepairEntryScreen() {
                   </View>
 
                   {/* Remarks */}
-                  <View style={styles.inlineFieldRow}>
+                  <View style={[styles.inlineFieldRow, { flex: 1, minWidth: 200 }]}>
                     <ThemedText style={styles.inlineFieldLabel}>Remarks</ThemedText>
                     <TextInput
                       style={[styles.formInput, { flex: 1 }]}
@@ -1637,7 +1637,7 @@ export default function RepairEntryScreen() {
                   </View>
 
                   {/* Trade IN */}
-                  <View style={styles.inlineFieldRow}>
+                  <View style={[styles.inlineFieldRow, { flex: 1.5, minWidth: 350 }]}>
                     <ThemedText style={styles.inlineFieldLabel}>Trade IN</ThemedText>
                     <View style={styles.tradeInOptionsGroup}>
                       {['Gold', 'Cash', 'Both'].map((opt) => (
@@ -1687,18 +1687,6 @@ export default function RepairEntryScreen() {
 
             {/* CARD 2: REPAIR ITEMS TABLE (100% FULL WIDTH) */}
             <View style={[styles.goldCard, { marginTop: 10 }]}>
-              <View style={styles.cardHeaderBanner}>
-                <View style={styles.headerTitleContainer}>
-                  <View style={styles.headerIconBadgeSmall}>
-                    <Ionicons name="hammer-outline" size={13} color="#B48218" />
-                  </View>
-                  <ThemedText style={styles.cardHeaderTitleSmall}>Repair Item Details</ThemedText>
-                  <View style={styles.counterBadge}>
-                    <ThemedText style={styles.counterBadgeText}>{items.length} items</ThemedText>
-                  </View>
-                </View>
-              </View>
-
               {/* Table Header (100% Full Width) */}
               <View style={styles.tableHeadRow}>
                 <ThemedText style={[styles.tableHeadCell, { flex: 3 }]}>Repair Description</ThemedText>
@@ -1834,15 +1822,6 @@ export default function RepairEntryScreen() {
 
             {/* CARD 3: REPAIR FINANCIAL SUMMARY */}
             <View style={[styles.goldCard, { marginTop: 10 }]}>
-              <View style={styles.cardHeaderBanner}>
-                <View style={styles.headerTitleContainer}>
-                  <View style={styles.headerIconBadgeSmall}>
-                    <Ionicons name="calculator-outline" size={13} color="#B48218" />
-                  </View>
-                  <ThemedText style={styles.cardHeaderTitleSmall}>Repair Financial Totals</ThemedText>
-                </View>
-              </View>
-
               <View style={styles.cardBody}>
                 <View style={styles.fourColumnGrid}>
                   {/* Total Weight */}
@@ -2515,18 +2494,19 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-    flexWrap: 'wrap',
+    flexWrap: 'nowrap',
   },
   pillOption: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
     backgroundColor: '#FCFAF6',
     borderWidth: 1,
     borderColor: '#E2D3B3',
     borderRadius: 4,
-    paddingVertical: 3,
-    paddingHorizontal: 6,
-    gap: 3,
+    paddingHorizontal: 8,
+    height: 26,
+    gap: 4,
   },
   pillOptionSelected: {
     backgroundColor: '#FFF4DA',
@@ -2544,16 +2524,17 @@ const styles = StyleSheet.create({
   tradeInGoBtn: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
     backgroundColor: '#FFF1D6',
     borderWidth: 1,
     borderColor: '#B8903B',
     borderRadius: 4,
-    paddingHorizontal: 6,
-    height: 22,
-    gap: 2,
+    paddingHorizontal: 8,
+    height: 26,
+    gap: 4,
   },
   tradeInGoBtnText: {
-    fontSize: 10,
+    fontSize: 11,
     fontWeight: 'bold',
     color: '#9E6D08',
   },

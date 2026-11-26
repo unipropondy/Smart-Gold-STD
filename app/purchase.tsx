@@ -309,7 +309,6 @@ export default function PurchaseScreen() {
   ]);
 
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
-  const [detailModalVisible, setDetailModalVisible] = useState(false);
 
   // LOV State
   const [lovVisible, setLovVisible] = useState(false);
@@ -479,8 +478,8 @@ export default function PurchaseScreen() {
   const fetchCatalogue = async () => {
     try {
       const jsNo = headerState.JobSheetNo ? encodeURIComponent(headerState.JobSheetNo.trim()) : '';
-      const url = jsNo 
-        ? `${API_URL}/catalogue/lov/catalogue?jobSheetNo=${jsNo}` 
+      const url = jsNo
+        ? `${API_URL}/catalogue/lov/catalogue?jobSheetNo=${jsNo}`
         : `${API_URL}/catalogue/lov/catalogue`;
       const res = await fetch(url);
       const json = await res.json();
@@ -752,7 +751,7 @@ export default function PurchaseScreen() {
       return;
     }
     const formatted = num.toFixed(2);
-    
+
     // Validate inventory weight against catalogue weight on weight blur
     checkWtPCS(num);
 
@@ -1132,11 +1131,18 @@ export default function PurchaseScreen() {
 
     setDetails(newDetails);
     setSelectedIndex(null);
-    clearCurrentDetail();
-    setDetailModalVisible(false);
+
+    // After Successful Line Addition: Clear only the Weight field, keep all other fields unchanged.
+    setCurrentDetail((prev: any) => ({
+      ...prev,
+      Weight: '',
+      TotalCost: '0.00',
+      PMCCost: '0.00',
+      SMCCost: '0.00',
+    }));
   };
 
-  // ================= DELETE DETAIL (from grid or modal) =================
+  // ================= DELETE DETAIL (from grid or bottom section) =================
   const deleteSelectedDetail = () => {
     if (selectedIndex === null) {
       showAlert("Validation", "Select item for deletion!");
@@ -1193,7 +1199,6 @@ export default function PurchaseScreen() {
             setSelectedIndex(null);
             clearCurrentDetail();
             showToast("Item deleted successfully", "success");
-            setDetailModalVisible(false);
           }
         }
       ]
@@ -1254,6 +1259,8 @@ export default function PurchaseScreen() {
       SellingPrice4: '',
       Image: '',
     });
+    setAutoSMC(false);
+    setSalesPCS(false);
   };
 
   // ================= SAVE PURCHASE =================
@@ -1467,96 +1474,84 @@ export default function PurchaseScreen() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: '#FBF9F5' }}>
-      <Stack.Screen
-        options={{
-          headerTitle: 'JobSheet Purchase',
-          headerStyle: { backgroundColor: '#FFFFFF' },
-          headerTintColor: '#3B2D17',
-          headerShadowVisible: false,
-          headerRight: () => (
-            <View style={{ flexDirection: 'row', alignItems: 'center', paddingRight: 8 }}>
-              {/* Auto / Manual Mode Pill Button */}
-              <TouchableOpacity
-                style={[
-                  styles.topActionBtn,
-                  {
-                    backgroundColor: isAutoManual ? '#FDE8E8' : '#E8F5E9',
-                    borderColor: isAutoManual ? '#D32F2F' : '#388E3C'
-                  }
-                ]}
-                onPress={() => {
-                  setIsAutoManual(!isAutoManual);
-                  showToast(isAutoManual ? "Switched to MANUAL mode" : "Switched to AUTO mode", "info");
-                }}
-              >
-                <ThemedText
-                  style={{
-                    color: isAutoManual ? '#C62828' : '#2E7D32',
-                    fontWeight: 'bold',
-                    fontSize: 11
-                  }}
-                >
-                  {isAutoManual ? 'AUTO' : 'MANUAL'}
-                </ThemedText>
-              </TouchableOpacity>
+      <Stack.Screen options={{ headerShown: false }} />
+      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 5, backgroundColor: '#FFFFFF', borderBottomWidth: 1, borderBottomColor: '#EBE2D2' }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+          <TouchableOpacity style={{ padding: 2, marginRight: 8 }} onPress={() => router.back()}>
+            <Ionicons name="arrow-back" size={22} color="#3B2D17" />
+          </TouchableOpacity>
+          <ThemedText style={{ fontSize: 17, fontWeight: '500', color: '#3B2D17', letterSpacing: 0.5 }}>JobSheet Purchase</ThemedText>
+        </View>
 
-              {/* Bill Close Button (F7) */}
-              <TouchableOpacity
-                style={[
-                  styles.topActionBtn,
-                  {
-                    backgroundColor: headerState.BillClose === 'Y' ? '#E0E0E0' : '#FBE9E7',
-                    borderColor: '#FF7043'
-                  }
-                ]}
-                onPress={handleBillClose}
-                disabled={headerState.BillClose === 'Y'}
-              >
-                <ThemedText style={{ color: '#D84315', fontWeight: 'bold', fontSize: 11 }}>
-                  {headerState.BillClose === 'Y' ? 'Closed' : 'BillClose'}
-                </ThemedText>
-              </TouchableOpacity>
+        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+          {/* Auto / Manual Mode Pill Button */}
+          <TouchableOpacity
+            style={[
+              styles.topActionBtn,
+              {
+                backgroundColor: isAutoManual ? '#FDE8E8' : '#E8F5E9',
+                borderColor: isAutoManual ? '#D32F2F' : '#388E3C'
+              }
+            ]}
+            onPress={() => {
+              setIsAutoManual(!isAutoManual);
+              showToast(isAutoManual ? "Switched to MANUAL mode" : "Switched to AUTO mode", "info");
+            }}
+          >
+            <ThemedText
+              style={{
+                color: isAutoManual ? '#C62828' : '#2E7D32',
+                fontWeight: 'bold',
+                fontSize: 11
+              }}
+            >
+              {isAutoManual ? 'AUTO' : 'MANUAL'}
+            </ThemedText>
+          </TouchableOpacity>
 
-              {/* Clear Button (F6) */}
-              <TouchableOpacity style={styles.topActionBtn} onPress={clearAll}>
-                <ThemedText style={{ color: '#5C4A28', fontWeight: 'bold', fontSize: 11 }}>Clear</ThemedText>
-              </TouchableOpacity>
+          {/* Bill Close Button (F7) */}
+          <TouchableOpacity
+            style={[
+              styles.topActionBtn,
+              {
+                backgroundColor: headerState.BillClose === 'Y' ? '#E0E0E0' : '#FBE9E7',
+                borderColor: '#FF7043'
+              }
+            ]}
+            onPress={handleBillClose}
+            disabled={headerState.BillClose === 'Y'}
+          >
+            <ThemedText style={{ color: '#D84315', fontWeight: 'bold', fontSize: 11 }}>
+              {headerState.BillClose === 'Y' ? 'Closed' : 'BillClose'}
+            </ThemedText>
+          </TouchableOpacity>
 
-              {/* Save Button */}
-              <TouchableOpacity
-                style={[
-                  styles.topActionBtn,
-                  { backgroundColor: '#F9F2E2', borderColor: '#B8903B' },
-                  isFormLocked && { opacity: 0.5 }
-                ]}
-                onPress={savePurchase}
-                disabled={isFormLocked}
-              >
-                <ThemedText style={{ color: '#9E6D08', fontWeight: 'bold', fontSize: 11 }}>Save</ThemedText>
-              </TouchableOpacity>
-            </View>
-          ),
-        }}
-      />
+          {/* Clear Button (F6) */}
+          <TouchableOpacity style={styles.topActionBtn} onPress={clearAll}>
+            <ThemedText style={{ color: '#5C4A28', fontWeight: 'bold', fontSize: 11 }}>Clear</ThemedText>
+          </TouchableOpacity>
+
+          {/* Save Button */}
+          <TouchableOpacity
+            style={[
+              styles.topActionBtn,
+              { backgroundColor: '#F9F2E2', borderColor: '#B8903B' },
+              isFormLocked && { opacity: 0.5 }
+            ]}
+            onPress={savePurchase}
+            disabled={isFormLocked}
+          >
+            <ThemedText style={{ color: '#9E6D08', fontWeight: 'bold', fontSize: 11 }}>Save</ThemedText>
+          </TouchableOpacity>
+        </View>
+      </View>
 
       <ScrollView style={styles.container} contentContainerStyle={styles.contentContainer}>
         {/* HEADER AREA */}
-        <ScrollView horizontal={true} showsHorizontalScrollIndicator={true} style={{ marginBottom: 14 }} contentContainerStyle={{ flexGrow: 1 }}>
+        <ScrollView horizontal={true} showsHorizontalScrollIndicator={true} style={{ marginBottom: 8 }} contentContainerStyle={{ flexGrow: 1 }}>
           <View style={{ flexDirection: 'row', width: '100%', minWidth: 1120 }}>
             {/* LEFT: JOB SHEET DETAILS */}
-            <View style={[styles.goldCard, { flex: 7, minWidth: 740, marginRight: 14 }]}>
-              <View style={styles.cardHeaderBanner}>
-                <View style={styles.headerIconBadge}>
-                  <Ionicons name="document-text" size={15} color="#B48218" />
-                </View>
-                <ThemedText style={styles.cardHeaderTitle}>Purchase JobSheet Details</ThemedText>
-                {headerState.BillClose === 'Y' && (
-                  <View style={styles.closedBadge}>
-                    <ThemedText style={styles.closedBadgeText}>CLOSED</ThemedText>
-                  </View>
-                )}
-              </View>
-
+            <View style={[styles.goldCard, { flex: 7, minWidth: 740, marginRight: 10 }]}>
               <View style={styles.cardBody}>
                 {/* Row 1: Job Sheet No, Invoice No, Invoice Date */}
                 <View style={styles.row}>
@@ -1839,13 +1834,6 @@ export default function PurchaseScreen() {
 
             {/* RIGHT: CATEGORY SUMMARY */}
             <View style={[styles.goldCard, { flex: 3.4, minWidth: 350 }]}>
-              <View style={styles.cardHeaderBanner}>
-                <View style={styles.headerIconBadge}>
-                  <Ionicons name="pie-chart" size={15} color="#B48218" />
-                </View>
-                <ThemedText style={styles.cardHeaderTitle}>Category Summary</ThemedText>
-              </View>
-
               <View style={{ padding: 0, flex: 1 }}>
                 <View style={[styles.tableHeader, { paddingVertical: 6 }]}>
                   <ThemedText style={[styles.tableHeaderText, { flex: 1.5, textAlign: 'center' }]}>Category</ThemedText>
@@ -1855,8 +1843,8 @@ export default function PurchaseScreen() {
                 </View>
                 <ScrollView style={{ minHeight: 120, maxHeight: 180 }}>
                   {categorySummaryList.length === 0 ? (
-                    <View style={[styles.emptyTableState, { paddingVertical: 24 }]}>
-                      <ThemedText style={{ color: '#8F7E66', fontSize: 12 }}>No category data</ThemedText>
+                    <View style={[styles.emptyTableState, { paddingVertical: 14 }]}>
+                      <ThemedText style={{ color: '#8F7E66', fontSize: 11 }}>No category data</ThemedText>
                     </View>
                   ) : (
                     categorySummaryList.map((cat, idx) => {
@@ -1876,11 +1864,9 @@ export default function PurchaseScreen() {
                                 CategoryCode: cat.CategoryCode,
                                 CatalogueName: jsDetail.Description || ''
                               });
-                              setDetailModalVisible(true);
                             } else {
                               setSelectedIndex(null);
                               await applySelectedCategory(cat.CategoryCode);
-                              setDetailModalVisible(true);
                             }
                           }}
                         >
@@ -1901,61 +1887,35 @@ export default function PurchaseScreen() {
         </ScrollView>
 
         {/* MIDDLE SECTION: LINE DETAILS GRID */}
-        <View style={[styles.goldCard, { marginBottom: 14 }]}>
-          <View style={[styles.cardHeaderBanner, { justifyContent: 'space-between' }]}>
-            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                  <View style={styles.headerIconBadge}>
-                    <Ionicons name="list" size={15} color="#B48218" />
-                  </View>
-                  <ThemedText style={styles.cardHeaderTitle}>Line Details</ThemedText>
-                </View>
+        <View style={[styles.goldCard, { marginBottom: 4 }]}>
+          {selectedIndex !== null && (
+            <View style={{ flexDirection: 'row', justifyContent: 'flex-end', alignItems: 'center', gap: 8, paddingHorizontal: 12, paddingVertical: 6, backgroundColor: '#FAF7F0', borderBottomWidth: 1, borderBottomColor: '#EBE2D2' }}>
+              <TouchableOpacity
+                style={[styles.addLineBtn, { backgroundColor: '#8E24AA' }]}
+                onPress={() => navigateToBarcode()}
+              >
+                <Ionicons name="barcode-outline" size={14} color="#FFF" style={{ marginRight: 4 }} />
+                <ThemedText style={styles.addLineBtnText}>BarCode</ThemedText>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[
+                  styles.addLineBtn,
+                  { backgroundColor: '#C62828' },
+                  isFormLocked && { opacity: 0.5 }
+                ]}
+                onPress={deleteSelectedDetail}
+                disabled={isFormLocked}
+              >
+                <Ionicons name="trash-outline" size={14} color="#FFF" style={{ marginRight: 4 }} />
+                <ThemedText style={styles.addLineBtnText}>Delete</ThemedText>
+              </TouchableOpacity>
+            </View>
+          )}
 
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                  {selectedIndex !== null && (
-                    <TouchableOpacity
-                      style={[styles.addLineBtn, { backgroundColor: '#8E24AA' }]}
-                      onPress={() => navigateToBarcode()}
-                    >
-                      <Ionicons name="barcode-outline" size={14} color="#FFF" style={{ marginRight: 4 }} />
-                      <ThemedText style={styles.addLineBtnText}>BarCode</ThemedText>
-                    </TouchableOpacity>
-                  )}
-                  {selectedIndex !== null && (
-                    <TouchableOpacity
-                      style={[
-                        styles.addLineBtn,
-                        { backgroundColor: '#C62828' },
-                        isFormLocked && { opacity: 0.5 }
-                      ]}
-                      onPress={deleteSelectedDetail}
-                      disabled={isFormLocked}
-                    >
-                      <Ionicons name="trash-outline" size={14} color="#FFF" style={{ marginRight: 4 }} />
-                      <ThemedText style={styles.addLineBtnText}>Delete</ThemedText>
-                    </TouchableOpacity>
-                  )}
-                  <TouchableOpacity
-                    style={[
-                      styles.addLineBtn,
-                      isFormLocked && { opacity: 0.5 }
-                    ]}
-                    onPress={() => {
-                      setSelectedIndex(null);
-                      clearCurrentDetail();
-                      setDetailModalVisible(true);
-                    }}
-                    disabled={isFormLocked}
-                  >
-                    <Ionicons name="add" size={14} color="#FFF" style={{ marginRight: 4 }} />
-                    <ThemedText style={styles.addLineBtnText}>Add Line</ThemedText>
-                  </TouchableOpacity>
-                </View>
-              </View>
-
-              <ScrollView horizontal contentContainerStyle={{ width: '100%' }}>
-                <View style={{ width: '100%', minWidth: 1400 }}>
-                  {/* Table Header */}
-                  <View style={styles.tableHeader}>
+          <ScrollView horizontal contentContainerStyle={{ width: '100%' }}>
+            <View style={{ width: '100%', minWidth: 1400 }}>
+              {/* Table Header */}
+              <View style={styles.tableHeader}>
                 <ThemedText style={[styles.tableHeaderText, { width: 130, textAlign: 'center' }]}>ItemCode</ThemedText>
                 <ThemedText style={[styles.tableHeaderText, { width: 70, textAlign: 'center' }]}>Class</ThemedText>
                 <ThemedText style={[styles.tableHeaderText, { width: 190, textAlign: 'center' }]}>Description</ThemedText>
@@ -1972,12 +1932,16 @@ export default function PurchaseScreen() {
 
               {/* Rows */}
               {details.length === 0 ? (
-                <View style={styles.emptyTableState}>
-                  <Ionicons name="cube-outline" size={38} color="#D8C7AA" style={{ marginBottom: 6 }} />
-                  <ThemedText style={{ color: '#8F7E66', fontSize: 13, fontWeight: '500' }}>No records to display</ThemedText>
+                <View style={[styles.emptyTableState, { height: 88 }]}>
+                  <Ionicons name="cube-outline" size={24} color="#D8C7AA" style={{ marginBottom: 2 }} />
+                  <ThemedText style={{ color: '#8F7E66', fontSize: 11, fontWeight: '500' }}>No records to display</ThemedText>
                 </View>
               ) : (
-                <ScrollView style={{ minHeight: 120, maxHeight: 220 }}>
+                <ScrollView
+                  style={{ height: 88 }}
+                  nestedScrollEnabled={true}
+                  showsVerticalScrollIndicator={true}
+                >
                   {details.map((item, idx) => (
                     <TouchableOpacity
                       key={idx}
@@ -1988,7 +1952,6 @@ export default function PurchaseScreen() {
                       onPress={() => {
                         setSelectedIndex(idx);
                         setCurrentDetail(item);
-                        setDetailModalVisible(true);
                       }}
                     >
                       <ThemedText style={[styles.tableCellText, { width: 130, fontWeight: 'bold' }]}>{item.InventoryCode}</ThemedText>
@@ -2040,579 +2003,554 @@ export default function PurchaseScreen() {
             </View>
           </ScrollView>
         </View>
-      </ScrollView>
 
-      {/* ================= DETAIL MODAL ================= */}
-      <Modal visible={detailModalVisible} transparent={true} animationType="fade">
-        <View style={styles.modalOverlay}>
-          {/* Modal-level Toast Notification */}
-          {toast.visible && (
-            <View
-              style={[
-                styles.toastContainer,
-                { backgroundColor: toast.type === 'success' ? '#2E7D32' : toast.type === 'error' ? '#C62828' : '#1565C0', zIndex: 10001 }
-              ]}
-            >
-              <Ionicons
-                name={toast.type === 'success' ? 'checkmark-circle' : toast.type === 'error' ? 'alert-circle' : 'information-circle'}
-                size={18}
-                color="#fff"
-                style={{ marginRight: 8 }}
-              />
-              <ThemedText style={{ color: '#FFF', fontWeight: 'bold', fontSize: 13, textAlign: 'center' }}>
-                {toast.message}
-              </ThemedText>
-            </View>
-          )}
-
-          <View style={[styles.modalContainer, { backgroundColor: cardColor, borderColor: borderColor, width: '92%', maxWidth: 1350 }]}>
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-              <ThemedText style={[styles.modalTitle, { color: textColor, marginBottom: 0 }]}>
-                {selectedIndex !== null ? 'Edit Line Detail' : 'Add Line Detail'}
-              </ThemedText>
-              <TouchableOpacity onPress={() => setDetailModalVisible(false)}>
-                <Ionicons name="close" size={24} color={textColor} />
-              </TouchableOpacity>
-            </View>
-
-            <View style={[styles.section, { backgroundColor: backgroundColor, padding: 8, borderColor: borderColor }]}>
-              <ScrollView horizontal={true} showsHorizontalScrollIndicator={true} contentContainerStyle={{ flexGrow: 1 }}>
-                <View style={{ borderWidth: 1, borderColor: '#aaa', backgroundColor: backgroundColor, padding: 2, marginBottom: 8, alignSelf: 'flex-start' }}>
-                  {/* ROW 1: Headers */}
-                  <View style={{ flexDirection: 'row' }}>
-                    <View style={{ width: 130, backgroundColor: cardColor, borderWidth: 1, borderColor: '#aaa', justifyContent: 'center' }}>
-                      <ThemedText style={{ color: textColor, fontSize: 11, fontWeight: 'bold', textAlign: 'center' }}>Catalogue Code</ThemedText>
-                    </View>
-                    <View style={{ width: 180, backgroundColor: cardColor, borderWidth: 1, borderColor: '#aaa', borderLeftWidth: 0, justifyContent: 'center' }}>
-                      <ThemedText style={{ color: textColor, fontSize: 11, fontWeight: 'bold', textAlign: 'center' }}>Category Code</ThemedText>
-                    </View>
-                    <View style={{ width: 120, backgroundColor: cardColor, borderWidth: 1, borderColor: '#aaa', borderLeftWidth: 0, justifyContent: 'center' }}>
-                      <ThemedText style={{ color: textColor, fontSize: 11, fontWeight: 'bold', textAlign: 'center' }}>Tray Id</ThemedText>
-                    </View>
-                    <View style={{ width: 120, backgroundColor: cardColor, borderWidth: 1, borderColor: '#aaa', borderLeftWidth: 0, justifyContent: 'center' }}>
-                      <ThemedText style={{ color: textColor, fontSize: 11, fontWeight: 'bold', textAlign: 'center' }}>Bill Weight</ThemedText>
-                    </View>
-                    <View style={{ width: 80, backgroundColor: cardColor, borderWidth: 1, borderColor: '#aaa', borderLeftWidth: 0, justifyContent: 'center' }}>
-                      <ThemedText style={{ color: textColor, fontSize: 11, fontWeight: 'bold', textAlign: 'center' }}>Bill PCS</ThemedText>
-                    </View>
-                    <View style={{ width: 100, backgroundColor: cardColor, borderWidth: 1, borderColor: '#aaa', borderLeftWidth: 0, justifyContent: 'center' }}>
-                      <ThemedText style={{ color: textColor, fontSize: 11, fontWeight: 'bold', textAlign: 'center' }}>Inv. Weight</ThemedText>
-                    </View>
-                    <View style={{ width: 90, backgroundColor: cardColor, borderWidth: 1, borderColor: '#aaa', borderLeftWidth: 0, justifyContent: 'center' }}>
-                      <ThemedText style={{ color: textColor, fontSize: 11, fontWeight: 'bold', textAlign: 'center' }}>Inv. PCS</ThemedText>
-                    </View>
-                    <View style={{ width: 140, backgroundColor: cardColor, borderWidth: 1, borderColor: '#aaa', borderLeftWidth: 0, paddingLeft: 4, justifyContent: 'center' }}>
-                      <ThemedText style={{ color: textColor, fontSize: 11, fontWeight: 'bold' }}>Purchase MC</ThemedText>
-                    </View>
-                    <View style={{ width: 240, backgroundColor: cardColor, borderWidth: 1, borderColor: '#aaa', borderLeftWidth: 0, paddingHorizontal: 6, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-                      <ThemedText style={{ color: textColor, fontSize: 11, fontWeight: 'bold' }}>Sales MC</ThemedText>
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                        <Checkbox label="AUTO" selected={autoSMC} onPress={() => setAutoSMC(!autoSMC)} />
-                        <Checkbox label="PCS" selected={salesPCS} onPress={() => setSalesPCS(!salesPCS)} />
-                      </View>
-                    </View>
+        {/* ================= ADD / EDIT LINE DETAIL SECTION ================= */}
+        <View style={[styles.goldCard, { marginTop: 4, padding: 8 }]}>
+          <View style={{ backgroundColor: '#FFFFFF', padding: 0 }}>
+            <ScrollView horizontal={true} showsHorizontalScrollIndicator={true} contentContainerStyle={{ flexGrow: 1 }}>
+              <View style={{ borderWidth: 1, borderColor: '#D8CDBA', backgroundColor: '#FFFFFF', marginBottom: 6, alignSelf: 'flex-start' }}>
+                {/* ROW 1: Headers */}
+                <View style={{ flexDirection: 'row' }}>
+                  <View style={{ width: 130, backgroundColor: '#F5E7CA', borderWidth: 1, borderColor: '#D8CDBA', justifyContent: 'center', paddingVertical: 1 }}>
+                    <ThemedText style={{ color: '#3B2D17', fontSize: 10.5, fontWeight: 'bold', textAlign: 'center' }}>Catalogue Code</ThemedText>
                   </View>
-
-                  {/* ROW 2: Inputs */}
-                  <View style={{ flexDirection: 'row' }}>
-                    <View style={{ width: 130, borderWidth: 1, borderColor: '#aaa', borderTopWidth: 0, flexDirection: 'row' }}>
-                      <TextInput
-                        style={{ width: 104, padding: 2, fontSize: 11, color: textColor }}
-                        value={currentDetail.CatalogueCode}
-                        onChangeText={(t) => updateDetail('CatalogueCode', t)}
-                        onBlur={() => {
-                          if (currentDetail.CatalogueCode) {
-                            applySelectedCatalogue({ CatalogueCode: currentDetail.CatalogueCode });
-                          }
-                        }}
-                      />
-                      <TouchableOpacity
-                        style={{ width: 24, backgroundColor: cardColor, borderLeftWidth: 1, borderColor: '#aaa', justifyContent: 'center', alignItems: 'center', flexShrink: 0 }}
-                        onPress={fetchCatalogue}
-                      >
-                        <ThemedText style={{ color: textColor, fontWeight: 'bold', fontSize: 10 }}>...</ThemedText>
-                      </TouchableOpacity>
-                    </View>
-
-                    <View style={{ width: 180, borderWidth: 1, borderColor: '#aaa', borderTopWidth: 0, borderLeftWidth: 0, flexDirection: 'row' }}>
-                      <TextInput
-                        style={{ flex: 1, padding: 2, fontSize: 11, color: textColor }}
-                        value={currentDetail.CategoryCode}
-                        onChangeText={(t) => updateDetail('CategoryCode', t)}
-                        onBlur={() => {
-                          if (currentDetail.CategoryCode) {
-                            applySelectedCategory(currentDetail.CategoryCode);
-                          }
-                        }}
-                      />
-                      <TouchableOpacity
-                        style={{ width: 24, backgroundColor: cardColor, borderLeftWidth: 1, borderColor: '#aaa', justifyContent: 'center', alignItems: 'center', flexShrink: 0 }}
-                        onPress={fetchCategories}
-                      >
-                        <ThemedText style={{ color: textColor, fontWeight: 'bold', fontSize: 10 }}>...</ThemedText>
-                      </TouchableOpacity>
-                    </View>
-
-                    <View style={{ width: 120, borderWidth: 1, borderColor: '#aaa', borderTopWidth: 0, borderLeftWidth: 0, flexDirection: 'row' }}>
-                      <TextInput
-                        style={{ width: 94, padding: 2, fontSize: 11, color: textColor }}
-                        value={currentDetail.TrayId}
-                        onChangeText={(t) => updateDetail('TrayId', t)}
-                        onBlur={() => validateTrayIdOnBlur(currentDetail.TrayId)}
-                      />
-                      <TouchableOpacity
-                        style={{ width: 24, backgroundColor: cardColor, borderLeftWidth: 1, borderColor: '#aaa', justifyContent: 'center', alignItems: 'center', flexShrink: 0 }}
-                        onPress={fetchTrays}
-                      >
-                        <ThemedText style={{ color: textColor, fontWeight: 'bold', fontSize: 10 }}>...</ThemedText>
-                      </TouchableOpacity>
-                    </View>
-
-                    <View style={{ width: 120, borderWidth: 1, borderColor: '#aaa', borderTopWidth: 0, borderLeftWidth: 0 }}>
-                      <TextInput
-                        style={{ flex: 1, padding: 2, fontSize: 11, color: textColor, textAlign: 'right', backgroundColor: '#F8F5EE' }}
-                        value={currentDetail.BillWeight}
-                        editable={false}
-                      />
-                    </View>
-
-                    <View style={{ width: 80, borderWidth: 1, borderColor: '#aaa', borderTopWidth: 0, borderLeftWidth: 0 }}>
-                      <TextInput
-                        style={{ flex: 1, padding: 2, fontSize: 11, color: textColor, textAlign: 'right', backgroundColor: '#F8F5EE' }}
-                        value={currentDetail.BillPCS}
-                        editable={false}
-                      />
-                    </View>
-
-                    <View style={{ width: 100, borderWidth: 1, borderColor: '#aaa', borderTopWidth: 0, borderLeftWidth: 0 }}>
-                      <TextInput
-                        style={{ flex: 1, padding: 2, fontSize: 11, color: textColor, textAlign: 'right', backgroundColor: '#F8F5EE' }}
-                        value={currentDetail.InvWeight}
-                        editable={false}
-                      />
-                    </View>
-
-                    <View style={{ width: 90, borderWidth: 1, borderColor: '#aaa', borderTopWidth: 0, borderLeftWidth: 0 }}>
-                      <TextInput
-                        style={{ flex: 1, padding: 2, fontSize: 11, color: textColor, textAlign: 'right', backgroundColor: '#F8F5EE' }}
-                        value={currentDetail.InvPCS}
-                        editable={false}
-                      />
-                    </View>
-
-                    <View style={{ width: 140, borderWidth: 1, borderColor: '#aaa', borderTopWidth: 0, borderLeftWidth: 0, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-around', paddingVertical: 2, paddingHorizontal: 4 }}>
-                      <Checkbox
-                        label="Per Gram"
-                        selected={currentDetail.PurchaseMCType === 'PerGram'}
-                        onPress={() => updateDetail('PurchaseMCType', 'PerGram')}
-                      />
-                      <Checkbox
-                        label="Per PCS"
-                        selected={currentDetail.PurchaseMCType === 'PerPCS'}
-                        onPress={() => updateDetail('PurchaseMCType', 'PerPCS')}
-                      />
-                    </View>
-
-                    <View style={{ width: 240, borderWidth: 1, borderColor: '#aaa', borderTopWidth: 0, borderLeftWidth: 0, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-around', paddingVertical: 2, paddingHorizontal: 4 }}>
-                      <Checkbox
-                        label="Per Gram"
-                        selected={currentDetail.SalesMCType === 'PerGram'}
-                        onPress={() => updateDetail('SalesMCType', 'PerGram')}
-                      />
-                      <Checkbox
-                        label="Per PCS"
-                        selected={currentDetail.SalesMCType === 'PerPCS'}
-                        onPress={() => updateDetail('SalesMCType', 'PerPCS')}
-                      />
-                    </View>
+                  <View style={{ width: 180, backgroundColor: '#F5E7CA', borderWidth: 1, borderColor: '#D8CDBA', borderLeftWidth: 0, justifyContent: 'center', paddingVertical: 1 }}>
+                    <ThemedText style={{ color: '#3B2D17', fontSize: 10.5, fontWeight: 'bold', textAlign: 'center' }}>Category Code</ThemedText>
                   </View>
-
-                  {/* ROW 3: Headers */}
-                  <View style={{ flexDirection: 'row' }}>
-                    <View style={{ width: 130, backgroundColor: cardColor, borderWidth: 1, borderColor: '#aaa', borderTopWidth: 0, justifyContent: 'center' }}>
-                      <ThemedText style={{ color: textColor, fontSize: 11, fontWeight: 'bold', textAlign: 'center' }}>Inventory Code</ThemedText>
-                    </View>
-                    <View style={{ width: 180, backgroundColor: cardColor, borderWidth: 1, borderColor: '#aaa', borderTopWidth: 0, borderLeftWidth: 0, justifyContent: 'center' }}>
-                      <ThemedText style={{ color: textColor, fontSize: 11, fontWeight: 'bold', textAlign: 'center' }}>Inventory Description</ThemedText>
-                    </View>
-                    <View style={{ width: 120, backgroundColor: cardColor, borderWidth: 1, borderColor: '#aaa', borderTopWidth: 0, borderLeftWidth: 0, justifyContent: 'center' }}>
-                      <ThemedText style={{ color: textColor, fontSize: 11, fontWeight: 'bold', textAlign: 'center' }}>Weight</ThemedText>
-                    </View>
-                    <View style={{ width: 120, backgroundColor: cardColor, borderWidth: 1, borderColor: '#aaa', borderTopWidth: 0, borderLeftWidth: 0, justifyContent: 'center' }}>
-                      <ThemedText style={{ color: textColor, fontSize: 11, fontWeight: 'bold', textAlign: 'center' }}>Size</ThemedText>
-                    </View>
-                    <View style={{ width: 80, backgroundColor: cardColor, borderWidth: 1, borderColor: '#aaa', borderTopWidth: 0, borderLeftWidth: 0, justifyContent: 'center' }}>
-                      <ThemedText style={{ color: textColor, fontSize: 11, fontWeight: 'bold', textAlign: 'center' }}>Gold Loss</ThemedText>
-                    </View>
-                    <View style={{ width: 100, backgroundColor: cardColor, borderWidth: 1, borderColor: '#aaa', borderTopWidth: 0, borderLeftWidth: 0, justifyContent: 'center' }}>
-                      <ThemedText style={{ color: textColor, fontSize: 11, fontWeight: 'bold', textAlign: 'center' }}>Cost Per Gram</ThemedText>
-                    </View>
-                    <View style={{ width: 90, backgroundColor: cardColor, borderWidth: 1, borderColor: '#aaa', borderTopWidth: 0, borderLeftWidth: 0, justifyContent: 'center' }}>
-                      <ThemedText style={{ color: textColor, fontSize: 11, fontWeight: 'bold', textAlign: 'center' }}>PMC</ThemedText>
-                    </View>
-                    <View style={{ width: 140, backgroundColor: cardColor, borderWidth: 1, borderColor: '#aaa', borderTopWidth: 0, borderLeftWidth: 0, justifyContent: 'center' }}>
-                      <ThemedText style={{ color: textColor, fontSize: 11, fontWeight: 'bold', textAlign: 'center' }}>SMC</ThemedText>
-                    </View>
-                    <View style={{ width: 60, backgroundColor: cardColor, borderWidth: 1, borderColor: '#aaa', borderTopWidth: 0, borderLeftWidth: 0, justifyContent: 'center' }}>
-                      <ThemedText style={{ color: textColor, fontSize: 11, fontWeight: 'bold', textAlign: 'center' }}>PCS</ThemedText>
-                    </View>
-                    <View style={{ width: 180, backgroundColor: cardColor, borderWidth: 1, borderColor: '#aaa', borderTopWidth: 0, borderLeftWidth: 0, justifyContent: 'center' }}>
-                      <ThemedText style={{ color: textColor, fontSize: 11, fontWeight: 'bold', textAlign: 'center' }}>Total Cost</ThemedText>
-                    </View>
+                  <View style={{ width: 120, backgroundColor: '#F5E7CA', borderWidth: 1, borderColor: '#D8CDBA', borderLeftWidth: 0, justifyContent: 'center', paddingVertical: 1 }}>
+                    <ThemedText style={{ color: '#3B2D17', fontSize: 10.5, fontWeight: 'bold', textAlign: 'center' }}>Tray Id</ThemedText>
                   </View>
-
-                  {/* ROW 4: Inputs */}
-                  <View style={{ flexDirection: 'row' }}>
-                    <View style={{ width: 130, borderWidth: 1, borderColor: '#aaa', borderTopWidth: 0 }}>
-                      <TextInput
-                        style={{ flex: 1, padding: 2, fontSize: 11, color: textColor }}
-                        value={currentDetail.InventoryCode}
-                        onChangeText={(t) => updateDetail('InventoryCode', t)}
-                      />
-                    </View>
-                    <View style={{ width: 180, borderWidth: 1, borderColor: '#aaa', borderTopWidth: 0, borderLeftWidth: 0 }}>
-                      <TextInput
-                        style={{ flex: 1, padding: 2, fontSize: 11, color: textColor }}
-                        value={currentDetail.InventoryDescription}
-                        onChangeText={(t) => updateDetail('InventoryDescription', t)}
-                      />
-                    </View>
-                    <View style={{ width: 120, borderWidth: 1, borderColor: '#aaa', borderTopWidth: 0, borderLeftWidth: 0 }}>
-                      <TextInput
-                        style={{ flex: 1, padding: 2, fontSize: 11, color: textColor, textAlign: 'right' }}
-                        value={currentDetail.Weight}
-                        onChangeText={(t) => updateDetail('Weight', t)}
-                        onBlur={handleWeightOnBlur}
-                        keyboardType="numeric"
-                      />
-                    </View>
-                    <View style={{ width: 120, borderWidth: 1, borderColor: '#aaa', borderTopWidth: 0, borderLeftWidth: 0, flexDirection: 'row' }}>
-                      <TextInput
-                        style={{ width: 94, padding: 2, fontSize: 11, color: textColor, textAlign: 'right' }}
-                        value={currentDetail.Size}
-                        onChangeText={(t) => updateDetail('Size', t)}
-                        onBlur={() => validateSizeOnBlur(currentDetail.Size)}
-                        keyboardType="numeric"
-                      />
-                      <TouchableOpacity
-                        style={{ width: 24, backgroundColor: cardColor, borderLeftWidth: 1, borderColor: '#aaa', justifyContent: 'center', alignItems: 'center', flexShrink: 0 }}
-                        onPress={fetchSizes}
-                      >
-                        <ThemedText style={{ color: textColor, fontWeight: 'bold', fontSize: 10 }}>...</ThemedText>
-                      </TouchableOpacity>
-                    </View>
-                    <View style={{ width: 80, borderWidth: 1, borderColor: '#aaa', borderTopWidth: 0, borderLeftWidth: 0 }}>
-                      <TextInput
-                        style={{ flex: 1, padding: 2, fontSize: 11, color: textColor, textAlign: 'right' }}
-                        value={currentDetail.GoldLoss}
-                        onChangeText={(t) => updateDetail('GoldLoss', t)}
-                        onBlur={() => {
-                          const val = parseFloat(currentDetail.GoldLoss);
-                          if (!isNaN(val)) updateDetail('GoldLoss', val.toFixed(2));
-                        }}
-                        keyboardType="numeric"
-                      />
-                    </View>
-                    <View style={{ width: 100, borderWidth: 1, borderColor: '#aaa', borderTopWidth: 0, borderLeftWidth: 0 }}>
-                      <TextInput
-                        style={{ flex: 1, padding: 2, fontSize: 11, color: textColor, textAlign: 'right' }}
-                        value={currentDetail.CostPerGram}
-                        onChangeText={(t) => updateDetail('CostPerGram', t)}
-                        onBlur={() => {
-                          const val = parseFloat(currentDetail.CostPerGram);
-                          if (!isNaN(val)) updateDetail('CostPerGram', val.toFixed(2));
-                        }}
-                        keyboardType="numeric"
-                      />
-                    </View>
-                    <View style={{ width: 90, borderWidth: 1, borderColor: '#aaa', borderTopWidth: 0, borderLeftWidth: 0 }}>
-                      <TextInput
-                        style={{ flex: 1, padding: 2, fontSize: 11, color: textColor, textAlign: 'right' }}
-                        value={currentDetail.PMC}
-                        onChangeText={(t) => updateDetail('PMC', t)}
-                        onBlur={() => {
-                          const val = parseFloat(currentDetail.PMC);
-                          if (currentDetail.PMC !== '' && !isNaN(val) && val < 0) {
-                            showToast("Invalid Purchase MC!", "error");
-                            updateDetail('PMC', '0.00');
-                            return;
-                          }
-                          const formattedPMC = !isNaN(val) && val >= 0 ? val.toFixed(2) : '0.00';
-                          if (autoSMC) {
-                            const calculatedSMC = (parseFloat(formattedPMC) * 4).toFixed(2);
-                            setCurrentDetail((prev: any) => ({
-                              ...prev,
-                              PMC: formattedPMC,
-                              SMC: calculatedSMC
-                            }));
-                          } else {
-                            updateDetail('PMC', formattedPMC);
-                          }
-                        }}
-                        keyboardType="numeric"
-                        editable={!isFormLocked}
-                      />
-                    </View>
-                    <View style={{ width: 140, borderWidth: 1, borderColor: '#aaa', borderTopWidth: 0, borderLeftWidth: 0, backgroundColor: autoSMC ? '#F8F5EE' : undefined }}>
-                      <TextInput
-                        style={{ flex: 1, padding: 2, fontSize: 11, color: autoSMC ? '#888' : textColor, textAlign: 'right' }}
-                        value={currentDetail.SMC}
-                        onChangeText={(t) => updateDetail('SMC', t)}
-                        onBlur={() => {
-                          const val = parseFloat(currentDetail.SMC);
-                          if (currentDetail.SMC !== '' && !isNaN(val) && val < 0) {
-                            showToast("Invalid Sales MC!", "error");
-                            updateDetail('SMC', '0.00');
-                            return;
-                          }
-                          if (!isNaN(val) && val >= 0) {
-                            updateDetail('SMC', val.toFixed(2));
-                          }
-                        }}
-                        keyboardType="numeric"
-                        editable={!isFormLocked && !autoSMC}
-                      />
-                    </View>
-                    <View style={{ width: 60, borderWidth: 1, borderColor: '#aaa', borderTopWidth: 0, borderLeftWidth: 0 }}>
-                      <TextInput
-                        style={{ flex: 1, padding: 2, fontSize: 11, color: textColor, textAlign: 'right' }}
-                        value={currentDetail.PCS}
-                        onChangeText={(t) => updateDetail('PCS', t)}
-                        onBlur={() => {
-                          const val = parseInt(currentDetail.PCS, 10);
-                          updateDetail('PCS', (!isNaN(val) && val > 0 ? val : 1).toString());
-                        }}
-                        keyboardType="numeric"
-                        editable={!isFormLocked}
-                      />
-                    </View>
-                    <View style={{ width: 180, borderWidth: 1, borderColor: '#aaa', borderTopWidth: 0, borderLeftWidth: 0, backgroundColor: '#F8F5EE' }}>
-                      <TextInput
-                        style={{ flex: 1, padding: 2, fontSize: 11, color: textColor, textAlign: 'right', fontWeight: 'bold' }}
-                        value={currentDetail.TotalCost}
-                        editable={false}
-                      />
-                    </View>
+                  <View style={{ width: 120, backgroundColor: '#F5E7CA', borderWidth: 1, borderColor: '#D8CDBA', borderLeftWidth: 0, justifyContent: 'center', paddingVertical: 1 }}>
+                    <ThemedText style={{ color: '#3B2D17', fontSize: 10.5, fontWeight: 'bold', textAlign: 'center' }}>Bill Weight</ThemedText>
                   </View>
-
-                  {/* ROW 5: Headers (Diamond Description & Stone Weight) */}
-                  <View style={{ flexDirection: 'row' }}>
-                    <View style={{ width: 310, backgroundColor: cardColor, borderWidth: 1, borderColor: '#aaa', borderTopWidth: 0, justifyContent: 'center' }}>
-                      <ThemedText style={{ color: textColor, fontSize: 11, fontWeight: 'bold', textAlign: 'center' }}>Diamond Description</ThemedText>
-                    </View>
-                    <View style={{ width: 120, backgroundColor: cardColor, borderWidth: 1, borderColor: '#aaa', borderTopWidth: 0, borderLeftWidth: 0, justifyContent: 'center' }}>
-                      <ThemedText style={{ color: textColor, fontSize: 11, fontWeight: 'bold', textAlign: 'center' }}>Stone Weight</ThemedText>
-                    </View>
+                  <View style={{ width: 80, backgroundColor: '#F5E7CA', borderWidth: 1, borderColor: '#D8CDBA', borderLeftWidth: 0, justifyContent: 'center', paddingVertical: 1 }}>
+                    <ThemedText style={{ color: '#3B2D17', fontSize: 10.5, fontWeight: 'bold', textAlign: 'center' }}>Bill PCS</ThemedText>
                   </View>
-
-                  {/* ROW 6: Inputs */}
-                  <View style={{ flexDirection: 'row', marginBottom: 8 }}>
-                    <View style={{ width: 310, borderWidth: 1, borderColor: '#aaa', borderTopWidth: 0 }}>
-                      <TextInput
-                        style={{ flex: 1, padding: 2, fontSize: 11, color: textColor }}
-                        value={currentDetail.DiamondDescription}
-                        onChangeText={(t) => updateDetail('DiamondDescription', t)}
-                      />
-                    </View>
-                    <View style={{ width: 120, borderWidth: 1, borderColor: '#aaa', borderTopWidth: 0, borderLeftWidth: 0 }}>
-                      <TextInput
-                        style={{ flex: 1, padding: 2, fontSize: 11, color: textColor, textAlign: 'right' }}
-                        value={currentDetail.StoneWeight}
-                        onChangeText={(t) => updateDetail('StoneWeight', t)}
-                        onBlur={() => {
-                          const val = parseFloat(currentDetail.StoneWeight);
-                          if (!isNaN(val)) {
-                            const wt = parseFloat(currentDetail.Weight) || 0;
-                            if (wt > 0 && val >= wt) {
-                              showToast("Stone weight cannot exceed total weight!", "error");
-                            }
-                            updateDetail('StoneWeight', val.toFixed(2));
-                          }
-                        }}
-                        keyboardType="numeric"
-                      />
+                  <View style={{ width: 100, backgroundColor: '#F5E7CA', borderWidth: 1, borderColor: '#D8CDBA', borderLeftWidth: 0, justifyContent: 'center', paddingVertical: 1 }}>
+                    <ThemedText style={{ color: '#3B2D17', fontSize: 10.5, fontWeight: 'bold', textAlign: 'center' }}>Inv. Weight</ThemedText>
+                  </View>
+                  <View style={{ width: 90, backgroundColor: '#F5E7CA', borderWidth: 1, borderColor: '#D8CDBA', borderLeftWidth: 0, justifyContent: 'center', paddingVertical: 1 }}>
+                    <ThemedText style={{ color: '#3B2D17', fontSize: 10.5, fontWeight: 'bold', textAlign: 'center' }}>Inv. PCS</ThemedText>
+                  </View>
+                  <View style={{ width: 140, backgroundColor: '#F5E7CA', borderWidth: 1, borderColor: '#D8CDBA', borderLeftWidth: 0, paddingLeft: 4, justifyContent: 'center', paddingVertical: 1 }}>
+                    <ThemedText style={{ color: '#3B2D17', fontSize: 10.5, fontWeight: 'bold' }}>Purchase MC</ThemedText>
+                  </View>
+                  <View style={{ width: 240, backgroundColor: '#F5E7CA', borderWidth: 1, borderColor: '#D8CDBA', borderLeftWidth: 0, paddingHorizontal: 6, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 1 }}>
+                    <ThemedText style={{ color: '#3B2D17', fontSize: 10.5, fontWeight: 'bold' }}>Sales MC</ThemedText>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                      <Checkbox label="AUTO" selected={autoSMC} onPress={() => setAutoSMC(!autoSMC)} />
+                      <Checkbox label="PCS" selected={salesPCS} onPress={() => setSalesPCS(!salesPCS)} />
                     </View>
                   </View>
                 </View>
-              </ScrollView>
 
-              {/* IPM Section (from purchase.txt gbIPM) */}
-              {currentDetail.IPM && (
-                <View style={styles.ipmBox}>
-                  <ThemedText style={{ fontSize: 11, fontWeight: 'bold', color: '#B48218', marginBottom: 6 }}>
-                    IPM Details (Investment Precious Metals)
-                  </ThemedText>
-                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
-                    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                      <ThemedText style={styles.ipmLabel}>Type:</ThemedText>
-                      <TextInput
-                        style={[styles.input, { width: 70 }]}
-                        value={currentDetail.IPMType}
-                        onChangeText={(t) => updateDetail('IPMType', t)}
-                        placeholder="Coin/Bar"
-                      />
-                    </View>
-
-                    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                      <ThemedText style={styles.ipmLabel}>Bar No:</ThemedText>
-                      <TextInput
-                        style={[styles.input, { width: 90 }]}
-                        value={currentDetail.IPMBarNo}
-                        onChangeText={(t) => updateDetail('IPMBarNo', t)}
-                      />
-                    </View>
-
-                    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                      <ThemedText style={styles.ipmLabel}>Purity:</ThemedText>
-                      <TextInput
-                        style={[styles.input, { width: 70 }]}
-                        value={currentDetail.IPMPurity}
-                        onChangeText={(t) => updateDetail('IPMPurity', t)}
-                        placeholder="999.9"
-                      />
-                    </View>
-
-                    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                      <ThemedText style={styles.ipmLabel}>GST Type:</ThemedText>
-                      <TextInput
-                        style={[styles.input, { width: 70 }]}
-                        value={currentDetail.IPMGSTType}
-                        onChangeText={(t) => updateDetail('IPMGSTType', t)}
-                      />
-                    </View>
-
-                    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                      <ThemedText style={styles.ipmLabel}>Refiner:</ThemedText>
-                      <View style={{ flexDirection: 'row' }}>
-                        <TextInput
-                          style={[styles.input, { width: 80, borderTopRightRadius: 0, borderBottomRightRadius: 0 }]}
-                          value={currentDetail.IPMRefiner}
-                          onChangeText={(t) => updateDetail('IPMRefiner', t)}
-                        />
-                        <TouchableOpacity style={[styles.lookupBtn, { width: 22, height: 28 }]} onPress={fetchRefiners}>
-                          <ThemedText style={{ fontSize: 10 }}>...</ThemedText>
-                        </TouchableOpacity>
-                      </View>
-                    </View>
-
-                    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                      <ThemedText style={styles.ipmLabel}>Country:</ThemedText>
-                      <View style={{ flexDirection: 'row' }}>
-                        <TextInput
-                          style={[styles.input, { width: 80, borderTopRightRadius: 0, borderBottomRightRadius: 0 }]}
-                          value={currentDetail.IPMCountry}
-                          onChangeText={(t) => updateDetail('IPMCountry', t)}
-                        />
-                        <TouchableOpacity style={[styles.lookupBtn, { width: 22, height: 28 }]} onPress={fetchCountries}>
-                          <ThemedText style={{ fontSize: 10 }}>...</ThemedText>
-                        </TouchableOpacity>
-                      </View>
-                    </View>
-                  </View>
-                </View>
-              )}
-
-              {/* Bottom Options & Actions */}
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 8 }}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-                  <Checkbox
-                    label="IPM"
-                    selected={currentDetail.IPM}
-                    onPress={() => updateDetail('IPM', !currentDetail.IPM)}
-                  />
-                  <Checkbox
-                    label="Addl. Desc"
-                    selected={currentDetail.AddlDesc}
-                    onPress={() => {
-                      const nextVal = !currentDetail.AddlDesc;
-                      updateDetail('AddlDesc', nextVal);
-                      if (nextVal) setAddlDescModalVisible(true);
-                    }}
-                  />
-                  {currentDetail.AddlDesc && (
+                {/* ROW 2: Inputs */}
+                <View style={{ flexDirection: 'row' }}>
+                  <View style={{ width: 130, borderWidth: 1, borderColor: '#D8CDBA', borderTopWidth: 0, flexDirection: 'row', backgroundColor: '#FFFFFF', height: 23 }}>
+                    <TextInput
+                      style={{ width: 106, paddingHorizontal: 4, paddingVertical: 1, fontSize: 10.5, color: '#3B2D17' }}
+                      value={currentDetail.CatalogueCode}
+                      onChangeText={(t) => updateDetail('CatalogueCode', t)}
+                      onBlur={() => {
+                        if (currentDetail.CatalogueCode) {
+                          applySelectedCatalogue({ CatalogueCode: currentDetail.CatalogueCode });
+                        }
+                      }}
+                    />
                     <TouchableOpacity
-                      style={[styles.actionBtn, { backgroundColor: '#FDF7EB', borderColor: '#B8903B' }]}
-                      onPress={() => setAddlDescModalVisible(true)}
+                      style={{ width: 22, backgroundColor: '#FAF5EA', borderLeftWidth: 1, borderColor: '#D8CDBA', justifyContent: 'center', alignItems: 'center', flexShrink: 0 }}
+                      onPress={fetchCatalogue}
                     >
-                      <ThemedText style={{ color: '#9E6D08', fontSize: 11, fontWeight: 'bold' }}>Edit Addl Desc</ThemedText>
+                      <ThemedText style={{ color: '#6E5528', fontWeight: 'bold', fontSize: 9.5 }}>...</ThemedText>
                     </TouchableOpacity>
-                  )}
-                  <Checkbox
-                    label="Image"
-                    selected={imageModalVisible}
-                    onPress={() => setImageModalVisible(!imageModalVisible)}
-                  />
+                  </View>
+
+                  <View style={{ width: 180, borderWidth: 1, borderColor: '#D8CDBA', borderTopWidth: 0, borderLeftWidth: 0, flexDirection: 'row', backgroundColor: '#FFFFFF', height: 23 }}>
+                    <TextInput
+                      style={{ flex: 1, paddingHorizontal: 4, paddingVertical: 1, fontSize: 10.5, color: '#3B2D17' }}
+                      value={currentDetail.CategoryCode}
+                      onChangeText={(t) => updateDetail('CategoryCode', t)}
+                      onBlur={() => {
+                        if (currentDetail.CategoryCode) {
+                          applySelectedCategory(currentDetail.CategoryCode);
+                        }
+                      }}
+                    />
+                    <TouchableOpacity
+                      style={{ width: 22, backgroundColor: '#FAF5EA', borderLeftWidth: 1, borderColor: '#D8CDBA', justifyContent: 'center', alignItems: 'center', flexShrink: 0 }}
+                      onPress={fetchCategories}
+                    >
+                      <ThemedText style={{ color: '#6E5528', fontWeight: 'bold', fontSize: 9.5 }}>...</ThemedText>
+                    </TouchableOpacity>
+                  </View>
+
+                  <View style={{ width: 120, borderWidth: 1, borderColor: '#D8CDBA', borderTopWidth: 0, borderLeftWidth: 0, flexDirection: 'row', backgroundColor: '#FFFFFF', height: 23 }}>
+                    <TextInput
+                      style={{ width: 96, paddingHorizontal: 4, paddingVertical: 1, fontSize: 10.5, color: '#3B2D17' }}
+                      value={currentDetail.TrayId}
+                      onChangeText={(t) => updateDetail('TrayId', t)}
+                      onBlur={() => validateTrayIdOnBlur(currentDetail.TrayId)}
+                    />
+                    <TouchableOpacity
+                      style={{ width: 22, backgroundColor: '#FAF5EA', borderLeftWidth: 1, borderColor: '#D8CDBA', justifyContent: 'center', alignItems: 'center', flexShrink: 0 }}
+                      onPress={fetchTrays}
+                    >
+                      <ThemedText style={{ color: '#6E5528', fontWeight: 'bold', fontSize: 9.5 }}>...</ThemedText>
+                    </TouchableOpacity>
+                  </View>
+
+                  <View style={{ width: 120, borderWidth: 1, borderColor: '#D8CDBA', borderTopWidth: 0, borderLeftWidth: 0, height: 23 }}>
+                    <TextInput
+                      style={{ flex: 1, paddingHorizontal: 4, paddingVertical: 1, fontSize: 10.5, color: '#3B2D17', textAlign: 'right', backgroundColor: '#F8F5EE' }}
+                      value={currentDetail.BillWeight}
+                      editable={false}
+                    />
+                  </View>
+
+                  <View style={{ width: 80, borderWidth: 1, borderColor: '#D8CDBA', borderTopWidth: 0, borderLeftWidth: 0, height: 23 }}>
+                    <TextInput
+                      style={{ flex: 1, paddingHorizontal: 4, paddingVertical: 1, fontSize: 10.5, color: '#3B2D17', textAlign: 'right', backgroundColor: '#F8F5EE' }}
+                      value={currentDetail.BillPCS}
+                      editable={false}
+                    />
+                  </View>
+
+                  <View style={{ width: 100, borderWidth: 1, borderColor: '#D8CDBA', borderTopWidth: 0, borderLeftWidth: 0, height: 23 }}>
+                    <TextInput
+                      style={{ flex: 1, paddingHorizontal: 4, paddingVertical: 1, fontSize: 10.5, color: '#3B2D17', textAlign: 'right', backgroundColor: '#F8F5EE' }}
+                      value={currentDetail.InvWeight}
+                      editable={false}
+                    />
+                  </View>
+
+                  <View style={{ width: 90, borderWidth: 1, borderColor: '#D8CDBA', borderTopWidth: 0, borderLeftWidth: 0, height: 23 }}>
+                    <TextInput
+                      style={{ flex: 1, paddingHorizontal: 4, paddingVertical: 1, fontSize: 10.5, color: '#3B2D17', textAlign: 'right', backgroundColor: '#F8F5EE' }}
+                      value={currentDetail.InvPCS}
+                      editable={false}
+                    />
+                  </View>
+
+                  <View style={{ width: 140, borderWidth: 1, borderColor: '#D8CDBA', borderTopWidth: 0, borderLeftWidth: 0, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-around', paddingVertical: 1, paddingHorizontal: 4, backgroundColor: '#FFFFFF', height: 23 }}>
+                    <Checkbox
+                      label="Per Gram"
+                      selected={currentDetail.PurchaseMCType === 'PerGram'}
+                      onPress={() => updateDetail('PurchaseMCType', 'PerGram')}
+                    />
+                    <Checkbox
+                      label="Per PCS"
+                      selected={currentDetail.PurchaseMCType === 'PerPCS'}
+                      onPress={() => updateDetail('PurchaseMCType', 'PerPCS')}
+                    />
+                  </View>
+
+                  <View style={{ width: 240, borderWidth: 1, borderColor: '#D8CDBA', borderTopWidth: 0, borderLeftWidth: 0, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-around', paddingVertical: 1, paddingHorizontal: 4, backgroundColor: '#FFFFFF', height: 23 }}>
+                    <Checkbox
+                      label="Per Gram"
+                      selected={currentDetail.SalesMCType === 'PerGram'}
+                      onPress={() => updateDetail('SalesMCType', 'PerGram')}
+                    />
+                    <Checkbox
+                      label="Per PCS"
+                      selected={currentDetail.SalesMCType === 'PerPCS'}
+                      onPress={() => updateDetail('SalesMCType', 'PerPCS')}
+                    />
+                  </View>
                 </View>
 
-                <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
-                  <TouchableOpacity
-                    style={[
-                      styles.actionBtn,
-                      {
-                        backgroundColor: isAutoManual ? '#D32F2F' : '#2E7D32',
-                        borderColor: isAutoManual ? '#B71C1C' : '#1B5E20'
-                      }
-                    ]}
-                    onPress={() => setIsAutoManual(!isAutoManual)}
-                  >
-                    <ThemedText style={{ color: '#FFFFFF', fontWeight: 'bold', fontSize: 11, textAlign: 'center' }}>
-                      {isAutoManual ? 'AUTO (F10)' : 'MANUAL (F10)'}
-                    </ThemedText>
-                  </TouchableOpacity>
+                {/* ROW 3: Headers */}
+                <View style={{ flexDirection: 'row' }}>
+                  <View style={{ width: 130, backgroundColor: '#F5E7CA', borderWidth: 1, borderColor: '#D8CDBA', borderTopWidth: 0, justifyContent: 'center', paddingVertical: 1 }}>
+                    <ThemedText style={{ color: '#3B2D17', fontSize: 10.5, fontWeight: 'bold', textAlign: 'center' }}>Inventory Code</ThemedText>
+                  </View>
+                  <View style={{ width: 180, backgroundColor: '#F5E7CA', borderWidth: 1, borderColor: '#D8CDBA', borderTopWidth: 0, borderLeftWidth: 0, justifyContent: 'center', paddingVertical: 1 }}>
+                    <ThemedText style={{ color: '#3B2D17', fontSize: 10.5, fontWeight: 'bold', textAlign: 'center' }}>Inventory Description</ThemedText>
+                  </View>
+                  <View style={{ width: 120, backgroundColor: '#F5E7CA', borderWidth: 1, borderColor: '#D8CDBA', borderTopWidth: 0, borderLeftWidth: 0, justifyContent: 'center', paddingVertical: 1 }}>
+                    <ThemedText style={{ color: '#3B2D17', fontSize: 10.5, fontWeight: 'bold', textAlign: 'center' }}>Weight</ThemedText>
+                  </View>
+                  <View style={{ width: 120, backgroundColor: '#F5E7CA', borderWidth: 1, borderColor: '#D8CDBA', borderTopWidth: 0, borderLeftWidth: 0, justifyContent: 'center', paddingVertical: 1 }}>
+                    <ThemedText style={{ color: '#3B2D17', fontSize: 10.5, fontWeight: 'bold', textAlign: 'center' }}>Size</ThemedText>
+                  </View>
+                  <View style={{ width: 80, backgroundColor: '#F5E7CA', borderWidth: 1, borderColor: '#D8CDBA', borderTopWidth: 0, borderLeftWidth: 0, justifyContent: 'center', paddingVertical: 1 }}>
+                    <ThemedText style={{ color: '#3B2D17', fontSize: 10.5, fontWeight: 'bold', textAlign: 'center' }}>Gold Loss</ThemedText>
+                  </View>
+                  <View style={{ width: 100, backgroundColor: '#F5E7CA', borderWidth: 1, borderColor: '#D8CDBA', borderTopWidth: 0, borderLeftWidth: 0, justifyContent: 'center', paddingVertical: 1 }}>
+                    <ThemedText style={{ color: '#3B2D17', fontSize: 10.5, fontWeight: 'bold', textAlign: 'center' }}>Cost Per Gram</ThemedText>
+                  </View>
+                  <View style={{ width: 90, backgroundColor: '#F5E7CA', borderWidth: 1, borderColor: '#D8CDBA', borderTopWidth: 0, borderLeftWidth: 0, justifyContent: 'center', paddingVertical: 1 }}>
+                    <ThemedText style={{ color: '#3B2D17', fontSize: 10.5, fontWeight: 'bold', textAlign: 'center' }}>PMC</ThemedText>
+                  </View>
+                  <View style={{ width: 140, backgroundColor: '#F5E7CA', borderWidth: 1, borderColor: '#D8CDBA', borderTopWidth: 0, borderLeftWidth: 0, justifyContent: 'center', paddingVertical: 1 }}>
+                    <ThemedText style={{ color: '#3B2D17', fontSize: 10.5, fontWeight: 'bold', textAlign: 'center' }}>SMC</ThemedText>
+                  </View>
+                  <View style={{ width: 60, backgroundColor: '#F5E7CA', borderWidth: 1, borderColor: '#D8CDBA', borderTopWidth: 0, borderLeftWidth: 0, justifyContent: 'center', paddingVertical: 1 }}>
+                    <ThemedText style={{ color: '#3B2D17', fontSize: 10.5, fontWeight: 'bold', textAlign: 'center' }}>PCS</ThemedText>
+                  </View>
+                  <View style={{ width: 180, backgroundColor: '#F5E7CA', borderWidth: 1, borderColor: '#D8CDBA', borderTopWidth: 0, borderLeftWidth: 0, justifyContent: 'center', paddingVertical: 1 }}>
+                    <ThemedText style={{ color: '#3B2D17', fontSize: 10.5, fontWeight: 'bold', textAlign: 'center' }}>Total Cost</ThemedText>
+                  </View>
+                </View>
 
-                  <TouchableOpacity
-                    style={[
-                      styles.actionBtn,
-                      { backgroundColor: '#F9F2E2', borderColor: '#cc9900' },
-                      isFormLocked && { opacity: 0.5 }
-                    ]}
-                    onPress={addDetail}
-                    disabled={isFormLocked}
-                  >
-                    <ThemedText style={{ color: '#9E6D08', fontWeight: 'bold', textAlign: 'center' }}>
-                      {selectedIndex !== null ? 'Update' : 'Add'}
-                    </ThemedText>
-                  </TouchableOpacity>
+                {/* ROW 4: Inputs */}
+                <View style={{ flexDirection: 'row' }}>
+                  <View style={{ width: 130, borderWidth: 1, borderColor: '#D8CDBA', borderTopWidth: 0, backgroundColor: '#FFFFFF', height: 23 }}>
+                    <TextInput
+                      style={{ flex: 1, paddingHorizontal: 4, paddingVertical: 1, fontSize: 10.5, color: '#3B2D17' }}
+                      value={currentDetail.InventoryCode}
+                      onChangeText={(t) => updateDetail('InventoryCode', t)}
+                    />
+                  </View>
+                  <View style={{ width: 180, borderWidth: 1, borderColor: '#D8CDBA', borderTopWidth: 0, borderLeftWidth: 0, backgroundColor: '#FFFFFF', height: 23 }}>
+                    <TextInput
+                      style={{ flex: 1, paddingHorizontal: 4, paddingVertical: 1, fontSize: 10.5, color: '#3B2D17' }}
+                      value={currentDetail.InventoryDescription}
+                      onChangeText={(t) => updateDetail('InventoryDescription', t)}
+                    />
+                  </View>
+                  <View style={{ width: 120, borderWidth: 1, borderColor: '#D8CDBA', borderTopWidth: 0, borderLeftWidth: 0, backgroundColor: '#FFFFFF', height: 23 }}>
+                    <TextInput
+                      style={{ flex: 1, paddingHorizontal: 4, paddingVertical: 1, fontSize: 10.5, color: '#3B2D17', textAlign: 'right' }}
+                      value={currentDetail.Weight}
+                      onChangeText={(t) => updateDetail('Weight', t)}
+                      onBlur={handleWeightOnBlur}
+                      keyboardType="numeric"
+                    />
+                  </View>
+                  <View style={{ width: 120, borderWidth: 1, borderColor: '#D8CDBA', borderTopWidth: 0, borderLeftWidth: 0, flexDirection: 'row', backgroundColor: '#FFFFFF', height: 23 }}>
+                    <TextInput
+                      style={{ width: 96, paddingHorizontal: 4, paddingVertical: 1, fontSize: 10.5, color: '#3B2D17', textAlign: 'right' }}
+                      value={currentDetail.Size}
+                      onChangeText={(t) => updateDetail('Size', t)}
+                      onBlur={() => validateSizeOnBlur(currentDetail.Size)}
+                      keyboardType="numeric"
+                    />
+                    <TouchableOpacity
+                      style={{ width: 22, backgroundColor: '#FAF5EA', borderLeftWidth: 1, borderColor: '#D8CDBA', justifyContent: 'center', alignItems: 'center', flexShrink: 0 }}
+                      onPress={fetchSizes}
+                    >
+                      <ThemedText style={{ color: '#6E5528', fontWeight: 'bold', fontSize: 9.5 }}>...</ThemedText>
+                    </TouchableOpacity>
+                  </View>
+                  <View style={{ width: 80, borderWidth: 1, borderColor: '#D8CDBA', borderTopWidth: 0, borderLeftWidth: 0, backgroundColor: '#FFFFFF', height: 23 }}>
+                    <TextInput
+                      style={{ flex: 1, paddingHorizontal: 4, paddingVertical: 1, fontSize: 10.5, color: '#3B2D17', textAlign: 'right' }}
+                      value={currentDetail.GoldLoss}
+                      onChangeText={(t) => updateDetail('GoldLoss', t)}
+                      onBlur={() => {
+                        const val = parseFloat(currentDetail.GoldLoss);
+                        if (!isNaN(val)) updateDetail('GoldLoss', val.toFixed(2));
+                      }}
+                      keyboardType="numeric"
+                    />
+                  </View>
+                  <View style={{ width: 100, borderWidth: 1, borderColor: '#D8CDBA', borderTopWidth: 0, borderLeftWidth: 0, backgroundColor: '#FFFFFF', height: 23 }}>
+                    <TextInput
+                      style={{ flex: 1, paddingHorizontal: 4, paddingVertical: 1, fontSize: 10.5, color: '#3B2D17', textAlign: 'right' }}
+                      value={currentDetail.CostPerGram}
+                      onChangeText={(t) => updateDetail('CostPerGram', t)}
+                      onBlur={() => {
+                        const val = parseFloat(currentDetail.CostPerGram);
+                        if (!isNaN(val)) updateDetail('CostPerGram', val.toFixed(2));
+                      }}
+                      keyboardType="numeric"
+                    />
+                  </View>
+                  <View style={{ width: 90, borderWidth: 1, borderColor: '#D8CDBA', borderTopWidth: 0, borderLeftWidth: 0, backgroundColor: '#FFFFFF', height: 23 }}>
+                    <TextInput
+                      style={{ flex: 1, paddingHorizontal: 4, paddingVertical: 1, fontSize: 10.5, color: '#3B2D17', textAlign: 'right' }}
+                      value={currentDetail.PMC}
+                      onChangeText={(t) => updateDetail('PMC', t)}
+                      onBlur={() => {
+                        const val = parseFloat(currentDetail.PMC);
+                        if (currentDetail.PMC !== '' && !isNaN(val) && val < 0) {
+                          showToast("Invalid Purchase MC!", "error");
+                          updateDetail('PMC', '0.00');
+                          return;
+                        }
+                        const formattedPMC = !isNaN(val) && val >= 0 ? val.toFixed(2) : '0.00';
+                        if (autoSMC) {
+                          const calculatedSMC = (parseFloat(formattedPMC) * 4).toFixed(2);
+                          setCurrentDetail((prev: any) => ({
+                            ...prev,
+                            PMC: formattedPMC,
+                            SMC: calculatedSMC
+                          }));
+                        } else {
+                          updateDetail('PMC', formattedPMC);
+                        }
+                      }}
+                      keyboardType="numeric"
+                      editable={!isFormLocked}
+                    />
+                  </View>
+                  <View style={{ width: 140, borderWidth: 1, borderColor: '#D8CDBA', borderTopWidth: 0, borderLeftWidth: 0, backgroundColor: autoSMC ? '#F8F5EE' : '#FFFFFF', height: 23 }}>
+                    <TextInput
+                      style={{ flex: 1, paddingHorizontal: 4, paddingVertical: 1, fontSize: 10.5, color: autoSMC ? '#888' : '#3B2D17', textAlign: 'right' }}
+                      value={currentDetail.SMC}
+                      onChangeText={(t) => updateDetail('SMC', t)}
+                      onBlur={() => {
+                        const val = parseFloat(currentDetail.SMC);
+                        if (currentDetail.SMC !== '' && !isNaN(val) && val < 0) {
+                          showToast("Invalid Sales MC!", "error");
+                          updateDetail('SMC', '0.00');
+                          return;
+                        }
+                        if (!isNaN(val) && val >= 0) {
+                          updateDetail('SMC', val.toFixed(2));
+                        }
+                      }}
+                      keyboardType="numeric"
+                      editable={!isFormLocked && !autoSMC}
+                    />
+                  </View>
+                  <View style={{ width: 60, borderWidth: 1, borderColor: '#D8CDBA', borderTopWidth: 0, borderLeftWidth: 0, backgroundColor: '#FFFFFF', height: 23 }}>
+                    <TextInput
+                      style={{ flex: 1, paddingHorizontal: 4, paddingVertical: 1, fontSize: 10.5, color: '#3B2D17', textAlign: 'right' }}
+                      value={currentDetail.PCS}
+                      onChangeText={(t) => updateDetail('PCS', t)}
+                      onBlur={() => {
+                        const val = parseInt(currentDetail.PCS, 10);
+                        updateDetail('PCS', (!isNaN(val) && val > 0 ? val : 1).toString());
+                      }}
+                      keyboardType="numeric"
+                      editable={!isFormLocked}
+                    />
+                  </View>
+                  <View style={{ width: 180, borderWidth: 1, borderColor: '#D8CDBA', borderTopWidth: 0, borderLeftWidth: 0, backgroundColor: '#F8F5EE', height: 23 }}>
+                    <TextInput
+                      style={{ flex: 1, paddingHorizontal: 4, paddingVertical: 1, fontSize: 10.5, color: '#3B2D17', textAlign: 'right', fontWeight: 'bold' }}
+                      value={currentDetail.TotalCost}
+                      editable={false}
+                    />
+                  </View>
+                </View>
 
+                {/* ROW 5: Headers (Diamond Description & Stone Weight) */}
+                <View style={{ flexDirection: 'row' }}>
+                  <View style={{ width: 310, backgroundColor: '#F5E7CA', borderWidth: 1, borderColor: '#D8CDBA', borderTopWidth: 0, justifyContent: 'center', paddingVertical: 1 }}>
+                    <ThemedText style={{ color: '#3B2D17', fontSize: 10.5, fontWeight: 'bold', textAlign: 'center' }}>Diamond Description</ThemedText>
+                  </View>
+                  <View style={{ width: 120, backgroundColor: '#F5E7CA', borderWidth: 1, borderColor: '#D8CDBA', borderTopWidth: 0, borderLeftWidth: 0, justifyContent: 'center', paddingVertical: 1 }}>
+                    <ThemedText style={{ color: '#3B2D17', fontSize: 10.5, fontWeight: 'bold', textAlign: 'center' }}>Stone Weight</ThemedText>
+                  </View>
+                </View>
+
+                {/* ROW 6: Inputs */}
+                <View style={{ flexDirection: 'row', marginBottom: 2 }}>
+                  <View style={{ width: 310, borderWidth: 1, borderColor: '#D8CDBA', borderTopWidth: 0, backgroundColor: '#FFFFFF', height: 23 }}>
+                    <TextInput
+                      style={{ flex: 1, paddingHorizontal: 4, paddingVertical: 1, fontSize: 10.5, color: '#3B2D17' }}
+                      value={currentDetail.DiamondDescription}
+                      onChangeText={(t) => updateDetail('DiamondDescription', t)}
+                    />
+                  </View>
+                  <View style={{ width: 120, borderWidth: 1, borderColor: '#D8CDBA', borderTopWidth: 0, borderLeftWidth: 0, backgroundColor: '#FFFFFF', height: 23 }}>
+                    <TextInput
+                      style={{ flex: 1, paddingHorizontal: 4, paddingVertical: 1, fontSize: 10.5, color: '#3B2D17', textAlign: 'right' }}
+                      value={currentDetail.StoneWeight}
+                      onChangeText={(t) => updateDetail('StoneWeight', t)}
+                      onBlur={() => {
+                        const val = parseFloat(currentDetail.StoneWeight);
+                        if (!isNaN(val)) {
+                          const wt = parseFloat(currentDetail.Weight) || 0;
+                          if (wt > 0 && val >= wt) {
+                            showToast("Stone weight cannot exceed total weight!", "error");
+                          }
+                          updateDetail('StoneWeight', val.toFixed(2));
+                        }
+                      }}
+                      keyboardType="numeric"
+                    />
+                  </View>
+                </View>
+              </View>
+            </ScrollView>
+
+            {/* IPM Section (from purchase.txt gbIPM) */}
+            {currentDetail.IPM && (
+              <View style={styles.ipmBox}>
+                <ThemedText style={{ fontSize: 11, fontWeight: 'bold', color: '#B48218', marginBottom: 6 }}>
+                  IPM Details (Investment Precious Metals)
+                </ThemedText>
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                    <ThemedText style={styles.ipmLabel}>Type:</ThemedText>
+                    <TextInput
+                      style={[styles.input, { width: 70 }]}
+                      value={currentDetail.IPMType}
+                      onChangeText={(t) => updateDetail('IPMType', t)}
+                      placeholder="Coin/Bar"
+                    />
+                  </View>
+
+                  <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                    <ThemedText style={styles.ipmLabel}>Bar No:</ThemedText>
+                    <TextInput
+                      style={[styles.input, { width: 90 }]}
+                      value={currentDetail.IPMBarNo}
+                      onChangeText={(t) => updateDetail('IPMBarNo', t)}
+                    />
+                  </View>
+
+                  <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                    <ThemedText style={styles.ipmLabel}>Purity:</ThemedText>
+                    <TextInput
+                      style={[styles.input, { width: 70 }]}
+                      value={currentDetail.IPMPurity}
+                      onChangeText={(t) => updateDetail('IPMPurity', t)}
+                      placeholder="999.9"
+                    />
+                  </View>
+
+                  <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                    <ThemedText style={styles.ipmLabel}>GST Type:</ThemedText>
+                    <TextInput
+                      style={[styles.input, { width: 70 }]}
+                      value={currentDetail.IPMGSTType}
+                      onChangeText={(t) => updateDetail('IPMGSTType', t)}
+                    />
+                  </View>
+
+                  <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                    <ThemedText style={styles.ipmLabel}>Refiner:</ThemedText>
+                    <View style={{ flexDirection: 'row' }}>
+                      <TextInput
+                        style={[styles.input, { width: 80, borderTopRightRadius: 0, borderBottomRightRadius: 0 }]}
+                        value={currentDetail.IPMRefiner}
+                        onChangeText={(t) => updateDetail('IPMRefiner', t)}
+                      />
+                      <TouchableOpacity style={[styles.lookupBtn, { width: 22, height: 28 }]} onPress={fetchRefiners}>
+                        <ThemedText style={{ fontSize: 10 }}>...</ThemedText>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+
+                  <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                    <ThemedText style={styles.ipmLabel}>Country:</ThemedText>
+                    <View style={{ flexDirection: 'row' }}>
+                      <TextInput
+                        style={[styles.input, { width: 80, borderTopRightRadius: 0, borderBottomRightRadius: 0 }]}
+                        value={currentDetail.IPMCountry}
+                        onChangeText={(t) => updateDetail('IPMCountry', t)}
+                      />
+                      <TouchableOpacity style={[styles.lookupBtn, { width: 22, height: 28 }]} onPress={fetchCountries}>
+                        <ThemedText style={{ fontSize: 10 }}>...</ThemedText>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                </View>
+              </View>
+            )}
+
+            {/* Bottom Options & Actions */}
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 4 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                <Checkbox
+                  label="IPM"
+                  selected={currentDetail.IPM}
+                  onPress={() => updateDetail('IPM', !currentDetail.IPM)}
+                />
+                <Checkbox
+                  label="Addl. Desc"
+                  selected={currentDetail.AddlDesc}
+                  onPress={() => {
+                    const nextVal = !currentDetail.AddlDesc;
+                    updateDetail('AddlDesc', nextVal);
+                    if (nextVal) setAddlDescModalVisible(true);
+                  }}
+                />
+                {currentDetail.AddlDesc && (
                   <TouchableOpacity
-                    style={[
-                      styles.actionBtn,
-                      { backgroundColor: cardColor, borderColor: '#aaa' },
-                      isFormLocked && { opacity: 0.5 }
-                    ]}
-                    onPress={() => {
-                      setSelectedIndex(null);
-                      clearCurrentDetail();
+                    style={[styles.actionBtn, { backgroundColor: '#FDF7EB', borderColor: '#B8903B', paddingVertical: 2, paddingHorizontal: 8 }]}
+                    onPress={() => setAddlDescModalVisible(true)}
+                  >
+                    <ThemedText style={{ color: '#9E6D08', fontSize: 10, fontWeight: 'bold' }}>Edit Addl Desc</ThemedText>
+                  </TouchableOpacity>
+                )}
+                <Checkbox
+                  label="Image"
+                  selected={imageModalVisible}
+                  onPress={() => setImageModalVisible(!imageModalVisible)}
+                />
+              </View>
+
+              <View style={{ flexDirection: 'row', gap: 6, alignItems: 'center' }}>
+                <TouchableOpacity
+                  style={[
+                    styles.actionBtn,
+                    {
+                      backgroundColor: isAutoManual ? '#FFEBEE' : '#FFFFFF',
+                      borderColor: isAutoManual ? '#C62828' : '#2E7D32',
+                      borderWidth: 1.5,
+                    }
+                  ]}
+                  onPress={() => setIsAutoManual(!isAutoManual)}
+                >
+                  <ThemedText
+                    style={{
+                      color: isAutoManual ? '#C62828' : '#2E7D32',
+                      fontWeight: 'bold',
+                      fontSize: 10.5,
+                      textAlign: 'center',
                     }}
-                    disabled={isFormLocked}
                   >
-                    <ThemedText style={{ color: textColor, fontWeight: 'bold', textAlign: 'center' }}>Clear</ThemedText>
-                  </TouchableOpacity>
+                    {isAutoManual ? 'AUTO (F10)' : 'MANUAL (F10)'}
+                  </ThemedText>
+                </TouchableOpacity>
 
-                  <TouchableOpacity
-                    style={[
-                      styles.actionBtn,
-                      { backgroundColor: '#FFEBEE', borderColor: '#E57373' },
-                      (isFormLocked || selectedIndex === null) && { opacity: 0.5 }
-                    ]}
-                    onPress={deleteSelectedDetail}
-                    disabled={isFormLocked || selectedIndex === null}
-                  >
-                    <ThemedText style={{ color: '#C62828', fontWeight: 'bold', textAlign: 'center' }}>Delete</ThemedText>
-                  </TouchableOpacity>
+                <TouchableOpacity
+                  style={[
+                    styles.actionBtn,
+                    { backgroundColor: '#F9F2E2', borderColor: '#cc9900' },
+                    isFormLocked && { opacity: 0.5 }
+                  ]}
+                  onPress={addDetail}
+                  disabled={isFormLocked}
+                >
+                  <ThemedText style={{ color: '#9E6D08', fontWeight: 'bold', fontSize: 11, textAlign: 'center' }}>
+                    {selectedIndex !== null ? 'Update' : 'Add'}
+                  </ThemedText>
+                </TouchableOpacity>
 
-                  <TouchableOpacity
-                    style={[styles.actionBtn, { backgroundColor: '#EDE7F6', borderColor: '#9575CD' }]}
-                    onPress={() => navigateToBarcode()}
-                  >
-                    <ThemedText style={{ color: '#512DA8', fontWeight: 'bold', textAlign: 'center' }}>BarCode</ThemedText>
-                  </TouchableOpacity>
-                </View>
+                <TouchableOpacity
+                  style={[
+                    styles.actionBtn,
+                    { backgroundColor: cardColor, borderColor: '#aaa' },
+                    isFormLocked && { opacity: 0.5 }
+                  ]}
+                  onPress={() => {
+                    setSelectedIndex(null);
+                    clearCurrentDetail();
+                  }}
+                  disabled={isFormLocked}
+                >
+                  <ThemedText style={{ color: textColor, fontWeight: 'bold', fontSize: 11, textAlign: 'center' }}>Clear</ThemedText>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[
+                    styles.actionBtn,
+                    { backgroundColor: '#FFEBEE', borderColor: '#E57373' },
+                    (isFormLocked || selectedIndex === null) && { opacity: 0.5 }
+                  ]}
+                  onPress={deleteSelectedDetail}
+                  disabled={isFormLocked || selectedIndex === null}
+                >
+                  <ThemedText style={{ color: '#C62828', fontWeight: 'bold', fontSize: 11, textAlign: 'center' }}>Delete</ThemedText>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[styles.actionBtn, { backgroundColor: '#F5E7CA', borderColor: '#B8903B' }]}
+                  onPress={() => navigateToBarcode()}
+                >
+                  <ThemedText style={{ color: '#8D6007', fontWeight: 'bold', fontSize: 11, textAlign: 'center' }}>BarCode</ThemedText>
+                </TouchableOpacity>
               </View>
             </View>
           </View>
         </View>
-      </Modal>
+      </ScrollView>
 
       {/* ================= ADDITIONAL DESCRIPTION MODAL (grpAddlDescription in purchase.txt) ================= */}
       <Modal visible={addlDescModalVisible} transparent={true} animationType="fade">
@@ -2766,8 +2704,8 @@ export default function PurchaseScreen() {
         </View>
       )}
 
-      {/* Toast Notification (screen-level, shown when modal is not visible) */}
-      {toast.visible && !detailModalVisible && (
+      {/* Toast Notification */}
+      {toast.visible && (
         <View
           style={[
             styles.toastContainer,
@@ -2790,20 +2728,20 @@ export default function PurchaseScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, paddingVertical: 12, paddingHorizontal: 16 },
-  contentContainer: { paddingBottom: 32 },
+  container: { flex: 1, paddingVertical: 6, paddingHorizontal: 12 },
+  contentContainer: { paddingBottom: 20 },
 
   // Luxury Gold Card Styling
   goldCard: {
     backgroundColor: '#FFFFFF',
-    borderRadius: 8,
+    borderRadius: 6,
     borderWidth: 1,
     borderColor: '#E8DCB8',
     overflow: 'hidden',
     shadowColor: '#A38035',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08,
-    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.06,
+    shadowRadius: 4,
     elevation: 2,
   },
   cardHeaderBanner: {
@@ -2812,22 +2750,22 @@ const styles = StyleSheet.create({
     backgroundColor: '#F5E7CA',
     borderBottomWidth: 1,
     borderBottomColor: '#E2D3B3',
-    paddingVertical: 7,
-    paddingHorizontal: 12,
+    paddingVertical: 4,
+    paddingHorizontal: 8,
   },
   headerIconBadge: {
-    width: 24,
-    height: 24,
-    borderRadius: 5,
+    width: 20,
+    height: 20,
+    borderRadius: 4,
     backgroundColor: '#FFF8EA',
     borderWidth: 1,
     borderColor: '#E2D2AF',
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 8,
+    marginRight: 6,
   },
   cardHeaderTitle: {
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: 'bold',
     color: '#3B2D17',
     letterSpacing: 0.3,
@@ -2835,21 +2773,21 @@ const styles = StyleSheet.create({
   closedBadge: {
     marginLeft: 12,
     backgroundColor: '#C62828',
-    paddingHorizontal: 8,
-    paddingVertical: 2,
+    paddingHorizontal: 6,
+    paddingVertical: 1,
     borderRadius: 4,
   },
   closedBadgeText: {
     color: '#FFFFFF',
-    fontSize: 10,
+    fontSize: 9,
     fontWeight: 'bold',
   },
   cardBody: {
-    padding: 10,
+    padding: 6,
   },
 
   // Rows and Labels
-  row: { flexDirection: 'row', alignItems: 'center', marginBottom: 7, flexWrap: 'wrap' },
+  row: { flexDirection: 'row', alignItems: 'center', marginBottom: 4, flexWrap: 'wrap' },
   label: { fontSize: 11, fontWeight: 'bold', width: 96, marginRight: 6, color: '#3A2E19' },
   labelRight: { fontSize: 11, fontWeight: 'bold', textAlign: 'right', marginRight: 8, color: '#3A2E19' },
 
@@ -2857,11 +2795,11 @@ const styles = StyleSheet.create({
   input: {
     borderWidth: 1,
     borderColor: '#E2D7C5',
-    borderRadius: 6,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    fontSize: 12,
-    height: 28,
+    borderRadius: 5,
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+    fontSize: 11.5,
+    height: 25,
     backgroundColor: '#FFFFFF',
     color: '#2C2519',
   },
@@ -2871,21 +2809,21 @@ const styles = StyleSheet.create({
     color: '#554736',
   },
   lookupBtn: {
-    width: 32,
-    height: 28,
+    width: 28,
+    height: 25,
     borderWidth: 1,
     borderColor: '#E2D7C5',
     borderLeftWidth: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    borderTopRightRadius: 6,
-    borderBottomRightRadius: 6,
+    borderTopRightRadius: 5,
+    borderBottomRightRadius: 5,
     backgroundColor: '#FAF5EA',
   },
   lookupBtnText: {
     color: '#6E5528',
     fontWeight: 'bold',
-    fontSize: 12,
+    fontSize: 11.5,
   },
 
   // Pill Box
@@ -2895,36 +2833,36 @@ const styles = StyleSheet.create({
     marginLeft: 8,
     borderWidth: 1,
     borderColor: '#DFD3BC',
-    borderRadius: 14,
-    paddingHorizontal: 6,
+    borderRadius: 12,
+    paddingHorizontal: 5,
     paddingVertical: 1,
-    height: 26,
+    height: 23,
     backgroundColor: '#FBF8F2',
   },
 
   // Checkboxes & Radios
-  radioContainer: { flexDirection: 'row', alignItems: 'center', marginRight: 10 },
+  radioContainer: { flexDirection: 'row', alignItems: 'center', marginRight: 8 },
   checkboxSquare: {
-    width: 15,
-    height: 15,
+    width: 14,
+    height: 14,
     borderWidth: 1.5,
     borderColor: '#B8903B',
     borderRadius: 3,
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 5,
+    marginRight: 4,
   },
-  radioLabel: { fontSize: 11, color: '#362B1A', fontWeight: '500' },
+  radioLabel: { fontSize: 10.5, color: '#362B1A', fontWeight: '500' },
 
   // Top Action Buttons
   topActionBtn: {
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    borderRadius: 5,
+    paddingVertical: 4,
+    paddingHorizontal: 10,
+    borderRadius: 4,
     borderWidth: 1,
     borderColor: '#DFD5C3',
     backgroundColor: '#FFFFFF',
-    marginHorizontal: 4,
+    marginHorizontal: 3,
   },
 
   // Table Styling
@@ -2932,32 +2870,32 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#9E6D08',
-    paddingVertical: 4,
-    paddingHorizontal: 12,
-    borderRadius: 5,
+    paddingVertical: 2,
+    paddingHorizontal: 8,
+    borderRadius: 4,
   },
   addLineBtnText: {
     color: '#FFFFFF',
     fontWeight: 'bold',
-    fontSize: 11,
+    fontSize: 10,
   },
   tableHeader: {
     flexDirection: 'row',
     backgroundColor: '#F5E7CA',
     borderBottomWidth: 1,
     borderBottomColor: '#E2D3B3',
-    paddingVertical: 7,
+    paddingVertical: 3,
     paddingHorizontal: 6,
   },
   tableHeaderText: {
-    fontSize: 11,
+    fontSize: 10.5,
     fontWeight: 'bold',
     color: '#3B2D17',
     paddingHorizontal: 4,
   },
   tableRow: {
     flexDirection: 'row',
-    paddingVertical: 6,
+    height: 22,
     paddingHorizontal: 6,
     borderBottomWidth: 1,
     borderBottomColor: '#F0E6D2',
@@ -2969,7 +2907,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 4,
   },
   emptyTableState: {
-    paddingVertical: 30,
+    paddingVertical: 12,
     justifyContent: 'center',
     alignItems: 'center',
     backgroundColor: '#FFFFFF',
@@ -2979,12 +2917,12 @@ const styles = StyleSheet.create({
     backgroundColor: '#F9F1DF',
     borderTopWidth: 1,
     borderTopColor: '#E5D6B6',
-    paddingVertical: 7,
+    paddingVertical: 1,
     paddingHorizontal: 6,
     alignItems: 'center',
   },
   tableTotalCellText: {
-    fontSize: 11,
+    fontSize: 10.5,
     fontWeight: 'bold',
     color: '#32230D',
     paddingHorizontal: 4,
@@ -2996,20 +2934,20 @@ const styles = StyleSheet.create({
     borderColor: '#E8DCB8',
     backgroundColor: '#FCF9F2',
     borderRadius: 6,
-    padding: 8,
-    marginTop: 6,
+    padding: 6,
+    marginTop: 4,
     marginBottom: 4,
   },
   ipmLabel: {
-    fontSize: 10,
+    fontSize: 9.5,
     fontWeight: 'bold',
     color: '#4A3B25',
     marginRight: 4,
   },
 
   // Modal & Generic Action Buttons
-  section: { borderRadius: 4, borderWidth: 1, padding: 8 },
-  actionBtn: { paddingVertical: 5, paddingHorizontal: 12, borderRadius: 4, borderWidth: 1, minWidth: 70, justifyContent: 'center', alignItems: 'center' },
+  section: { borderRadius: 4, borderWidth: 1, padding: 6 },
+  actionBtn: { paddingVertical: 2, paddingHorizontal: 8, borderRadius: 4, borderWidth: 1, minWidth: 56, justifyContent: 'center', alignItems: 'center' },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center' },
   modalContainer: { width: '80%', borderRadius: 8, padding: 16, borderWidth: 1 },
   modalTitle: { fontSize: 16, fontWeight: 'bold', marginBottom: 12 },

@@ -798,8 +798,6 @@ export default function DirectPurchaseScreen() {
   const [addlDescModalVisible, setAddlDescModalVisible] = useState(false);
   // Image preview modal
   const [imageModalVisible, setImageModalVisible] = useState(false);
-  // Line Detail Entry Modal
-  const [detailModalVisible, setDetailModalVisible] = useState(false);
 
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -1727,17 +1725,20 @@ export default function DirectPurchaseScreen() {
       showToast('Line item added successfully');
     }
 
-    setCurrentDetail({
-      ...getInitialDetailState(),
-      CostPerGram: headerState.CostPerGram || '',
-    });
-    setDetailModalVisible(false);
+    // 1. After Successful Line Addition: Clear only the Weight field, keep all other fields unchanged.
+    setCurrentDetail((prev: any) => ({
+      ...prev,
+      Weight: '',
+      NetWeight: '',
+      TotalCost: '0.00',
+      PMCCost: '0.00',
+      SMCCost: '0.00',
+    }));
   };
 
   const handleEditDetail = (index: number) => {
     setSelectedIndex(index);
     setCurrentDetail({ ...details[index] });
-    setDetailModalVisible(true);
   };
 
   const handleDeleteDetail = async () => {
@@ -1805,6 +1806,10 @@ export default function DirectPurchaseScreen() {
   const handleClearDetail = () => {
     setSelectedIndex(null);
     setCurrentDetail(getInitialDetailState());
+    setAutoSMC(false);
+    setSalesPCS(false);
+    setImageModalVisible(false);
+    setAddlDescModalVisible(false);
   };
 
   const handleClearForm = () => {
@@ -1926,7 +1931,6 @@ export default function DirectPurchaseScreen() {
               setHeaderState((prev: any) => ({ ...prev, BillClose: 'Y' }));
               setCurrentDetail(getInitialDetailState());
               setSelectedIndex(null);
-              setDetailModalVisible(false);
               showToast('Purchase bill closed!', 'success');
             } else {
               const msg = res.message || 'Failed to close bill';
@@ -1946,122 +1950,86 @@ export default function DirectPurchaseScreen() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: '#FBF9F5' }}>
-      <Stack.Screen
-        options={{
-          headerTitle: 'Direct Purchase',
-          headerStyle: { backgroundColor: '#FFFFFF' },
-          headerTintColor: '#3B2D17',
-          headerShadowVisible: false,
-          headerRight: () => (
-            <View style={{ flexDirection: 'row', alignItems: 'center', paddingRight: 8 }}>
-              {/* Auto / Manual Mode Pill Button */}
-              {/* <TouchableOpacity
-                style={[
-                  styles.topActionBtn,
-                  {
-                    backgroundColor: isManual ? '#FDE8E8' : '#E8F5E9',
-                    borderColor: isManual ? '#D32F2F' : '#388E3C'
-                  }
-                ]}
-                onPress={() => {
-                  setIsManual(!isManual);
-                  showToast(isManual ? 'Switched to AUTO mode' : 'Switched to MANUAL mode', 'info');
-                }}
-              >
-                <ThemedText
-                  style={{
-                    color: isManual ? '#C62828' : '#2E7D32',
-                    fontWeight: 'bold',
-                    fontSize: 11
-                  }}
-                >
-                  {isManual ? 'MANUAL' : 'AUTO'}
-                </ThemedText>
-              </TouchableOpacity> */}
+      <Stack.Screen options={{ headerShown: false }} />
+      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 14, paddingVertical: 5, backgroundColor: '#FFFFFF', borderBottomWidth: 1, borderBottomColor: '#EBE2D2' }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+          <TouchableOpacity style={{ padding: 2, marginRight: 8 }} onPress={() => router.back()}>
+            <Ionicons name="arrow-back" size={20} color="#3B2D17" />
+          </TouchableOpacity>
+          <ThemedText style={{ fontSize: 16, fontWeight: '500', color: '#3B2D17', letterSpacing: 0.3 }}>Direct Purchase</ThemedText>
+        </View>
 
-              {/* Bill Close Button (F7) */}
-              <TouchableOpacity
-                style={[
-                  styles.topActionBtn,
-                  {
-                    backgroundColor: headerState.BillClose === 'Y' ? '#E0E0E0' : '#FBE9E7',
-                    borderColor: '#FF7043'
-                  }
-                ]}
-                onPress={handleBillClose}
-                disabled={headerState.BillClose === 'Y'}
-              >
-                <ThemedText style={{ color: '#D84315', fontWeight: 'bold', fontSize: 11 }}>
-                  {headerState.BillClose === 'Y' ? 'Closed' : 'BillClose'}
-                </ThemedText>
-              </TouchableOpacity>
+        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+          {/* Bill Close Button (F7) */}
+          <TouchableOpacity
+            style={[
+              styles.topActionBtn,
+              {
+                backgroundColor: headerState.BillClose === 'Y' ? '#E0E0E0' : '#FBE9E7',
+                borderColor: '#FF7043',
+                paddingVertical: 3,
+                paddingHorizontal: 8,
+              }
+            ]}
+            onPress={handleBillClose}
+            disabled={headerState.BillClose === 'Y'}
+          >
+            <ThemedText style={{ color: '#D84315', fontWeight: 'bold', fontSize: 10.5 }}>
+              {headerState.BillClose === 'Y' ? 'Closed' : 'BillClose'}
+            </ThemedText>
+          </TouchableOpacity>
 
-              {/* Bill Clear Button (Clears entire bill and unlocks header) */}
-              <TouchableOpacity style={styles.topActionBtn} onPress={handleClearForm}>
-                <ThemedText style={{ color: '#5C4A28', fontWeight: 'bold', fontSize: 11 }}>Clear</ThemedText>
-              </TouchableOpacity>
+          {/* Bill Clear Button */}
+          <TouchableOpacity
+            style={[styles.topActionBtn, { paddingVertical: 3, paddingHorizontal: 8 }]}
+            onPress={handleClearForm}
+          >
+            <ThemedText style={{ color: '#5C4A28', fontWeight: 'bold', fontSize: 10.5 }}>Clear</ThemedText>
+          </TouchableOpacity>
 
+          {/* Print Button */}
+          <TouchableOpacity
+            style={[
+              styles.topActionBtn,
+              { backgroundColor: '#FFF8E1', borderColor: '#FFA000', flexDirection: 'row', alignItems: 'center', gap: 4, paddingVertical: 3, paddingHorizontal: 8 }
+            ]}
+            onPress={handlePrintReport}
+            disabled={reportLoading}
+          >
+            {reportLoading ? (
+              <ActivityIndicator size="small" color="#B8860B" />
+            ) : (
+              <>
+                <Ionicons name="print-outline" size={12} color="#8D6E63" />
+                <ThemedText style={{ color: '#8D6E63', fontWeight: 'bold', fontSize: 10.5 }}>Print</ThemedText>
+              </>
+            )}
+          </TouchableOpacity>
 
-
-              {/* Print Button */}
-              <TouchableOpacity
-                style={[
-                  styles.topActionBtn,
-                  { backgroundColor: '#FFF8E1', borderColor: '#FFA000', flexDirection: 'row', alignItems: 'center', gap: 4 }
-                ]}
-                onPress={handlePrintReport}
-                disabled={reportLoading}
-              >
-                {reportLoading ? (
-                  <ActivityIndicator size="small" color="#B8860B" />
-                ) : (
-                  <>
-                    <Ionicons name="print-outline" size={13} color="#8D6E63" />
-                    <ThemedText style={{ color: '#8D6E63', fontWeight: 'bold', fontSize: 11 }}>Print</ThemedText>
-                  </>
-                )}
-              </TouchableOpacity>
-
-
-
-              {/* Save Button (F8) */}
-              <TouchableOpacity
-                style={[
-                  styles.topActionBtn,
-                  { backgroundColor: '#F9F2E2', borderColor: '#B8903B' }
-                ]}
-                onPress={handleSavePurchase}
-                disabled={saving || isFormLocked}
-              >
-                {saving ? (
-                  <ActivityIndicator size="small" color="#9E6D08" />
-                ) : (
-                  <ThemedText style={{ color: '#9E6D08', fontWeight: 'bold', fontSize: 11 }}>Save</ThemedText>
-                )}
-              </TouchableOpacity>
-            </View>
-          ),
-        }}
-      />
+          {/* Save Button (F8) */}
+          <TouchableOpacity
+            style={[
+              styles.topActionBtn,
+              { backgroundColor: '#F9F2E2', borderColor: '#B8903B', paddingVertical: 3, paddingHorizontal: 8 }
+            ]}
+            onPress={handleSavePurchase}
+            disabled={saving || isFormLocked}
+          >
+            {saving ? (
+              <ActivityIndicator size="small" color="#9E6D08" />
+            ) : (
+              <ThemedText style={{ color: '#9E6D08', fontWeight: 'bold', fontSize: 10.5 }}>Save</ThemedText>
+            )}
+          </TouchableOpacity>
+        </View>
+      </View>
 
       <ScrollView style={styles.container} contentContainerStyle={styles.contentContainer}>
         {/* ================= TOP SECTION: JOBSHEET DETAILS & SUMMARY ================= */}
-        <ScrollView horizontal={true} showsHorizontalScrollIndicator={true} style={{ marginBottom: 14 }} contentContainerStyle={{ width: '100%' }}>
+        <ScrollView horizontal={true} showsHorizontalScrollIndicator={true} style={{ marginBottom: 6 }} contentContainerStyle={{ width: '100%' }}>
           <View style={{ flexDirection: 'row', width: '100%', minWidth: 1120 }}>
             {/* LEFT: JOB SHEET DETAILS */}
-            <View style={[styles.goldCard, { flex: 7, minWidth: 740, marginRight: 14 }]}>
-              <View style={styles.cardHeaderBanner}>
-                <View style={styles.headerIconBadge}>
-                  <Ionicons name="document-text" size={15} color="#B48218" />
-                </View>
-                <ThemedText style={styles.cardHeaderTitle}>Direct Purchase JobSheet Details</ThemedText>
-                {isFormLocked && (
-                  <View style={styles.closedBadge}>
-                    <ThemedText style={styles.closedBadgeText}>CLOSED</ThemedText>
-                  </View>
-                )}
-              </View>
-
+            <View style={[styles.goldCard, { flex: 7, minWidth: 740, marginRight: 6 }]}>
               <View style={styles.cardBody}>
                 {/* Row 1: JobSheet No, Invoice No, Invoice Date */}
                 <View style={styles.row}>
@@ -2352,13 +2320,6 @@ export default function DirectPurchaseScreen() {
 
             {/* RIGHT: SUMMARY CARD (matching purchase.tsx goldCard right summary) */}
             <View style={[styles.goldCard, { flex: 3.4, minWidth: 350 }]}>
-              <View style={styles.cardHeaderBanner}>
-                <View style={styles.headerIconBadge}>
-                  <Ionicons name="calculator-outline" size={15} color="#B48218" />
-                </View>
-                <ThemedText style={styles.cardHeaderTitle}>Purchase Summary</ThemedText>
-              </View>
-
               <View style={[styles.cardBody, { justifyContent: 'space-around', flex: 1 }]}>
                 <View style={styles.row}>
                   <ThemedText style={[styles.label, { width: 90 }]}>Total Cost</ThemedText>
@@ -2427,56 +2388,7 @@ export default function DirectPurchaseScreen() {
         </ScrollView>
 
         {/* ================= MIDDLE SECTION: DATA GRID (grdPurchase) ================= */}
-        <View style={[styles.goldCard, { marginBottom: 14 }]}>
-          <View style={[styles.cardHeaderBanner, { justifyContent: 'space-between' }]}>
-            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-              <View style={styles.headerIconBadge}>
-                <Ionicons name="list" size={15} color="#B48218" />
-              </View>
-              <ThemedText style={styles.cardHeaderTitle}>Line Details</ThemedText>
-            </View>
-
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-              {selectedIndex !== null && (
-                <TouchableOpacity
-                  style={[styles.addLineBtn, { backgroundColor: '#8E24AA' }]}
-                  onPress={() => router.push('/barcode' as any)}
-                >
-                  <Ionicons name="barcode-outline" size={14} color="#FFF" style={{ marginRight: 4 }} />
-                  <ThemedText style={styles.addLineBtnText}>BarCode</ThemedText>
-                </TouchableOpacity>
-              )}
-              {selectedIndex !== null && (
-                <TouchableOpacity
-                  style={[styles.addLineBtn, { backgroundColor: '#C62828' }]}
-                  onPress={handleDeleteDetail}
-                >
-                  <Ionicons name="trash-outline" size={14} color="#FFF" style={{ marginRight: 4 }} />
-                  <ThemedText style={styles.addLineBtnText}>Delete</ThemedText>
-                </TouchableOpacity>
-              )}
-              <TouchableOpacity
-                style={[styles.addLineBtn, isFormLocked && { backgroundColor: '#BDBDBD' }]}
-                onPress={() => {
-                  if (isFormLocked) {
-                    showToast('This bill is closed. Cannot add lines!', 'info');
-                    return;
-                  }
-                  setSelectedIndex(null);
-                  setCurrentDetail({
-                    ...getInitialDetailState(),
-                    CostPerGram: headerState.CostPerGram || '',
-                  });
-                  setDetailModalVisible(true);
-                }}
-                disabled={isFormLocked}
-              >
-                <Ionicons name="add" size={14} color="#FFF" style={{ marginRight: 4 }} />
-                <ThemedText style={styles.addLineBtnText}>New Line</ThemedText>
-              </TouchableOpacity>
-            </View>
-          </View>
-
+        <View style={[styles.goldCard, { marginBottom: 6 }]}>
           <ScrollView horizontal contentContainerStyle={{ width: '100%' }}>
             <View style={{ width: '100%', minWidth: 1250 }}>
               <View style={styles.tableHeader}>
@@ -2496,11 +2408,15 @@ export default function DirectPurchaseScreen() {
                 <ThemedText style={[styles.tableHeaderText, { flex: 1, minWidth: 105, textAlign: 'right' }]}>TotalCost</ThemedText>
               </View>
 
-              <ScrollView style={{ minHeight: 140, maxHeight: 240 }}>
+              <ScrollView
+                style={{ height: 88 }}
+                nestedScrollEnabled={true}
+                showsVerticalScrollIndicator={true}
+              >
                 {details.length === 0 ? (
-                  <View style={styles.emptyTableState}>
-                    <Ionicons name="cube-outline" size={36} color="#D8C7AA" style={{ marginBottom: 6 }} />
-                    <ThemedText style={{ color: '#8F7E66', fontSize: 13, fontWeight: '500' }}>No records to display</ThemedText>
+                  <View style={[styles.emptyTableState, { height: 88, paddingVertical: 12 }]}>
+                    <Ionicons name="cube-outline" size={24} color="#D8C7AA" style={{ marginBottom: 2 }} />
+                    <ThemedText style={{ color: '#8F7E66', fontSize: 11, fontWeight: '500' }}>No records to display</ThemedText>
                   </View>
                 ) : (
                   details.map((item, idx) => (
@@ -2573,111 +2489,43 @@ export default function DirectPurchaseScreen() {
             </View>
           </ScrollView>
         </View>
-      </ScrollView>
-
-      {/* ================= LINE DETAIL ENTRY MODAL ================= */}
-      <Modal visible={detailModalVisible} transparent={true} animationType="fade">
-        <View style={styles.modalOverlay}>
-
-          <View style={[styles.goldCard, { width: '92%', maxWidth: 1350, maxHeight: '90%' }]}>
-            <View style={[styles.cardHeaderBanner, { justifyContent: 'space-between' }]}>
-              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                <View style={styles.headerIconBadge}>
-                  <Ionicons name="create-outline" size={15} color="#B48218" />
-                </View>
-                <ThemedText style={styles.cardHeaderTitle}>
-                  {selectedIndex !== null ? 'Edit Line Detail' : 'Add Line Detail'}
-                </ThemedText>
-              </View>
-
-              <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
-                <TouchableOpacity
-                  style={[
-                    styles.addLineBtn,
-                    {
-                      backgroundColor: isManual ? '#FDE8E8' : '#E8F5E9',
-                      borderWidth: 1,
-                      borderColor: isManual ? '#E57373' : '#81C784'
-                    }
-                  ]}
-                  onPress={() => setIsManual(!isManual)}
-                >
-                  <ThemedText
-                    style={{
-                      color: isManual ? '#C62828' : '#2E7D32',
-                      fontWeight: 'bold',
-                      fontSize: 11
-                    }}
-                  >
-                    {isManual ? 'MANUAL (F10)' : 'AUTO (F10)'}
-                  </ThemedText>
-                </TouchableOpacity>
-
-                <TouchableOpacity onPress={() => setDetailModalVisible(false)} style={{ padding: 4, marginLeft: 6 }}>
-                  <Ionicons name="close" size={22} color="#3B2D17" />
-                </TouchableOpacity>
-              </View>
-            </View>
-
-            {/* Modal Toast Notification (Rendered exclusively inside modal when open) */}
-            {toast.visible && (
-              <View
-                style={[
-                  styles.toastContainer,
-                  {
-                    backgroundColor: toast.type === 'success' ? '#2E7D32' : toast.type === 'error' ? '#C62828' : '#1565C0',
-                    top: 14,
-                    zIndex: 99999
-                  }
-                ]}
-              >
-                <Ionicons
-                  name={toast.type === 'success' ? 'checkmark-circle' : toast.type === 'error' ? 'alert-circle' : 'information-circle'}
-                  size={18}
-                  color="#fff"
-                  style={{ marginRight: 8 }}
-                />
-                <ThemedText style={{ color: '#FFF', fontWeight: 'bold', fontSize: 13, textAlign: 'center' }}>
-                  {toast.message}
-                </ThemedText>
-              </View>
-            )}
-
-            <ScrollView style={{ padding: 12 }}>
+        {/* ================= LINE DETAIL ENTRY SECTION (BOTTOM OF PAGE) ================= */}
+        <View style={[styles.goldCard, { marginTop: 4, width: '100%' }]}>
+          <View style={{ padding: 6 }}>
               {/* TABLE GRID: 2 Sublines formatted identically to purchase.tsx */}
               <ScrollView horizontal showsHorizontalScrollIndicator={true} contentContainerStyle={{ flexGrow: 1 }}>
                 <View style={{ width: '100%', minWidth: 1200, borderWidth: 1, borderColor: '#D8CEBD', backgroundColor: '#FFFFFF', padding: 2, marginBottom: 8 }}>
                   {/* SUBLINE 1 - ROW 1: Headers */}
                   <View style={{ flexDirection: 'row' }}>
-                    <View style={{ width: 130, backgroundColor: '#FAF4E6', borderWidth: 1, borderColor: '#D8CEBD', paddingVertical: 4, justifyContent: 'center' }}>
+                    <View style={{ width: 130, backgroundColor: '#FAF4E6', borderWidth: 1, borderColor: '#D8CEBD', paddingVertical: 1, justifyContent: 'center' }}>
                       <ThemedText style={{ color: '#6E4E10', fontSize: 10.5, fontWeight: 'bold', textAlign: 'center' }}>Catalogue Code</ThemedText>
                     </View>
-                    <View style={{ width: 180, backgroundColor: '#FAF4E6', borderWidth: 1, borderColor: '#D8CEBD', borderLeftWidth: 0, paddingVertical: 4, justifyContent: 'center' }}>
+                    <View style={{ width: 180, backgroundColor: '#FAF4E6', borderWidth: 1, borderColor: '#D8CEBD', borderLeftWidth: 0, paddingVertical: 1, justifyContent: 'center' }}>
                       <ThemedText style={{ color: '#6E4E10', fontSize: 10.5, fontWeight: 'bold', textAlign: 'center' }}>Category Code</ThemedText>
                     </View>
-                    <View style={{ width: 110, backgroundColor: '#FAF4E6', borderWidth: 1, borderColor: '#D8CEBD', borderLeftWidth: 0, paddingVertical: 4, justifyContent: 'center' }}>
+                    <View style={{ width: 110, backgroundColor: '#FAF4E6', borderWidth: 1, borderColor: '#D8CEBD', borderLeftWidth: 0, paddingVertical: 1, justifyContent: 'center' }}>
                       <ThemedText style={{ color: '#6E4E10', fontSize: 10.5, fontWeight: 'bold', textAlign: 'center' }}>Tray Id</ThemedText>
                     </View>
-                    <View style={{ width: 110, backgroundColor: '#FAF4E6', borderWidth: 1, borderColor: '#D8CEBD', borderLeftWidth: 0, paddingVertical: 4, justifyContent: 'center' }}>
+                    <View style={{ width: 110, backgroundColor: '#FAF4E6', borderWidth: 1, borderColor: '#D8CEBD', borderLeftWidth: 0, paddingVertical: 1, justifyContent: 'center' }}>
                       <ThemedText style={{ color: '#6E4E10', fontSize: 10.5, fontWeight: 'bold', textAlign: 'center' }}>Catalogue Wt</ThemedText>
                     </View>
-                    <View style={{ width: 100, backgroundColor: '#FAF4E6', borderWidth: 1, borderColor: '#D8CEBD', borderLeftWidth: 0, paddingVertical: 4, justifyContent: 'center' }}>
+                    <View style={{ width: 100, backgroundColor: '#FAF4E6', borderWidth: 1, borderColor: '#D8CEBD', borderLeftWidth: 0, paddingVertical: 1, justifyContent: 'center' }}>
                       <ThemedText style={{ color: '#6E4E10', fontSize: 10.5, fontWeight: 'bold', textAlign: 'center' }}>Catalogue PCS</ThemedText>
                     </View>
-                    <View style={{ width: 200, backgroundColor: '#FAF4E6', borderWidth: 1, borderColor: '#D8CEBD', borderLeftWidth: 0, paddingVertical: 4, justifyContent: 'center' }}>
+                    <View style={{ width: 200, backgroundColor: '#FAF4E6', borderWidth: 1, borderColor: '#D8CEBD', borderLeftWidth: 0, paddingVertical: 1, justifyContent: 'center' }}>
                       <ThemedText style={{ color: '#6E4E10', fontSize: 10.5, fontWeight: 'bold', textAlign: 'center' }}>Purchase MC</ThemedText>
                     </View>
-                    <View style={{ flex: 1, minWidth: 260, backgroundColor: '#FAF4E6', borderWidth: 1, borderColor: '#D8CEBD', borderLeftWidth: 0, paddingVertical: 4, justifyContent: 'center' }}>
+                    <View style={{ flex: 1, minWidth: 260, backgroundColor: '#FAF4E6', borderWidth: 1, borderColor: '#D8CEBD', borderLeftWidth: 0, paddingVertical: 1, justifyContent: 'center' }}>
                       <ThemedText style={{ color: '#6E4E10', fontSize: 10.5, fontWeight: 'bold', textAlign: 'center' }}>Sales MC</ThemedText>
                     </View>
                   </View>
 
                   {/* SUBLINE 1 - ROW 2: Inputs */}
-                  <View style={{ flexDirection: 'row', marginBottom: 6 }}>
+                  <View style={{ flexDirection: 'row', marginBottom: 4 }}>
                     {/* Catalogue Code */}
-                    <View style={{ width: 130, borderWidth: 1, borderColor: '#D8CEBD', borderTopWidth: 0, flexDirection: 'row', height: 28, backgroundColor: '#FFFFFF' }}>
+                    <View style={{ width: 130, borderWidth: 1, borderColor: '#D8CEBD', borderTopWidth: 0, flexDirection: 'row', height: 23, backgroundColor: '#FFFFFF' }}>
                       <TextInput
-                        style={{ width: 102, paddingHorizontal: 6, paddingVertical: 2, fontSize: 11.5, color: '#2B2114' }}
+                        style={{ width: 106, paddingHorizontal: 4, paddingVertical: 1, fontSize: 10.5, color: '#2B2114' }}
                         value={currentDetail.CatalogueCode}
                         onChangeText={(t) => updateDetail('CatalogueCode', t)}
                         onBlur={async () => {
@@ -2747,17 +2595,17 @@ export default function DirectPurchaseScreen() {
                         }}
                       />
                       <TouchableOpacity
-                        style={{ width: 26, backgroundColor: '#FAF4E6', borderLeftWidth: 1, borderColor: '#D8CEBD', justifyContent: 'center', alignItems: 'center', flexShrink: 0 }}
+                        style={{ width: 22, backgroundColor: '#FAF4E6', borderLeftWidth: 1, borderColor: '#D8CEBD', justifyContent: 'center', alignItems: 'center', flexShrink: 0 }}
                         onPress={fetchCatalogues}
                       >
-                        <ThemedText style={{ color: '#6E4E10', fontWeight: 'bold', fontSize: 12 }}>...</ThemedText>
+                        <ThemedText style={{ color: '#6E4E10', fontWeight: 'bold', fontSize: 9.5 }}>...</ThemedText>
                       </TouchableOpacity>
                     </View>
 
                     {/* Category Code (without LOV button as requested) */}
-                    <View style={{ width: 180, borderWidth: 1, borderColor: '#D8CEBD', borderTopWidth: 0, borderLeftWidth: 0, height: 28, backgroundColor: '#FFFFFF' }}>
+                    <View style={{ width: 180, borderWidth: 1, borderColor: '#D8CEBD', borderTopWidth: 0, borderLeftWidth: 0, height: 23, backgroundColor: '#FFFFFF' }}>
                       <TextInput
-                        style={{ flex: 1, paddingHorizontal: 6, paddingVertical: 2, fontSize: 11.5, color: '#2B2114' }}
+                        style={{ flex: 1, paddingHorizontal: 4, paddingVertical: 1, fontSize: 10.5, color: '#2B2114' }}
                         value={currentDetail.CategoryCode}
                         onChangeText={(t) => updateDetail('CategoryCode', t)}
                         onBlur={async () => {
@@ -2789,9 +2637,9 @@ export default function DirectPurchaseScreen() {
                     </View>
 
                     {/* Tray Id */}
-                    <View style={{ width: 110, borderWidth: 1, borderColor: '#D8CEBD', borderTopWidth: 0, borderLeftWidth: 0, flexDirection: 'row', height: 28, backgroundColor: '#FFFFFF' }}>
+                    <View style={{ width: 110, borderWidth: 1, borderColor: '#D8CEBD', borderTopWidth: 0, borderLeftWidth: 0, flexDirection: 'row', height: 23, backgroundColor: '#FFFFFF' }}>
                       <TextInput
-                        style={{ width: 82, paddingHorizontal: 6, paddingVertical: 2, fontSize: 11.5, color: '#2B2114' }}
+                        style={{ width: 86, paddingHorizontal: 4, paddingVertical: 1, fontSize: 10.5, color: '#2B2114' }}
                         value={currentDetail.TrayId}
                         onChangeText={(t) => updateDetail('TrayId', t)}
                         onBlur={async () => {
@@ -2812,17 +2660,17 @@ export default function DirectPurchaseScreen() {
                         }}
                       />
                       <TouchableOpacity
-                        style={{ width: 26, backgroundColor: '#FAF4E6', borderLeftWidth: 1, borderColor: '#D8CEBD', justifyContent: 'center', alignItems: 'center', flexShrink: 0 }}
+                        style={{ width: 22, backgroundColor: '#FAF4E6', borderLeftWidth: 1, borderColor: '#D8CEBD', justifyContent: 'center', alignItems: 'center', flexShrink: 0 }}
                         onPress={fetchTrays}
                       >
-                        <ThemedText style={{ color: '#6E4E10', fontWeight: 'bold', fontSize: 12 }}>...</ThemedText>
+                        <ThemedText style={{ color: '#6E4E10', fontWeight: 'bold', fontSize: 9.5 }}>...</ThemedText>
                       </TouchableOpacity>
                     </View>
 
                     {/* Catalogue Wt */}
-                    <View style={{ width: 110, borderWidth: 1, borderColor: '#D8CEBD', borderTopWidth: 0, borderLeftWidth: 0, height: 28, backgroundColor: '#FFFFFF' }}>
+                    <View style={{ width: 110, borderWidth: 1, borderColor: '#D8CEBD', borderTopWidth: 0, borderLeftWidth: 0, height: 23, backgroundColor: '#FFFFFF' }}>
                       <TextInput
-                        style={{ flex: 1, paddingHorizontal: 6, paddingVertical: 2, fontSize: 11.5, color: '#2B2114', textAlign: 'right' }}
+                        style={{ flex: 1, paddingHorizontal: 4, paddingVertical: 1, fontSize: 10.5, color: '#2B2114', textAlign: 'right' }}
                         value={currentDetail.CatalogueWeight}
                         onChangeText={(t) => updateDetail('CatalogueWeight', t)}
                         keyboardType="numeric"
@@ -2830,9 +2678,9 @@ export default function DirectPurchaseScreen() {
                     </View>
 
                     {/* Catalogue PCS */}
-                    <View style={{ width: 100, borderWidth: 1, borderColor: '#D8CEBD', borderTopWidth: 0, borderLeftWidth: 0, height: 28, backgroundColor: '#FFFFFF' }}>
+                    <View style={{ width: 100, borderWidth: 1, borderColor: '#D8CEBD', borderTopWidth: 0, borderLeftWidth: 0, height: 23, backgroundColor: '#FFFFFF' }}>
                       <TextInput
-                        style={{ flex: 1, paddingHorizontal: 6, paddingVertical: 2, fontSize: 11.5, color: '#2B2114', textAlign: 'right' }}
+                        style={{ flex: 1, paddingHorizontal: 4, paddingVertical: 1, fontSize: 10.5, color: '#2B2114', textAlign: 'right' }}
                         value={currentDetail.CataloguePCS}
                         onChangeText={(t) => updateDetail('CataloguePCS', t)}
                         keyboardType="numeric"
@@ -2840,7 +2688,7 @@ export default function DirectPurchaseScreen() {
                     </View>
 
                     {/* Purchase MC */}
-                    <View style={{ width: 200, borderWidth: 1, borderColor: '#D8CEBD', borderTopWidth: 0, borderLeftWidth: 0, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-around', height: 28, backgroundColor: '#FAF8F3', paddingHorizontal: 4 }}>
+                    <View style={{ width: 200, borderWidth: 1, borderColor: '#D8CEBD', borderTopWidth: 0, borderLeftWidth: 0, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-around', height: 23, backgroundColor: '#FAF8F3', paddingHorizontal: 4 }}>
                       <Radio
                         label="Per Gram"
                         selected={currentDetail.PurchaseMCType === 'PerGram'}
@@ -2854,7 +2702,7 @@ export default function DirectPurchaseScreen() {
                     </View>
 
                     {/* Sales MC */}
-                    <View style={{ flex: 1, minWidth: 260, borderWidth: 1, borderColor: '#D8CEBD', borderTopWidth: 0, borderLeftWidth: 0, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-around', height: 28, backgroundColor: '#FAF8F3', paddingHorizontal: 4 }}>
+                    <View style={{ flex: 1, minWidth: 260, borderWidth: 1, borderColor: '#D8CEBD', borderTopWidth: 0, borderLeftWidth: 0, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-around', height: 23, backgroundColor: '#FAF8F3', paddingHorizontal: 4 }}>
                       <Checkbox
                         label="AUTO"
                         selected={autoSMC}
@@ -2880,34 +2728,34 @@ export default function DirectPurchaseScreen() {
 
                   {/* SUBLINE 2 - ROW 3: Headers */}
                   <View style={{ flexDirection: 'row' }}>
-                    <View style={{ width: 130, backgroundColor: '#FAF4E6', borderWidth: 1, borderColor: '#D8CEBD', paddingVertical: 4, justifyContent: 'center' }}>
+                    <View style={{ width: 130, backgroundColor: '#FAF4E6', borderWidth: 1, borderColor: '#D8CEBD', paddingVertical: 1, justifyContent: 'center' }}>
                       <ThemedText style={{ color: '#6E4E10', fontSize: 10.5, fontWeight: 'bold', textAlign: 'center' }}>Inventory Code</ThemedText>
                     </View>
-                    <View style={{ flex: 2, minWidth: 200, backgroundColor: '#FAF4E6', borderWidth: 1, borderColor: '#D8CEBD', borderLeftWidth: 0, paddingVertical: 4, justifyContent: 'center' }}>
+                    <View style={{ flex: 2, minWidth: 200, backgroundColor: '#FAF4E6', borderWidth: 1, borderColor: '#D8CEBD', borderLeftWidth: 0, paddingVertical: 1, justifyContent: 'center' }}>
                       <ThemedText style={{ color: '#6E4E10', fontSize: 10.5, fontWeight: 'bold', textAlign: 'center' }}>Inventory Description</ThemedText>
                     </View>
-                    <View style={{ width: 85, backgroundColor: '#FAF4E6', borderWidth: 1, borderColor: '#D8CEBD', borderLeftWidth: 0, paddingVertical: 4, justifyContent: 'center' }}>
+                    <View style={{ width: 85, backgroundColor: '#FAF4E6', borderWidth: 1, borderColor: '#D8CEBD', borderLeftWidth: 0, paddingVertical: 1, justifyContent: 'center' }}>
                       <ThemedText style={{ color: '#6E4E10', fontSize: 10.5, fontWeight: 'bold', textAlign: 'center' }}>Weight</ThemedText>
                     </View>
-                    <View style={{ width: 95, backgroundColor: '#FAF4E6', borderWidth: 1, borderColor: '#D8CEBD', borderLeftWidth: 0, paddingVertical: 4, justifyContent: 'center' }}>
+                    <View style={{ width: 95, backgroundColor: '#FAF4E6', borderWidth: 1, borderColor: '#D8CEBD', borderLeftWidth: 0, paddingVertical: 1, justifyContent: 'center' }}>
                       <ThemedText style={{ color: '#6E4E10', fontSize: 10.5, fontWeight: 'bold', textAlign: 'center' }}>Size Code</ThemedText>
                     </View>
-                    <View style={{ width: 85, backgroundColor: '#FAF4E6', borderWidth: 1, borderColor: '#D8CEBD', borderLeftWidth: 0, paddingVertical: 4, justifyContent: 'center' }}>
+                    <View style={{ width: 85, backgroundColor: '#FAF4E6', borderWidth: 1, borderColor: '#D8CEBD', borderLeftWidth: 0, paddingVertical: 1, justifyContent: 'center' }}>
                       <ThemedText style={{ color: '#6E4E10', fontSize: 10.5, fontWeight: 'bold', textAlign: 'center' }}>Gold Loss</ThemedText>
                     </View>
-                    <View style={{ width: 95, backgroundColor: '#FAF4E6', borderWidth: 1, borderColor: '#D8CEBD', borderLeftWidth: 0, paddingVertical: 4, justifyContent: 'center' }}>
+                    <View style={{ width: 95, backgroundColor: '#FAF4E6', borderWidth: 1, borderColor: '#D8CEBD', borderLeftWidth: 0, paddingVertical: 1, justifyContent: 'center' }}>
                       <ThemedText style={{ color: '#6E4E10', fontSize: 10.5, fontWeight: 'bold', textAlign: 'center' }}>Cost / g</ThemedText>
                     </View>
-                    <View style={{ width: 80, backgroundColor: '#FAF4E6', borderWidth: 1, borderColor: '#D8CEBD', borderLeftWidth: 0, paddingVertical: 4, justifyContent: 'center' }}>
+                    <View style={{ width: 80, backgroundColor: '#FAF4E6', borderWidth: 1, borderColor: '#D8CEBD', borderLeftWidth: 0, paddingVertical: 1, justifyContent: 'center' }}>
                       <ThemedText style={{ color: '#6E4E10', fontSize: 10.5, fontWeight: 'bold', textAlign: 'center' }}>PMC</ThemedText>
                     </View>
-                    <View style={{ width: 80, backgroundColor: '#FAF4E6', borderWidth: 1, borderColor: '#D8CEBD', borderLeftWidth: 0, paddingVertical: 4, justifyContent: 'center' }}>
+                    <View style={{ width: 80, backgroundColor: '#FAF4E6', borderWidth: 1, borderColor: '#D8CEBD', borderLeftWidth: 0, paddingVertical: 1, justifyContent: 'center' }}>
                       <ThemedText style={{ color: '#6E4E10', fontSize: 10.5, fontWeight: 'bold', textAlign: 'center' }}>SMC</ThemedText>
                     </View>
-                    <View style={{ width: 65, backgroundColor: '#FAF4E6', borderWidth: 1, borderColor: '#D8CEBD', borderLeftWidth: 0, paddingVertical: 4, justifyContent: 'center' }}>
+                    <View style={{ width: 65, backgroundColor: '#FAF4E6', borderWidth: 1, borderColor: '#D8CEBD', borderLeftWidth: 0, paddingVertical: 1, justifyContent: 'center' }}>
                       <ThemedText style={{ color: '#6E4E10', fontSize: 10.5, fontWeight: 'bold', textAlign: 'center' }}>PCS</ThemedText>
                     </View>
-                    <View style={{ flex: 1, minWidth: 110, backgroundColor: '#FAF4E6', borderWidth: 1, borderColor: '#D8CEBD', borderLeftWidth: 0, paddingVertical: 4, justifyContent: 'center' }}>
+                    <View style={{ flex: 1, minWidth: 110, backgroundColor: '#FAF4E6', borderWidth: 1, borderColor: '#D8CEBD', borderLeftWidth: 0, paddingVertical: 1, justifyContent: 'center' }}>
                       <ThemedText style={{ color: '#6E4E10', fontSize: 10.5, fontWeight: 'bold', textAlign: 'center' }}>Total Cost</ThemedText>
                     </View>
                   </View>
@@ -2915,9 +2763,9 @@ export default function DirectPurchaseScreen() {
                   {/* SUBLINE 2 - ROW 4: Inputs */}
                   <View style={{ flexDirection: 'row' }}>
                     {/* Inventory Code */}
-                    <View style={{ width: 130, borderWidth: 1, borderColor: '#D8CEBD', borderTopWidth: 0, height: 28, backgroundColor: !isManual ? '#F8F5EE' : '#FFFFFF' }}>
+                    <View style={{ width: 130, borderWidth: 1, borderColor: '#D8CEBD', borderTopWidth: 0, height: 23, backgroundColor: !isManual ? '#F8F5EE' : '#FFFFFF' }}>
                       <TextInput
-                        style={{ flex: 1, paddingHorizontal: 6, paddingVertical: 2, fontSize: 11.5, color: '#2B2114' }}
+                        style={{ flex: 1, paddingHorizontal: 4, paddingVertical: 1, fontSize: 10.5, color: '#2B2114' }}
                         value={currentDetail.InventoryCode}
                         onChangeText={(t) => updateDetail('InventoryCode', t)}
                         onBlur={() => {
@@ -2930,9 +2778,9 @@ export default function DirectPurchaseScreen() {
                     </View>
 
                     {/* Inventory Description */}
-                    <View style={{ flex: 2, minWidth: 200, borderWidth: 1, borderColor: '#D8CEBD', borderTopWidth: 0, borderLeftWidth: 0, height: 28, backgroundColor: '#FFFFFF' }}>
+                    <View style={{ flex: 2, minWidth: 200, borderWidth: 1, borderColor: '#D8CEBD', borderTopWidth: 0, borderLeftWidth: 0, height: 23, backgroundColor: '#FFFFFF' }}>
                       <TextInput
-                        style={{ flex: 1, paddingHorizontal: 6, paddingVertical: 2, fontSize: 11.5, color: '#2B2114' }}
+                        style={{ flex: 1, paddingHorizontal: 4, paddingVertical: 1, fontSize: 10.5, color: '#2B2114' }}
                         value={currentDetail.InventoryDescription}
                         onChangeText={(t) => updateDetail('InventoryDescription', t)}
                         onBlur={() => {
@@ -2944,9 +2792,9 @@ export default function DirectPurchaseScreen() {
                     </View>
 
                     {/* Weight */}
-                    <View style={{ width: 85, borderWidth: 1, borderColor: '#D8CEBD', borderTopWidth: 0, borderLeftWidth: 0, height: 28, backgroundColor: '#FFFFFF' }}>
+                    <View style={{ width: 85, borderWidth: 1, borderColor: '#D8CEBD', borderTopWidth: 0, borderLeftWidth: 0, height: 23, backgroundColor: '#FFFFFF' }}>
                       <TextInput
-                        style={{ flex: 1, paddingHorizontal: 6, paddingVertical: 2, fontSize: 11.5, color: '#2B2114', textAlign: 'right' }}
+                        style={{ flex: 1, paddingHorizontal: 4, paddingVertical: 1, fontSize: 10.5, color: '#2B2114', textAlign: 'right' }}
                         value={currentDetail.Weight}
                         onChangeText={(t) => updateDetail('Weight', t)}
                         onBlur={async () => {
@@ -2975,9 +2823,9 @@ export default function DirectPurchaseScreen() {
                     </View>
 
                     {/* Size Code */}
-                    <View style={{ width: 95, borderWidth: 1, borderColor: '#D8CEBD', borderTopWidth: 0, borderLeftWidth: 0, flexDirection: 'row', height: 28, backgroundColor: '#FFFFFF' }}>
+                    <View style={{ width: 95, borderWidth: 1, borderColor: '#D8CEBD', borderTopWidth: 0, borderLeftWidth: 0, flexDirection: 'row', height: 23, backgroundColor: '#FFFFFF' }}>
                       <TextInput
-                        style={{ width: 67, paddingHorizontal: 6, paddingVertical: 2, fontSize: 11.5, color: '#2B2114', textAlign: 'center' }}
+                        style={{ width: 71, paddingHorizontal: 4, paddingVertical: 1, fontSize: 10.5, color: '#2B2114', textAlign: 'center' }}
                         value={String(currentDetail.SizeCode ?? '')}
                         onChangeText={(t) => updateDetail('SizeCode', t)}
                         onBlur={async () => {
@@ -3000,15 +2848,15 @@ export default function DirectPurchaseScreen() {
                           }
                         }}
                       />
-                      <TouchableOpacity style={{ width: 26, backgroundColor: '#FAF4E6', borderLeftWidth: 1, borderColor: '#D8CEBD', justifyContent: 'center', alignItems: 'center', flexShrink: 0 }} onPress={fetchSizes}>
-                        <ThemedText style={{ color: '#6E4E10', fontWeight: 'bold', fontSize: 12 }}>...</ThemedText>
+                      <TouchableOpacity style={{ width: 22, backgroundColor: '#FAF4E6', borderLeftWidth: 1, borderColor: '#D8CEBD', justifyContent: 'center', alignItems: 'center', flexShrink: 0 }} onPress={fetchSizes}>
+                        <ThemedText style={{ color: '#6E4E10', fontWeight: 'bold', fontSize: 9.5 }}>...</ThemedText>
                       </TouchableOpacity>
                     </View>
 
                     {/* Gold Loss */}
-                    <View style={{ width: 85, borderWidth: 1, borderColor: '#D8CEBD', borderTopWidth: 0, borderLeftWidth: 0, height: 28, backgroundColor: '#FFFFFF' }}>
+                    <View style={{ width: 85, borderWidth: 1, borderColor: '#D8CEBD', borderTopWidth: 0, borderLeftWidth: 0, height: 23, backgroundColor: '#FFFFFF' }}>
                       <TextInput
-                        style={{ flex: 1, paddingHorizontal: 6, paddingVertical: 2, fontSize: 11.5, color: '#2B2114', textAlign: 'right' }}
+                        style={{ flex: 1, paddingHorizontal: 4, paddingVertical: 1, fontSize: 10.5, color: '#2B2114', textAlign: 'right' }}
                         value={currentDetail.GoldLoss}
                         onChangeText={(t) => updateDetail('GoldLoss', t)}
                         keyboardType="numeric"
@@ -3016,9 +2864,9 @@ export default function DirectPurchaseScreen() {
                     </View>
 
                     {/* Cost / g */}
-                    <View style={{ width: 95, borderWidth: 1, borderColor: '#D8CEBD', borderTopWidth: 0, borderLeftWidth: 0, height: 28, backgroundColor: '#FFFFFF' }}>
+                    <View style={{ width: 95, borderWidth: 1, borderColor: '#D8CEBD', borderTopWidth: 0, borderLeftWidth: 0, height: 23, backgroundColor: '#FFFFFF' }}>
                       <TextInput
-                        style={{ flex: 1, paddingHorizontal: 6, paddingVertical: 2, fontSize: 11.5, color: '#2B2114', textAlign: 'right' }}
+                        style={{ flex: 1, paddingHorizontal: 4, paddingVertical: 1, fontSize: 10.5, color: '#2B2114', textAlign: 'right' }}
                         value={currentDetail.CostPerGram}
                         onChangeText={(t) => updateDetail('CostPerGram', t)}
                         onBlur={() => {
@@ -3039,9 +2887,9 @@ export default function DirectPurchaseScreen() {
                     </View>
 
                     {/* PMC */}
-                    <View style={{ width: 80, borderWidth: 1, borderColor: '#D8CEBD', borderTopWidth: 0, borderLeftWidth: 0, height: 28, backgroundColor: '#FFFFFF' }}>
+                    <View style={{ width: 80, borderWidth: 1, borderColor: '#D8CEBD', borderTopWidth: 0, borderLeftWidth: 0, height: 23, backgroundColor: '#FFFFFF' }}>
                       <TextInput
-                        style={{ flex: 1, paddingHorizontal: 6, paddingVertical: 2, fontSize: 11.5, color: '#2B2114', textAlign: 'right' }}
+                        style={{ flex: 1, paddingHorizontal: 4, paddingVertical: 1, fontSize: 10.5, color: '#2B2114', textAlign: 'right' }}
                         value={currentDetail.PMC}
                         onChangeText={(t) => updateDetail('PMC', t)}
                         keyboardType="numeric"
@@ -3049,9 +2897,9 @@ export default function DirectPurchaseScreen() {
                     </View>
 
                     {/* SMC */}
-                    <View style={{ width: 80, borderWidth: 1, borderColor: '#D8CEBD', borderTopWidth: 0, borderLeftWidth: 0, height: 28, backgroundColor: autoSMC ? '#F8F5EE' : '#FFFFFF' }}>
+                    <View style={{ width: 80, borderWidth: 1, borderColor: '#D8CEBD', borderTopWidth: 0, borderLeftWidth: 0, height: 23, backgroundColor: autoSMC ? '#F8F5EE' : '#FFFFFF' }}>
                       <TextInput
-                        style={{ flex: 1, paddingHorizontal: 6, paddingVertical: 2, fontSize: 11.5, color: '#2B2114', textAlign: 'right' }}
+                        style={{ flex: 1, paddingHorizontal: 4, paddingVertical: 1, fontSize: 10.5, color: '#2B2114', textAlign: 'right' }}
                         value={currentDetail.SMC}
                         onChangeText={(t) => updateDetail('SMC', t)}
                         editable={!autoSMC}
@@ -3060,9 +2908,9 @@ export default function DirectPurchaseScreen() {
                     </View>
 
                     {/* PCS */}
-                    <View style={{ width: 65, borderWidth: 1, borderColor: '#D8CEBD', borderTopWidth: 0, borderLeftWidth: 0, height: 28, backgroundColor: '#FFFFFF' }}>
+                    <View style={{ width: 65, borderWidth: 1, borderColor: '#D8CEBD', borderTopWidth: 0, borderLeftWidth: 0, height: 23, backgroundColor: '#FFFFFF' }}>
                       <TextInput
-                        style={{ flex: 1, paddingHorizontal: 6, paddingVertical: 2, fontSize: 11.5, color: '#2B2114', textAlign: 'right' }}
+                        style={{ flex: 1, paddingHorizontal: 4, paddingVertical: 1, fontSize: 10.5, color: '#2B2114', textAlign: 'right' }}
                         value={currentDetail.PCS}
                         onChangeText={(t) => updateDetail('PCS', t)}
                         onBlur={() => {
@@ -3079,9 +2927,9 @@ export default function DirectPurchaseScreen() {
                     </View>
 
                     {/* Total Cost */}
-                    <View style={{ flex: 1, minWidth: 110, borderWidth: 1, borderColor: '#D8CEBD', borderTopWidth: 0, borderLeftWidth: 0, height: 28, backgroundColor: '#F8F5EE' }}>
+                    <View style={{ flex: 1, minWidth: 110, borderWidth: 1, borderColor: '#D8CEBD', borderTopWidth: 0, borderLeftWidth: 0, height: 23, backgroundColor: '#F8F5EE' }}>
                       <TextInput
-                        style={{ flex: 1, paddingHorizontal: 6, paddingVertical: 2, fontSize: 11.5, color: '#9E6D08', textAlign: 'right', fontWeight: 'bold' }}
+                        style={{ flex: 1, paddingHorizontal: 4, paddingVertical: 1, fontSize: 10.5, color: '#9E6D08', textAlign: 'right', fontWeight: 'bold' }}
                         value={currentDetail.TotalCost}
                         editable={false}
                       />
@@ -3092,12 +2940,12 @@ export default function DirectPurchaseScreen() {
                   {/* No separate header row - fields align under Subline 2 column positions */}
                   <View style={{ flexDirection: 'row' }}>
                     {/* Spacer under Inventory Code (width: 130) */}
-                    <View style={{ width: 130, borderWidth: 1, borderColor: '#D8CEBD', borderTopWidth: 0, height: 28, backgroundColor: '#FAF8F3' }} />
+                    <View style={{ width: 130, borderWidth: 1, borderColor: '#D8CEBD', borderTopWidth: 0, height: 23, backgroundColor: '#FAF8F3' }} />
 
                     {/* Diamond/Stone Description — same column as Inventory Description (flex: 2, minWidth: 200) */}
-                    <View style={{ flex: 2, minWidth: 200, borderWidth: 1, borderColor: '#D8CEBD', borderTopWidth: 0, borderLeftWidth: 0, height: 28, backgroundColor: '#FFFFFF' }}>
+                    <View style={{ flex: 2, minWidth: 200, borderWidth: 1, borderColor: '#D8CEBD', borderTopWidth: 0, borderLeftWidth: 0, height: 23, backgroundColor: '#FFFFFF' }}>
                       <TextInput
-                        style={{ flex: 1, paddingHorizontal: 6, paddingVertical: 2, fontSize: 11.5, color: '#2B2114' }}
+                        style={{ flex: 1, paddingHorizontal: 4, paddingVertical: 1, fontSize: 10.5, color: '#2B2114' }}
                         value={currentDetail.DiamondDescription}
                         onChangeText={(t) => updateDetail('DiamondDescription', t)}
                         maxLength={50}
@@ -3107,9 +2955,9 @@ export default function DirectPurchaseScreen() {
                     </View>
 
                     {/* Stone Weight — same column as Weight (width: 85) */}
-                    <View style={{ width: 85, borderWidth: 1, borderColor: '#D8CEBD', borderTopWidth: 0, borderLeftWidth: 0, height: 28, backgroundColor: '#FFFFFF' }}>
+                    <View style={{ width: 85, borderWidth: 1, borderColor: '#D8CEBD', borderTopWidth: 0, borderLeftWidth: 0, height: 23, backgroundColor: '#FFFFFF' }}>
                       <TextInput
-                        style={{ flex: 1, paddingHorizontal: 6, paddingVertical: 2, fontSize: 11.5, color: '#2B2114', textAlign: 'right' }}
+                        style={{ flex: 1, paddingHorizontal: 4, paddingVertical: 1, fontSize: 10.5, color: '#2B2114', textAlign: 'right' }}
                         value={currentDetail.StoneWeight}
                         onChangeText={(t) => updateDetail('StoneWeight', t)}
                         keyboardType="numeric"
@@ -3119,12 +2967,12 @@ export default function DirectPurchaseScreen() {
                     </View>
 
                     {/* Spacer under Size Code (width: 95) */}
-                    <View style={{ width: 95, borderWidth: 1, borderColor: '#D8CEBD', borderTopWidth: 0, borderLeftWidth: 0, height: 28, backgroundColor: '#FAF8F3' }} />
+                    <View style={{ width: 95, borderWidth: 1, borderColor: '#D8CEBD', borderTopWidth: 0, borderLeftWidth: 0, height: 23, backgroundColor: '#FAF8F3' }} />
 
                     {/* Net Weight (readonly) — same column as Gold Loss (width: 85) */}
-                    <View style={{ width: 85, borderWidth: 1, borderColor: '#D8CEBD', borderTopWidth: 0, borderLeftWidth: 0, height: 28, backgroundColor: '#F8F5EE' }}>
+                    <View style={{ width: 85, borderWidth: 1, borderColor: '#D8CEBD', borderTopWidth: 0, borderLeftWidth: 0, height: 23, backgroundColor: '#F8F5EE' }}>
                       <TextInput
-                        style={{ flex: 1, paddingHorizontal: 6, paddingVertical: 2, fontSize: 11.5, color: '#6E4E10', textAlign: 'right', fontWeight: 'bold' }}
+                        style={{ flex: 1, paddingHorizontal: 4, paddingVertical: 1, fontSize: 10.5, color: '#6E4E10', textAlign: 'right', fontWeight: 'bold' }}
                         value={currentDetail.NetWeight}
                         editable={false}
                         placeholder="Net Wt"
@@ -3133,38 +2981,38 @@ export default function DirectPurchaseScreen() {
                     </View>
 
                     {/* Spacer under Cost / g (width: 95) */}
-                    <View style={{ width: 95, borderWidth: 1, borderColor: '#D8CEBD', borderTopWidth: 0, borderLeftWidth: 0, height: 28, backgroundColor: '#FAF8F3' }} />
+                    <View style={{ width: 95, borderWidth: 1, borderColor: '#D8CEBD', borderTopWidth: 0, borderLeftWidth: 0, height: 23, backgroundColor: '#FAF8F3' }} />
 
                     {/* PMC Cost (readonly) — same column as PMC (width: 80) */}
-                    <View style={{ width: 80, borderWidth: 1, borderColor: '#D8CEBD', borderTopWidth: 0, borderLeftWidth: 0, height: 28, backgroundColor: '#F8F5EE' }}>
+                    <View style={{ width: 80, borderWidth: 1, borderColor: '#D8CEBD', borderTopWidth: 0, borderLeftWidth: 0, height: 23, backgroundColor: '#F8F5EE' }}>
                       <TextInput
-                        style={{ flex: 1, paddingHorizontal: 6, paddingVertical: 2, fontSize: 11.5, color: '#6E4E10', textAlign: 'right', fontWeight: 'bold' }}
+                        style={{ flex: 1, paddingHorizontal: 4, paddingVertical: 1, fontSize: 10.5, color: '#6E4E10', textAlign: 'right', fontWeight: 'bold' }}
                         value={currentDetail.PMCCost}
                         editable={false}
                       />
                     </View>
 
                     {/* SMC Cost (readonly) — same column as SMC (width: 80) */}
-                    <View style={{ width: 80, borderWidth: 1, borderColor: '#D8CEBD', borderTopWidth: 0, borderLeftWidth: 0, height: 28, backgroundColor: '#F8F5EE' }}>
+                    <View style={{ width: 80, borderWidth: 1, borderColor: '#D8CEBD', borderTopWidth: 0, borderLeftWidth: 0, height: 23, backgroundColor: '#F8F5EE' }}>
                       <TextInput
-                        style={{ flex: 1, paddingHorizontal: 6, paddingVertical: 2, fontSize: 11.5, color: '#6E4E10', textAlign: 'right', fontWeight: 'bold' }}
+                        style={{ flex: 1, paddingHorizontal: 4, paddingVertical: 1, fontSize: 10.5, color: '#6E4E10', textAlign: 'right', fontWeight: 'bold' }}
                         value={currentDetail.SMCCost}
                         editable={false}
                       />
                     </View>
 
                     {/* Spacer under PCS (width: 65) */}
-                    <View style={{ width: 65, borderWidth: 1, borderColor: '#D8CEBD', borderTopWidth: 0, borderLeftWidth: 0, height: 28, backgroundColor: '#FAF8F3' }} />
+                    <View style={{ width: 65, borderWidth: 1, borderColor: '#D8CEBD', borderTopWidth: 0, borderLeftWidth: 0, height: 23, backgroundColor: '#FAF8F3' }} />
 
                     {/* Spacer under Total Cost (flex: 1, minWidth: 110) */}
-                    <View style={{ flex: 1, minWidth: 110, borderWidth: 1, borderColor: '#D8CEBD', borderTopWidth: 0, borderLeftWidth: 0, height: 28, backgroundColor: '#FAF8F3' }} />
+                    <View style={{ flex: 1, minWidth: 110, borderWidth: 1, borderColor: '#D8CEBD', borderTopWidth: 0, borderLeftWidth: 0, height: 23, backgroundColor: '#FAF8F3' }} />
                   </View>
                 </View>
               </ScrollView>
 
               {/* CHECKBOXES & ACTION BUTTONS ROW */}
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 12, borderTopWidth: 1, borderTopColor: '#F0E6D2', paddingTop: 10 }}>
-                <View style={{ flexDirection: 'row', gap: 14, alignItems: 'center' }}>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 4, borderTopWidth: 1, borderTopColor: '#F0E6D2', paddingTop: 4 }}>
+                <View style={{ flexDirection: 'row', gap: 10, alignItems: 'center' }}>
                   <Checkbox
                     label="Addl. Desc"
                     selected={currentDetail.AddlDesc}
@@ -3199,12 +3047,35 @@ export default function DirectPurchaseScreen() {
                   />
                 </View>
 
-                <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
+                <View style={{ flexDirection: 'row', gap: 6, alignItems: 'center' }}>
+                  <TouchableOpacity
+                    style={[
+                      styles.actionBtn,
+                      {
+                        backgroundColor: isManual ? '#FFEBEE' : '#FFFFFF',
+                        borderColor: isManual ? '#C62828' : '#2E7D32',
+                        borderWidth: 1.5,
+                      }
+                    ]}
+                    onPress={() => setIsManual(!isManual)}
+                  >
+                    <ThemedText
+                      style={{
+                        color: isManual ? '#C62828' : '#2E7D32',
+                        fontWeight: 'bold',
+                        fontSize: 10,
+                        textAlign: 'center',
+                      }}
+                    >
+                      {isManual ? 'MANUAL (F10)' : 'AUTO (F10)'}
+                    </ThemedText>
+                  </TouchableOpacity>
+
                   <TouchableOpacity
                     style={[styles.actionBtn, { backgroundColor: '#F9F2E2', borderColor: '#B8903B' }]}
                     onPress={handleAddOrUpdateDetail}
                   >
-                    <ThemedText style={{ color: '#9E6D08', fontWeight: 'bold', textAlign: 'center' }}>
+                    <ThemedText style={{ color: '#9E6D08', fontWeight: 'bold', fontSize: 10.5, textAlign: 'center' }}>
                       {selectedIndex !== null ? 'Update' : 'Add Line'}
                     </ThemedText>
                   </TouchableOpacity>
@@ -3213,21 +3084,28 @@ export default function DirectPurchaseScreen() {
                     style={[styles.actionBtn, { backgroundColor: '#FFFFFF', borderColor: '#D8CEBD' }]}
                     onPress={handleClearDetail}
                   >
-                    <ThemedText style={{ color: '#554736', fontWeight: 'bold', textAlign: 'center' }}>Clear</ThemedText>
+                    <ThemedText style={{ color: '#554736', fontWeight: 'bold', fontSize: 10.5, textAlign: 'center' }}>Clear</ThemedText>
                   </TouchableOpacity>
 
                   <TouchableOpacity
                     style={[styles.actionBtn, { backgroundColor: '#FFEBEE', borderColor: '#E57373' }]}
                     onPress={handleDeleteDetail}
                   >
-                    <ThemedText style={{ color: '#C62828', fontWeight: 'bold', textAlign: 'center' }}>Delete</ThemedText>
+                    <ThemedText style={{ color: '#C62828', fontWeight: 'bold', fontSize: 10.5, textAlign: 'center' }}>Delete</ThemedText>
                   </TouchableOpacity>
 
                   <TouchableOpacity
-                    style={[styles.actionBtn, { backgroundColor: '#EDE7F6', borderColor: '#9575CD' }]}
-                    onPress={() => router.push('/barcode' as any)}
+                    style={[styles.actionBtn, { backgroundColor: '#F5E7CA', borderColor: '#B8903B' }]}
+                    onPress={() => {
+                      const code = (currentDetail.InventoryCode || (selectedIndex !== null ? details[selectedIndex]?.InventoryCode : '') || '').trim();
+                      if (code) {
+                        router.push({ pathname: '/barcode', params: { inventoryCode: code } });
+                      } else {
+                        router.push('/barcode' as any);
+                      }
+                    }}
                   >
-                    <ThemedText style={{ color: '#512DA8', fontWeight: 'bold', textAlign: 'center' }}>BarCode</ThemedText>
+                    <ThemedText style={{ color: '#8D6007', fontWeight: 'bold', fontSize: 10.5, textAlign: 'center' }}>BarCode</ThemedText>
                   </TouchableOpacity>
                 </View>
               </View>
@@ -3395,10 +3273,9 @@ export default function DirectPurchaseScreen() {
                   </View>
                 </View>
               )}
-            </ScrollView>
           </View>
         </View>
-      </Modal>
+      </ScrollView>
 
       {/* ================= ADDITIONAL DESCRIPTION MODAL (grpAddlDescription) ================= */}
       <Modal visible={addlDescModalVisible} transparent={true} animationType="fade">
@@ -3870,8 +3747,8 @@ export default function DirectPurchaseScreen() {
         </View>
       </Modal>
 
-      {/* ================= TOAST NOTIFICATION (When Modal is Closed) ================= */}
-      {toast.visible && !detailModalVisible && (
+      {/* ================= TOAST NOTIFICATION ================= */}
+      {toast.visible && (
         <View
           style={[
             styles.toastContainer,
@@ -3896,19 +3773,19 @@ export default function DirectPurchaseScreen() {
 const styles = StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: '#FBF9F5', width: '100%' },
   container: { flex: 1, width: '100%' },
-  contentContainer: { width: '100%', padding: 14, paddingBottom: 36 },
+  contentContainer: { width: '100%', padding: 6, paddingBottom: 16 },
 
   // Luxury Gold Card Styling (Matching purchase.tsx)
   goldCard: {
     backgroundColor: '#FFFFFF',
-    borderRadius: 8,
+    borderRadius: 6,
     borderWidth: 1,
     borderColor: '#E8DCB8',
     overflow: 'hidden',
     shadowColor: '#A38035',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08,
-    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.06,
+    shadowRadius: 4,
     elevation: 2,
   },
   cardHeaderBanner: {
@@ -3917,32 +3794,32 @@ const styles = StyleSheet.create({
     backgroundColor: '#F5E7CA',
     borderBottomWidth: 1,
     borderBottomColor: '#E2D3B3',
-    paddingVertical: 7,
-    paddingHorizontal: 12,
+    paddingVertical: 3,
+    paddingHorizontal: 8,
   },
   headerIconBadge: {
-    width: 24,
-    height: 24,
-    borderRadius: 5,
+    width: 20,
+    height: 20,
+    borderRadius: 4,
     backgroundColor: '#FFF8EA',
     borderWidth: 1,
     borderColor: '#E2D2AF',
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 8,
+    marginRight: 6,
   },
   cardHeaderTitle: {
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: 'bold',
     color: '#3B2D17',
     letterSpacing: 0.3,
   },
   cardBody: {
-    padding: 10,
+    padding: 6,
   },
 
   // Rows and Labels (Matching purchase.tsx)
-  row: { flexDirection: 'row', alignItems: 'center', marginBottom: 7, flexWrap: 'wrap' },
+  row: { flexDirection: 'row', alignItems: 'center', marginBottom: 4, flexWrap: 'wrap' },
   label: { fontSize: 11, fontWeight: 'bold', width: 96, marginRight: 6, color: '#3A2E19' },
   labelRight: { fontSize: 11, fontWeight: 'bold', textAlign: 'right', marginRight: 8, color: '#3A2E19' },
 
@@ -3950,11 +3827,11 @@ const styles = StyleSheet.create({
   input: {
     borderWidth: 1,
     borderColor: '#E2D7C5',
-    borderRadius: 6,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    fontSize: 12,
-    height: 28,
+    borderRadius: 5,
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+    fontSize: 11.5,
+    height: 24,
     backgroundColor: '#FFFFFF',
     color: '#2C2519',
   },
@@ -3964,21 +3841,21 @@ const styles = StyleSheet.create({
     color: '#554736',
   },
   lookupBtn: {
-    width: 32,
-    height: 28,
+    width: 28,
+    height: 24,
     borderWidth: 1,
     borderColor: '#E2D7C5',
     borderLeftWidth: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    borderTopRightRadius: 6,
-    borderBottomRightRadius: 6,
+    borderTopRightRadius: 5,
+    borderBottomRightRadius: 5,
     backgroundColor: '#FAF5EA',
   },
   lookupBtnText: {
     color: '#6E5528',
     fontWeight: 'bold',
-    fontSize: 12,
+    fontSize: 11,
   },
 
   // Pill Box
@@ -3988,22 +3865,22 @@ const styles = StyleSheet.create({
     marginLeft: 8,
     borderWidth: 1,
     borderColor: '#DFD3BC',
-    borderRadius: 14,
-    paddingHorizontal: 6,
+    borderRadius: 12,
+    paddingHorizontal: 5,
     paddingVertical: 1,
-    height: 26,
+    height: 23,
     backgroundColor: '#FBF8F2',
   },
 
   // Top Action Buttons
   topActionBtn: {
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    borderRadius: 5,
+    paddingVertical: 4,
+    paddingHorizontal: 10,
+    borderRadius: 4,
     borderWidth: 1,
     borderColor: '#DFD5C3',
     backgroundColor: '#FFFFFF',
-    marginHorizontal: 4,
+    marginHorizontal: 3,
   },
 
   // Table Styling (Matching purchase.tsx)
@@ -4011,27 +3888,26 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#9E6D08',
-    paddingVertical: 4,
-    paddingHorizontal: 12,
-    borderRadius: 5,
+    paddingVertical: 2,
+    paddingHorizontal: 8,
+    borderRadius: 4,
   },
   addLineBtnText: {
     color: '#FFFFFF',
     fontWeight: 'bold',
-    fontSize: 11,
+    fontSize: 10,
   },
   tableHeader: {
     flexDirection: 'row',
     backgroundColor: '#F5E7CA',
     borderBottomWidth: 1,
     borderBottomColor: '#E2D3B3',
-    paddingVertical: 8,
+    paddingVertical: 3,
     paddingHorizontal: 6,
     alignItems: 'center',
-    minHeight: 36,
   },
   tableHeaderText: {
-    fontSize: 11,
+    fontSize: 10.5,
     fontWeight: 'bold',
     color: '#3B2D17',
     paddingHorizontal: 4,
@@ -4039,12 +3915,11 @@ const styles = StyleSheet.create({
   },
   tableRow: {
     flexDirection: 'row',
-    paddingVertical: 7,
+    height: 22,
     paddingHorizontal: 6,
     borderBottomWidth: 1,
     borderBottomColor: '#F0E6D2',
     alignItems: 'center',
-    minHeight: 34,
   },
   tableCellText: {
     fontSize: 11,
@@ -4053,7 +3928,7 @@ const styles = StyleSheet.create({
     textAlignVertical: 'center',
   },
   emptyTableState: {
-    paddingVertical: 30,
+    paddingVertical: 12,
     justifyContent: 'center',
     alignItems: 'center',
     backgroundColor: '#FFFFFF',
@@ -4063,13 +3938,12 @@ const styles = StyleSheet.create({
     backgroundColor: '#F9F1DF',
     borderTopWidth: 1,
     borderTopColor: '#E5D6B6',
-    paddingVertical: 8,
+    paddingVertical: 1,
     paddingHorizontal: 6,
     alignItems: 'center',
-    minHeight: 36,
   },
   tableTotalCellText: {
-    fontSize: 11,
+    fontSize: 10.5,
     fontWeight: 'bold',
     color: '#32230D',
     paddingHorizontal: 4,
@@ -4379,16 +4253,16 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
     borderColor: '#DFD5C3',
     borderWidth: 1,
-    borderRadius: 5,
-    paddingVertical: 5,
-    paddingHorizontal: 14,
+    borderRadius: 4,
+    paddingVertical: 2,
+    paddingHorizontal: 8,
     justifyContent: 'center',
     alignItems: 'center',
-    minWidth: 70,
+    minWidth: 56,
   },
   actionBtnText: {
     fontWeight: '700',
-    fontSize: 11.5,
+    fontSize: 10.5,
     color: '#3B2D17',
   },
   manualBtn: {

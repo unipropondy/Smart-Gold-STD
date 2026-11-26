@@ -562,13 +562,6 @@ export default function InventoryMaintenanceScreen() {
 
         {/* Footer Configuration Card */}
         <View style={styles.footerCard}>
-          <View style={styles.cardHeaderBanner}>
-            <View style={styles.headerIconBadge}>
-              <Ionicons name="calculator-outline" size={13} color="#B48218" />
-            </View>
-            <ThemedText style={styles.cardHeaderTitle}>Calculation & Options</ThemedText>
-          </View>
-
           <View style={styles.footerBody}>
             <View style={styles.footerRow}>
               {/* Additional Description Action Button */}

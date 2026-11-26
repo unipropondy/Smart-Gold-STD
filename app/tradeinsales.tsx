@@ -1289,37 +1289,22 @@ export default function TradeInSalesScreen() {
         <View style={styles.topSection}>
           {/* Left: Customer & Invoice Card */}
           <View style={styles.customerCard}>
-            <View style={styles.cardHeaderBanner}>
-              <View style={styles.headerTitleRow}>
-                <View style={styles.headerIconBadge}>
-                  <Ionicons name="receipt-outline" size={14} color="#8D6409" />
-                </View>
-                <ThemedText style={styles.cardHeaderTitle}>INVOICE & CUSTOMER DETAILS</ThemedText>
-              </View>
-              {salesmanCode ? (
-                <View style={styles.salesmanBadge}>
-                  <Ionicons name="person" size={11} color="#8D6409" />
-                  <ThemedText style={styles.salesmanBadgeText}>{salesmanCode}</ThemedText>
-                </View>
-              ) : null}
-            </View>
-
             <View style={styles.cardBody}>
-              {/* Single Combined Row: Invoice No, Cost/Gram, Loss(%), Customer, Name, Customer Type */}
-              <View style={[styles.formRow, { alignItems: 'flex-end', flexWrap: 'wrap', gap: 10 }]}>
-                <View style={styles.fieldGroup}>
-                  <ThemedText style={styles.fieldLabel}>Invoice No.</ThemedText>
-                  <TextInput
-                    style={[styles.input, styles.readonlyInput, { width: 95 }]}
-                    value={invoiceNo}
-                    editable={false}
-                  />
+              {/* Row 1: Invoice No, Cost / Gram, Loss (%) */}
+              <View style={[styles.formRow, { gap: 6, alignItems: 'center' }]}>
+                <View style={{ width: 68 }}>
+                  <ThemedText style={styles.rowLabel}>Invoice No.</ThemedText>
                 </View>
+                <TextInput
+                  style={[styles.input, styles.readonlyInput, { width: 95 }]}
+                  value={invoiceNo}
+                  editable={false}
+                />
 
-                <View style={styles.fieldGroup}>
-                  <ThemedText style={styles.fieldLabel}>Cost / Gram</ThemedText>
+                <View style={{ flexDirection: 'row', alignItems: 'center', marginLeft: 8 }}>
+                  <ThemedText style={[styles.rowLabel, { width: 70 }]}>Cost / Gram</ThemedText>
                   <TextInput
-                    style={[styles.input, styles.numericInput, { width: 75 }]}
+                    style={[styles.input, styles.numericInput, { width: 65 }]}
                     value={costPerGram}
                     keyboardType="numeric"
                     onChangeText={(val) => {
@@ -1330,10 +1315,10 @@ export default function TradeInSalesScreen() {
                   />
                 </View>
 
-                <View style={styles.fieldGroup}>
-                  <ThemedText style={styles.fieldLabel}>Loss (%)</ThemedText>
+                <View style={{ flexDirection: 'row', alignItems: 'center', marginLeft: 8 }}>
+                  <ThemedText style={[styles.rowLabel, { width: 52 }]}>Loss (%)</ThemedText>
                   <TextInput
-                    style={[styles.input, styles.numericInput, { width: 65 }]}
+                    style={[styles.input, styles.numericInput, { width: 50 }]}
                     value={lossPerc}
                     keyboardType="numeric"
                     onChangeText={(val) => {
@@ -1345,55 +1330,55 @@ export default function TradeInSalesScreen() {
                     }}
                   />
                 </View>
+              </View>
 
-                <View style={styles.fieldGroup}>
-                  <ThemedText style={styles.fieldLabel}>Customer</ThemedText>
-                  <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                    <TouchableOpacity
-                      style={[styles.input, { minWidth: 110, justifyContent: 'center' }]}
-                      onPress={() => {
-                        setCustInputTemp(customerCode);
-                        setIsCustInputModalVisible(true);
-                      }}
-                      activeOpacity={0.7}
-                    >
-                      <ThemedText style={styles.customerCodeText} numberOfLines={1}>
-                        {customerCode || 'Select...'}
-                      </ThemedText>
-                    </TouchableOpacity>
+              {/* Row 2: Customer, Name, Customer Type */}
+              <View style={[styles.formRow, { marginTop: 4, gap: 6, alignItems: 'center' }]}>
+                <View style={{ width: 68 }}>
+                  <ThemedText style={styles.rowLabel}>Customer</ThemedText>
+                </View>
+                <View style={{ width: 120, flexDirection: 'row', alignItems: 'center' }}>
+                  <TouchableOpacity
+                    style={[styles.input, { flex: 1, justifyContent: 'center', borderTopRightRadius: 0, borderBottomRightRadius: 0, borderRightWidth: 0 }]}
+                    onPress={() => {
+                      setCustInputTemp(customerCode);
+                      setIsCustInputModalVisible(true);
+                    }}
+                    activeOpacity={0.7}
+                  >
+                    <ThemedText style={styles.customerCodeText} numberOfLines={1}>
+                      {customerCode || 'Select...'}
+                    </ThemedText>
+                  </TouchableOpacity>
 
-                    <TouchableOpacity
-                      style={styles.btnSearchDots}
-                      onPress={() => openLookupModal('customer')}
-                      activeOpacity={0.7}
-                    >
-                      <Ionicons name="search" size={13} color="#554428" />
-                    </TouchableOpacity>
-                  </View>
+                  <TouchableOpacity
+                    style={styles.btnSearchDots}
+                    onPress={() => openLookupModal('customer')}
+                    activeOpacity={0.7}
+                  >
+                    <Ionicons name="search" size={13} color="#554428" />
+                  </TouchableOpacity>
                 </View>
 
-                <View style={[styles.fieldGroup, { flex: 1, minWidth: 150 }]}>
-                  <ThemedText style={styles.fieldLabel}>Name</ThemedText>
-                  <TextInput
-                    style={[styles.input, styles.readonlyInput, { width: '100%' }]}
-                    value={customerName}
-                    editable={false}
-                    placeholder="Customer Name"
-                    placeholderTextColor="#A89E8D"
-                  />
-                </View>
+                <TextInput
+                  style={[styles.input, styles.readonlyInput, { flex: 1 }]}
+                  value={customerName}
+                  editable={false}
+                  placeholder="Customer Name"
+                  placeholderTextColor="#A89E8D"
+                />
 
-                <View style={{ alignItems: 'flex-end', justifyContent: 'flex-end' }}>
-                  <View style={styles.customerTypeBadge}>
-                    <Ionicons name="shield-checkmark-outline" size={12} color="#9E6D08" style={{ marginRight: 4 }} />
-                    <ThemedText style={styles.customerTypeText}>{customerType}</ThemedText>
-                  </View>
+                <View style={styles.customerTypeBadge}>
+                  <Ionicons name="shield-checkmark-outline" size={12} color="#9E6D08" style={{ marginRight: 4 }} />
+                  <ThemedText style={styles.customerTypeText}>{customerType}</ThemedText>
                 </View>
               </View>
 
               {/* Address Row 1: Address Line 1 & Line 2 */}
-              <View style={[styles.formRow, { marginTop: 6, gap: 8 }]}>
-                <ThemedText style={styles.rowLabel}>Address</ThemedText>
+              <View style={[styles.formRow, { marginTop: 4, gap: 6, alignItems: 'center' }]}>
+                <View style={{ width: 68 }}>
+                  <ThemedText style={styles.rowLabel}>Address</ThemedText>
+                </View>
                 <TextInput
                   style={[styles.input, styles.readonlyInput, { flex: 1 }]}
                   value={address1}
@@ -1411,14 +1396,14 @@ export default function TradeInSalesScreen() {
               </View>
 
               {/* Address Row 2: New Button & Address Line 3 / Postal Code */}
-              <View style={[styles.formRow, { marginTop: 6, gap: 8 }]}>
-                <View style={{ width: 75 }}>
+              <View style={[styles.formRow, { marginTop: 3, gap: 6, alignItems: 'center' }]}>
+                <View style={{ width: 68, alignItems: 'flex-start' }}>
                   <TouchableOpacity
                     style={styles.btnNewCustomer}
                     onPress={() => router.push('/customer')}
                     activeOpacity={0.7}
                   >
-                    <Ionicons name="person-add-outline" size={12} color="#8D6409" style={{ marginRight: 3 }} />
+                    <Ionicons name="person-add-outline" size={11} color="#8D6409" style={{ marginRight: 3 }} />
                     <ThemedText style={styles.btnNewCustomerText}>New</ThemedText>
                   </TouchableOpacity>
                 </View>
@@ -1431,9 +1416,11 @@ export default function TradeInSalesScreen() {
                 />
               </View>
 
-              {/* Row 7: Remarks */}
-              <View style={[styles.formRow, { marginTop: 6 }]}>
-                <ThemedText style={styles.rowLabel}>Remarks</ThemedText>
+              {/* Row 5: Remarks */}
+              <View style={[styles.formRow, { marginTop: 3, gap: 6, alignItems: 'center' }]}>
+                <View style={{ width: 68 }}>
+                  <ThemedText style={styles.rowLabel}>Remarks</ThemedText>
+                </View>
                 <TextInput
                   style={[styles.input, { flex: 1 }]}
                   value={remarks}
@@ -1445,47 +1432,56 @@ export default function TradeInSalesScreen() {
             </View>
           </View>
 
-          {/* Right: Premium Financials Summary Cards */}
+          {/* Right: Summary Card (Matching directpurchase / purchase / tradeingold layout) */}
           <View style={styles.rightFinancials}>
-            {/* Sales Amount Card */}
-            <View style={styles.financialCard}>
-              <View style={styles.financialCardHeader}>
-                <Ionicons name="cart-outline" size={13} color="#8D6409" />
-                <ThemedText style={styles.financialCardTitle}>Sales Amount</ThemedText>
-              </View>
-              <View style={styles.financialValueBox}>
-                <ThemedText style={styles.currencyPrefix}>$</ThemedText>
+            <View style={styles.summaryCardBody}>
+              {/* Sales Amount Row */}
+              <View style={styles.summaryRow}>
+                <ThemedText style={styles.summaryLabel}>Sales Amount</ThemedText>
                 <TextInput
-                  style={styles.financialInput}
+                  style={[styles.input, styles.summaryInput]}
                   value={salesAmount}
                   keyboardType="numeric"
                   onChangeText={setSalesAmount}
                 />
               </View>
-            </View>
 
-            {/* Trade In Amount Card */}
-            <View style={[styles.financialCard, styles.tradeInCard]}>
-              <View style={styles.financialCardHeader}>
-                <Ionicons name="repeat-outline" size={13} color="#8D6409" />
-                <ThemedText style={styles.financialCardTitle}>Trade In Amount</ThemedText>
+              {/* Trade In Amount Row */}
+              <View style={styles.summaryRow}>
+                <ThemedText style={styles.summaryLabel}>Trade In Amount</ThemedText>
+                <TextInput
+                  style={[styles.input, styles.readonlyInput, styles.summaryInput]}
+                  value={totalTradeInAmount.toFixed(2)}
+                  editable={false}
+                />
               </View>
-              <View style={styles.financialValueBox}>
-                <ThemedText style={styles.currencyPrefix}>$</ThemedText>
-                <ThemedText style={styles.financialValueText}>
-                  {totalTradeInAmount.toFixed(2)}
-                </ThemedText>
-              </View>
-            </View>
 
-            {/* Quick Summary Pill */}
-            <View style={styles.itemsSummaryBadge}>
-              <ThemedText style={styles.itemsSummaryText}>
-                Items: {gridItems.length}
-              </ThemedText>
-              <ThemedText style={styles.itemsSummarySubText}>
-                Tot Wt: {gridItems.reduce((acc, it) => acc + (it.Weight || 0), 0).toFixed(2)}g
-              </ThemedText>
+              {/* Balance Amount Row */}
+              <View style={styles.summaryRow}>
+                <ThemedText style={styles.summaryLabel}>Balance Amount</ThemedText>
+                <TextInput
+                  style={[
+                    styles.input,
+                    styles.readonlyInput,
+                    styles.summaryInput,
+                    (parseFloat(salesAmount) || 0) - totalTradeInAmount < 0
+                      ? { color: '#C62828' }
+                      : { color: '#2E7D32' },
+                  ]}
+                  value={((parseFloat(salesAmount) || 0) - totalTradeInAmount).toFixed(2)}
+                  editable={false}
+                />
+              </View>
+
+              {/* Items Summary Row */}
+              <View style={styles.summaryRow}>
+                <ThemedText style={styles.summaryLabel}>Total Weight</ThemedText>
+                <TextInput
+                  style={[styles.input, styles.readonlyInput, styles.summaryInput, { color: '#8D6409' }]}
+                  value={`${gridItems.reduce((acc, it) => acc + (it.Weight || 0), 0).toFixed(2)}g`}
+                  editable={false}
+                />
+              </View>
             </View>
           </View>
         </View>
@@ -1501,10 +1497,14 @@ export default function TradeInSalesScreen() {
           </View>
 
           {/* Grid Body */}
-          <View style={styles.gridBody}>
+          <ScrollView
+            style={styles.gridBody}
+            nestedScrollEnabled={true}
+            showsVerticalScrollIndicator={true}
+          >
             {gridItems.length === 0 ? (
               <View style={styles.gridEmptyArea}>
-                <Ionicons name="basket-outline" size={28} color="#C8BEAC" />
+                <Ionicons name="basket-outline" size={24} color="#C8BEAC" />
                 <ThemedText style={styles.emptyGridText}>No trade-in items added yet</ThemedText>
                 <ThemedText style={styles.emptyGridSubText}>Enter item details below and tap "Add"</ThemedText>
               </View>
@@ -1544,7 +1544,7 @@ export default function TradeInSalesScreen() {
                 );
               })
             )}
-          </View>
+          </ScrollView>
         </View>
 
         {/* LOWER SECTION: Entry Section & Input Boxes (Directly below Grid) */}
@@ -2099,13 +2099,13 @@ const styles = StyleSheet.create({
     backgroundColor: '#FBF9F5',
   },
   container: {
-    padding: 10,
-    paddingBottom: 24,
+    padding: 6,
+    paddingBottom: 16,
   },
 
   // ===== TOP NAV HEADER =====
   topNavHeader: {
-    height: 48,
+    height: 38,
     backgroundColor: '#FFFFFF',
     flexDirection: 'row',
     alignItems: 'center',
@@ -2122,44 +2122,44 @@ const styles = StyleSheet.create({
   headerLeft: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
+    gap: 8,
   },
   backBtn: {
-    padding: 6,
-    borderRadius: 6,
+    padding: 3,
+    borderRadius: 4,
     backgroundColor: '#FAF5EA',
     borderWidth: 1,
     borderColor: '#E8DCB8',
   },
   headerTitle: {
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: 'bold',
     color: '#3B2D17',
-    letterSpacing: 0.5,
+    letterSpacing: 0.3,
   },
   headerSubtitle: {
-    fontSize: 10,
+    fontSize: 9.5,
     color: '#8D6409',
     fontWeight: '600',
   },
   headerRight: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: 6,
   },
   headerActionBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 4,
     backgroundColor: '#FAF5EA',
     borderWidth: 1,
     borderColor: '#DFD5C3',
     gap: 4,
   },
   headerActionBtnText: {
-    fontSize: 11,
+    fontSize: 10.5,
     fontWeight: 'bold',
     color: '#5C4A28',
   },
@@ -2168,7 +2168,7 @@ const styles = StyleSheet.create({
     borderColor: '#B8903B',
   },
   headerSaveBtnText: {
-    fontSize: 11,
+    fontSize: 10.5,
     fontWeight: 'bold',
     color: '#9E6D08',
   },
@@ -2176,25 +2176,25 @@ const styles = StyleSheet.create({
   // ===== TOP SECTION (Customer Card + Financial Totals) =====
   topSection: {
     flexDirection: 'row',
-    gap: 10,
+    gap: 6,
   },
   customerCard: {
     flex: 1,
     backgroundColor: '#FFFFFF',
-    borderRadius: 8,
+    borderRadius: 6,
     borderWidth: 1,
     borderColor: '#E8DCB8',
     shadowColor: '#A38035',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.06,
-    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 3,
     elevation: 2,
     overflow: 'hidden',
   },
   cardHeaderBanner: {
     backgroundColor: '#F5E7CA',
-    paddingHorizontal: 10,
-    paddingVertical: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
@@ -2204,12 +2204,12 @@ const styles = StyleSheet.create({
   headerTitleRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    gap: 5,
   },
   headerIconBadge: {
-    width: 20,
-    height: 20,
-    borderRadius: 4,
+    width: 18,
+    height: 18,
+    borderRadius: 3,
     backgroundColor: '#FFF8EA',
     borderWidth: 1,
     borderColor: '#E2D2AF',
@@ -2217,29 +2217,29 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   cardHeaderTitle: {
-    fontSize: 11,
+    fontSize: 10.5,
     fontWeight: 'bold',
     color: '#3B2D17',
-    letterSpacing: 0.4,
+    letterSpacing: 0.3,
   },
   salesmanBadge: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#FFF8EA',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 4,
+    paddingHorizontal: 5,
+    paddingVertical: 1,
+    borderRadius: 3,
     borderWidth: 1,
     borderColor: '#E2D2AF',
     gap: 3,
   },
   salesmanBadgeText: {
-    fontSize: 10,
+    fontSize: 9.5,
     fontWeight: 'bold',
     color: '#8D6409',
   },
   cardBody: {
-    padding: 10,
+    padding: 6,
   },
   formRow: {
     flexDirection: 'row',
@@ -2249,26 +2249,26 @@ const styles = StyleSheet.create({
     flexDirection: 'column',
   },
   fieldLabel: {
-    fontSize: 10,
+    fontSize: 9.5,
     fontWeight: '600',
     color: '#6E5528',
-    marginBottom: 3,
+    marginBottom: 2,
   },
   rowLabel: {
-    fontSize: 11,
+    fontSize: 10.5,
     fontWeight: '600',
     color: '#554428',
-    width: 75,
+    width: 60,
   },
   input: {
-    height: 28,
+    height: 24,
     backgroundColor: '#FFFFFF',
     borderWidth: 1,
     borderColor: '#D8CDBA',
-    borderRadius: 5,
-    paddingHorizontal: 8,
+    borderRadius: 4,
+    paddingHorizontal: 6,
     paddingVertical: 0,
-    fontSize: 11,
+    fontSize: 10.5,
     color: '#3B2D17',
     fontWeight: '500',
   },
@@ -2281,19 +2281,19 @@ const styles = StyleSheet.create({
     textAlign: 'right',
   },
   customerCodeText: {
-    fontSize: 11,
+    fontSize: 10.5,
     fontWeight: 'bold',
     color: '#8D6409',
   },
   btnSearchDots: {
-    width: 28,
-    height: 28,
+    width: 24,
+    height: 24,
     backgroundColor: '#F5EBD4',
     borderWidth: 1,
     borderLeftWidth: 0,
     borderColor: '#D8CDBA',
-    borderTopRightRadius: 5,
-    borderBottomRightRadius: 5,
+    borderTopRightRadius: 4,
+    borderBottomRightRadius: 4,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -2303,12 +2303,12 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFF8EA',
     borderWidth: 1,
     borderColor: '#D8C59A',
-    borderRadius: 6,
+    borderRadius: 4,
     paddingHorizontal: 8,
-    paddingVertical: 4,
+    height: 24,
   },
   customerTypeText: {
-    fontSize: 11,
+    fontSize: 10.5,
     fontWeight: 'bold',
     color: '#9E6D08',
   },
@@ -2316,27 +2316,24 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    width: 66,
-    height: 28,
+    width: 60,
+    height: 24,
     backgroundColor: '#FAF5EA',
     borderWidth: 1,
     borderColor: '#D8C59A',
-    borderRadius: 5,
+    borderRadius: 4,
   },
   btnNewCustomerText: {
-    fontSize: 11,
+    fontSize: 10.5,
     fontWeight: 'bold',
     color: '#8D6409',
   },
 
   // ===== RIGHT FINANCIALS =====
   rightFinancials: {
-    width: 175,
-    gap: 8,
-  },
-  financialCard: {
+    width: 290,
     backgroundColor: '#FFFFFF',
-    borderRadius: 8,
+    borderRadius: 6,
     borderWidth: 1,
     borderColor: '#E8DCB8',
     shadowColor: '#A38035',
@@ -2344,81 +2341,35 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.05,
     shadowRadius: 3,
     elevation: 2,
-    overflow: 'hidden',
+    padding: 5,
   },
-  tradeInCard: {
-    borderColor: '#B8903B',
-    borderWidth: 1.5,
+  summaryCardBody: {
+    flex: 1,
+    justifyContent: 'space-between',
   },
-  financialCardHeader: {
-    backgroundColor: '#F5E7CA',
-    paddingHorizontal: 8,
-    paddingVertical: 5,
+  summaryRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 5,
-    borderBottomWidth: 1,
-    borderBottomColor: '#E2D3B3',
+    justifyContent: 'space-between',
+    marginVertical: 1,
   },
-  financialCardTitle: {
+  summaryLabel: {
     fontSize: 11,
-    fontWeight: 'bold',
-    color: '#3B2D17',
-    letterSpacing: 0.3,
+    fontWeight: '600',
+    color: '#554428',
+    width: 120,
   },
-  financialValueBox: {
-    backgroundColor: '#FFFDF9',
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'flex-end',
-    minHeight: 36,
-  },
-  currencyPrefix: {
-    fontSize: 13,
-    fontWeight: 'bold',
-    color: '#8D6409',
-    marginRight: 4,
-  },
-  financialValueText: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#9E6D08',
-  },
-  financialInput: {
-    fontSize: 15,
-    fontWeight: 'bold',
-    color: '#3B2D17',
+  summaryInput: {
+    flex: 1,
     textAlign: 'right',
-    padding: 0,
-    minWidth: 70,
-  },
-  itemsSummaryBadge: {
-    backgroundColor: '#FAF5EA',
-    borderRadius: 6,
-    borderWidth: 1,
-    borderColor: '#E8DCB8',
-    paddingHorizontal: 8,
-    paddingVertical: 5,
-    alignItems: 'center',
-  },
-  itemsSummaryText: {
-    fontSize: 11,
     fontWeight: 'bold',
-    color: '#5C4A28',
-  },
-  itemsSummarySubText: {
-    fontSize: 10,
-    color: '#8D6409',
-    marginTop: 1,
   },
 
   // ===== MIDDLE SECTION: DATA GRID (grdTrade) =====
   gridContainer: {
-    marginTop: 10,
+    marginTop: 6,
     backgroundColor: '#FFFFFF',
-    borderRadius: 8,
+    borderRadius: 6,
     borderWidth: 1,
     borderColor: '#E8DCB8',
     shadowColor: '#A38035',
@@ -2431,44 +2382,43 @@ const styles = StyleSheet.create({
   gridHeader: {
     flexDirection: 'row',
     backgroundColor: '#F5E7CA',
-    paddingVertical: 8,
-    paddingHorizontal: 10,
+    paddingVertical: 3,
+    paddingHorizontal: 8,
     borderBottomWidth: 1,
     borderBottomColor: '#E2D3B3',
   },
   gridHeaderText: {
-    fontSize: 11,
+    fontSize: 10.5,
     fontWeight: 'bold',
     color: '#3B2D17',
-    letterSpacing: 0.3,
+    letterSpacing: 0.2,
   },
   gridBody: {
-    minHeight: 160,
+    height: 88,
     backgroundColor: '#FFFFFF',
   },
   gridEmptyArea: {
-    minHeight: 160,
+    height: 88,
     justifyContent: 'center',
     alignItems: 'center',
     backgroundColor: '#FCFAF6',
-    padding: 20,
-    gap: 4,
+    padding: 10,
+    gap: 2,
   },
   emptyGridText: {
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '600',
     color: '#8D6409',
-    marginTop: 4,
   },
   emptyGridSubText: {
-    fontSize: 10,
+    fontSize: 9.5,
     color: '#A89E8D',
   },
   gridRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 8,
-    paddingHorizontal: 10,
+    height: 22,
+    paddingHorizontal: 8,
     borderBottomWidth: 1,
     borderBottomColor: '#F3EBDD',
     backgroundColor: '#FFFFFF',
@@ -2482,9 +2432,9 @@ const styles = StyleSheet.create({
     borderLeftColor: '#B8903B',
   },
   selectedIndicatorDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
+    width: 5,
+    height: 5,
+    borderRadius: 2.5,
     backgroundColor: '#B8903B',
   },
   gridCellText: {
@@ -2498,9 +2448,9 @@ const styles = StyleSheet.create({
 
   // ===== LOWER SECTION: DETAIL ENTRY SECTION =====
   detailEntrySection: {
-    marginTop: 10,
+    marginTop: 6,
     backgroundColor: '#FFFFFF',
-    borderRadius: 8,
+    borderRadius: 6,
     borderWidth: 1,
     borderColor: '#E8DCB8',
     shadowColor: '#A38035',
@@ -2509,12 +2459,12 @@ const styles = StyleSheet.create({
     shadowRadius: 3,
     elevation: 2,
     overflow: 'hidden',
-    paddingBottom: 8,
+    paddingBottom: 4,
   },
   detailEntryBanner: {
     backgroundColor: '#F7ECCF',
-    paddingHorizontal: 10,
-    paddingVertical: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
@@ -2522,26 +2472,26 @@ const styles = StyleSheet.create({
     borderBottomColor: '#E6D7B4',
   },
   detailEntryBannerTitle: {
-    fontSize: 11,
+    fontSize: 10.5,
     fontWeight: 'bold',
     color: '#3B2D17',
     letterSpacing: 0.3,
   },
   selectedItemPill: {
-    fontSize: 10,
+    fontSize: 9,
     fontWeight: 'bold',
     color: '#9E6D08',
     backgroundColor: '#FFF8EA',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 4,
+    paddingHorizontal: 5,
+    paddingVertical: 1,
+    borderRadius: 3,
     borderWidth: 1,
     borderColor: '#E2D2AF',
   },
   entryHeaderLabelsRow: {
     flexDirection: 'row',
-    paddingHorizontal: 8,
-    paddingTop: 6,
+    paddingHorizontal: 6,
+    paddingTop: 3,
     paddingBottom: 2,
   },
   entryColLabel: {
@@ -2551,18 +2501,18 @@ const styles = StyleSheet.create({
   },
   inputsRow: {
     flexDirection: 'row',
-    paddingHorizontal: 8,
+    paddingHorizontal: 6,
     gap: 4,
   },
   inputBox: {
-    height: 28,
+    height: 24,
     backgroundColor: '#FFFFFF',
     borderWidth: 1,
     borderColor: '#D8CDBA',
-    borderRadius: 5,
-    paddingHorizontal: 8,
+    borderRadius: 4,
+    paddingHorizontal: 6,
     paddingVertical: 0,
-    fontSize: 11,
+    fontSize: 10.5,
     color: '#3B2D17',
     fontWeight: '500',
   },
@@ -2576,18 +2526,18 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    height: 28,
-    paddingHorizontal: 10,
-    borderRadius: 5,
+    height: 24,
+    paddingHorizontal: 8,
+    borderRadius: 4,
     borderWidth: 1,
-    gap: 4,
+    gap: 3,
   },
   btnAddItem: {
     backgroundColor: '#FFF8E7',
     borderColor: '#B8903B',
   },
   btnAddItemText: {
-    fontSize: 11,
+    fontSize: 10.5,
     fontWeight: 'bold',
     color: '#8D6409',
   },
@@ -2596,7 +2546,7 @@ const styles = StyleSheet.create({
     borderColor: '#F2A8A2',
   },
   btnDeleteItemText: {
-    fontSize: 11,
+    fontSize: 10.5,
     fontWeight: 'bold',
     color: '#C62828',
   },
@@ -2605,7 +2555,7 @@ const styles = StyleSheet.create({
     borderColor: '#DFD5C3',
   },
   btnClearItemText: {
-    fontSize: 11,
+    fontSize: 10.5,
     fontWeight: 'bold',
     color: '#5C4A28',
   },
@@ -2614,27 +2564,27 @@ const styles = StyleSheet.create({
   bottomBar: {
     flexDirection: 'row',
     justifyContent: 'flex-end',
-    gap: 8,
-    marginTop: 14,
-    paddingBottom: 10,
+    gap: 6,
+    marginTop: 8,
+    paddingBottom: 6,
   },
   bottomActionBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    minWidth: 105,
-    height: 32,
-    borderRadius: 6,
+    minWidth: 85,
+    height: 28,
+    borderRadius: 4,
     borderWidth: 1,
-    paddingHorizontal: 12,
-    gap: 5,
+    paddingHorizontal: 10,
+    gap: 4,
   },
   bottomBtnPrimary: {
     backgroundColor: '#F9F2E2',
     borderColor: '#B8903B',
   },
   bottomBtnPrimaryText: {
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: 'bold',
     color: '#9E6D08',
   },
@@ -2643,7 +2593,7 @@ const styles = StyleSheet.create({
     borderColor: '#DFD5C3',
   },
   bottomBtnSecondaryText: {
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: 'bold',
     color: '#5C4A28',
   },

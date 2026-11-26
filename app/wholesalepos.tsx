@@ -1608,8 +1608,95 @@ export default function WholeSalePOSScreen() {
           </View>
         </View>
 
-        {/* MIDDLE SECTION: Item Entry Form Card */}
-        <View style={[styles.goldCard, { marginTop: 8 }]}>
+        {/* MIDDLE SECTION: 100% Full-Width Items Table */}
+        <View style={[styles.goldCard, { marginTop: 6, minHeight: 110 }]}>
+          <View style={{ width: '100%' }}>
+            {/* Table Header */}
+            <View style={styles.tableHeader}>
+              <ThemedText style={[styles.tableHeaderText, { flex: 1.4 }]}>Inventory Code</ThemedText>
+              <ThemedText style={[styles.tableHeaderText, { flex: 2.3 }]}>Description</ThemedText>
+              <ThemedText style={[styles.tableHeaderText, { flex: 1, textAlign: 'right' }]}>Weight</ThemedText>
+              <ThemedText style={[styles.tableHeaderText, { flex: 1, textAlign: 'right' }]}>Gold Loss</ThemedText>
+              <ThemedText style={[styles.tableHeaderText, { flex: 1, textAlign: 'right' }]}>Cost/g</ThemedText>
+              <ThemedText style={[styles.tableHeaderText, { flex: 1, textAlign: 'right' }]}>SMC</ThemedText>
+              <ThemedText style={[styles.tableHeaderText, { flex: 0.8, textAlign: 'right' }]}>PCS</ThemedText>
+              <ThemedText style={[styles.tableHeaderText, { flex: 1.3, textAlign: 'right' }]}>Total</ThemedText>
+              <ThemedText style={[styles.tableHeaderText, { width: 60, textAlign: 'center' }]}>Act</ThemedText>
+            </View>
+
+            {/* Table Body (Fixed height 88px for 4 records with vertical scrolling) */}
+            <ScrollView
+              style={{ height: 88 }}
+              nestedScrollEnabled={true}
+              showsVerticalScrollIndicator={true}
+            >
+              {details.length === 0 ? (
+                <View style={styles.emptyTableState}>
+                  <Ionicons name="cart-outline" size={24} color="#D0C2A8" />
+                  <ThemedText style={styles.emptyTableTitle}>No items added yet</ThemedText>
+                  <ThemedText style={styles.emptyTableSubtitle}>
+                    Fill in the item code and attributes below, then click '+ Add Item'
+                  </ThemedText>
+                </View>
+              ) : (
+                details.map((item, index) => (
+                  <View
+                    key={index.toString()}
+                    style={[
+                      styles.tableRow,
+                      index % 2 === 1 && { backgroundColor: '#FCFAF6' },
+                      selectedIndex === index && styles.tableRowSelected,
+                    ]}
+                  >
+                    <ThemedText style={[styles.tableCellText, { flex: 1.4, fontWeight: 'bold', color: '#8D6409' }]}>
+                      {item.InventoryCode}
+                    </ThemedText>
+                    <ThemedText style={[styles.tableCellText, { flex: 2.3 }]} numberOfLines={1}>
+                      {item.Description}
+                    </ThemedText>
+                    <ThemedText style={[styles.tableCellText, { flex: 1, textAlign: 'right' }]}>
+                      {parseFloat(item.Weight || 0).toFixed(2)}
+                    </ThemedText>
+                    <ThemedText style={[styles.tableCellText, { flex: 1, textAlign: 'right' }]}>
+                      {parseFloat(item.GoldLoss || 0).toFixed(2)}
+                    </ThemedText>
+                    <ThemedText style={[styles.tableCellText, { flex: 1, textAlign: 'right' }]}>
+                      {parseFloat(item.CostPerGram || 0).toFixed(2)}
+                    </ThemedText>
+                    <ThemedText style={[styles.tableCellText, { flex: 1, textAlign: 'right' }]}>
+                      {parseFloat(item.SMC || 0).toFixed(2)}
+                    </ThemedText>
+                    <ThemedText style={[styles.tableCellText, { flex: 0.8, textAlign: 'right', fontWeight: 'bold' }]}>
+                      {item.PCS}
+                    </ThemedText>
+                    <ThemedText style={[styles.tableCellText, { flex: 1.3, textAlign: 'right', fontWeight: 'bold', color: '#9E6D08' }]}>
+                      {parseFloat(item.TotalValue || 0).toFixed(2)}
+                    </ThemedText>
+                    <View style={{ width: 60, flexDirection: 'row', justifyContent: 'center', gap: 6 }}>
+                      <TouchableOpacity
+                        onPress={() => editDetail(index)}
+                        activeOpacity={0.7}
+                        style={{ padding: 4 }}
+                      >
+                        <Ionicons name="pencil" size={14} color="#B48218" />
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        onPress={() => removeDetail(index)}
+                        activeOpacity={0.7}
+                        style={{ padding: 4 }}
+                      >
+                        <Ionicons name="trash-outline" size={14} color="#D93829" />
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                ))
+              )}
+            </ScrollView>
+          </View>
+        </View>
+
+        {/* BOTTOM SECTION: Item Entry Form Card */}
+        <View style={[styles.goldCard, { marginTop: 6 }]}>
           <View style={styles.cardHeaderBanner}>
             <View style={{ flexDirection: 'row', alignItems: 'center' }}>
               <View style={styles.headerIconBadge}>
@@ -1746,87 +1833,6 @@ export default function WholeSalePOSScreen() {
                 />
               </View>
             </View>
-          </View>
-        </View>
-
-        {/* BOTTOM SECTION: 100% Full-Width Items Table */}
-        <View style={[styles.goldCard, { marginTop: 8, minHeight: 240 }]}>
-          <View style={{ width: '100%' }}>
-            {/* Table Header */}
-            <View style={styles.tableHeader}>
-              <ThemedText style={[styles.tableHeaderText, { flex: 1.4 }]}>Inventory Code</ThemedText>
-              <ThemedText style={[styles.tableHeaderText, { flex: 2.3 }]}>Description</ThemedText>
-              <ThemedText style={[styles.tableHeaderText, { flex: 1, textAlign: 'right' }]}>Weight</ThemedText>
-              <ThemedText style={[styles.tableHeaderText, { flex: 1, textAlign: 'right' }]}>Gold Loss</ThemedText>
-              <ThemedText style={[styles.tableHeaderText, { flex: 1, textAlign: 'right' }]}>Cost/g</ThemedText>
-              <ThemedText style={[styles.tableHeaderText, { flex: 1, textAlign: 'right' }]}>SMC</ThemedText>
-              <ThemedText style={[styles.tableHeaderText, { flex: 0.8, textAlign: 'right' }]}>PCS</ThemedText>
-              <ThemedText style={[styles.tableHeaderText, { flex: 1.3, textAlign: 'right' }]}>Total</ThemedText>
-              <ThemedText style={[styles.tableHeaderText, { width: 60, textAlign: 'center' }]}>Act</ThemedText>
-            </View>
-
-            {/* Table Rows */}
-            {details.length === 0 ? (
-              <View style={styles.emptyTableState}>
-                <Ionicons name="cart-outline" size={30} color="#D0C2A8" />
-                <ThemedText style={styles.emptyTableTitle}>No items added yet</ThemedText>
-                <ThemedText style={styles.emptyTableSubtitle}>
-                  Fill in the item code and attributes above, then click '+ Add Item'
-                </ThemedText>
-              </View>
-            ) : (
-              details.map((item, index) => (
-                <View
-                  key={index.toString()}
-                  style={[
-                    styles.tableRow,
-                    index % 2 === 1 && { backgroundColor: '#FCFAF6' },
-                    selectedIndex === index && styles.tableRowSelected,
-                  ]}
-                >
-                  <ThemedText style={[styles.tableCellText, { flex: 1.4, fontWeight: 'bold', color: '#8D6409' }]}>
-                    {item.InventoryCode}
-                  </ThemedText>
-                  <ThemedText style={[styles.tableCellText, { flex: 2.3 }]} numberOfLines={1}>
-                    {item.Description}
-                  </ThemedText>
-                  <ThemedText style={[styles.tableCellText, { flex: 1, textAlign: 'right' }]}>
-                    {parseFloat(item.Weight || 0).toFixed(2)}
-                  </ThemedText>
-                  <ThemedText style={[styles.tableCellText, { flex: 1, textAlign: 'right' }]}>
-                    {parseFloat(item.GoldLoss || 0).toFixed(2)}
-                  </ThemedText>
-                  <ThemedText style={[styles.tableCellText, { flex: 1, textAlign: 'right' }]}>
-                    {parseFloat(item.CostPerGram || 0).toFixed(2)}
-                  </ThemedText>
-                  <ThemedText style={[styles.tableCellText, { flex: 1, textAlign: 'right' }]}>
-                    {parseFloat(item.SMC || 0).toFixed(2)}
-                  </ThemedText>
-                  <ThemedText style={[styles.tableCellText, { flex: 0.8, textAlign: 'right', fontWeight: 'bold' }]}>
-                    {item.PCS}
-                  </ThemedText>
-                  <ThemedText style={[styles.tableCellText, { flex: 1.3, textAlign: 'right', fontWeight: 'bold', color: '#9E6D08' }]}>
-                    {parseFloat(item.TotalValue || 0).toFixed(2)}
-                  </ThemedText>
-                  <View style={{ width: 60, flexDirection: 'row', justifyContent: 'center', gap: 6 }}>
-                    <TouchableOpacity
-                      onPress={() => editDetail(index)}
-                      activeOpacity={0.7}
-                      style={{ padding: 4 }}
-                    >
-                      <Ionicons name="pencil" size={16} color="#B48218" />
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      onPress={() => removeDetail(index)}
-                      activeOpacity={0.7}
-                      style={{ padding: 4 }}
-                    >
-                      <Ionicons name="trash-outline" size={16} color="#D93829" />
-                    </TouchableOpacity>
-                  </View>
-                </View>
-              ))
-            )}
           </View>
         </View>
       </ScrollView>
@@ -2280,7 +2286,8 @@ const styles = StyleSheet.create({
     backgroundColor: '#FBF9F5',
   },
   contentContainer: {
-    padding: 8,
+    padding: 6,
+    paddingBottom: 16,
   },
 
   // ===== TOP HEADER BAR =====
@@ -2291,19 +2298,19 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
     borderBottomWidth: 1,
     borderBottomColor: '#EBE2D2',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
   },
   headerLeft: {
     flexDirection: 'row',
     alignItems: 'center',
   },
   backButton: {
-    padding: 4,
-    marginRight: 8,
+    padding: 3,
+    marginRight: 6,
   },
   headerTitle: {
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: 'bold',
     color: '#3B2D17',
     letterSpacing: 0.3,
@@ -2311,7 +2318,7 @@ const styles = StyleSheet.create({
   headerActions: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: 6,
   },
   headerBtnSecondary: {
     flexDirection: 'row',
@@ -2319,12 +2326,12 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
     borderWidth: 1,
     borderColor: '#DFD3BC',
-    borderRadius: 6,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
+    borderRadius: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
   },
   headerBtnSecondaryText: {
-    fontSize: 11,
+    fontSize: 10.5,
     fontWeight: 'bold',
     color: '#554428',
   },
@@ -2334,12 +2341,12 @@ const styles = StyleSheet.create({
     backgroundColor: '#F5E7CA',
     borderWidth: 1,
     borderColor: '#D4C3A3',
-    borderRadius: 6,
-    paddingHorizontal: 12,
-    paddingVertical: 5,
+    borderRadius: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 3,
   },
   headerBtnPrimaryText: {
-    fontSize: 11,
+    fontSize: 10.5,
     fontWeight: 'bold',
     color: '#9E6D08',
   },
@@ -2347,26 +2354,26 @@ const styles = StyleSheet.create({
   // ===== TOP SPLIT ROW =====
   topSplitRow: {
     flexDirection: 'row',
-    gap: 8,
+    gap: 6,
   },
 
   // ===== LUXURY GOLD CARD =====
   goldCard: {
     backgroundColor: '#FFFFFF',
-    borderRadius: 8,
+    borderRadius: 6,
     borderWidth: 1,
     borderColor: '#E8DCB8',
     shadowColor: '#A38035',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08,
-    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 3,
     elevation: 2,
     overflow: 'hidden',
   },
   cardHeaderBanner: {
     backgroundColor: '#F5E7CA',
-    paddingHorizontal: 10,
-    paddingVertical: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
     borderBottomWidth: 1,
     borderBottomColor: '#E2D3B3',
     flexDirection: 'row',
@@ -2374,36 +2381,36 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
   },
   headerIconBadge: {
-    width: 22,
-    height: 22,
-    borderRadius: 5,
+    width: 18,
+    height: 18,
+    borderRadius: 3,
     backgroundColor: '#FFF8EA',
     borderWidth: 1,
     borderColor: '#E2D2AF',
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 6,
+    marginRight: 5,
   },
   cardHeaderTitle: {
-    fontSize: 12,
+    fontSize: 10.5,
     fontWeight: 'bold',
     color: '#3B2D17',
     letterSpacing: 0.3,
   },
   cardBody: {
-    padding: 8,
+    padding: 6,
   },
   counterBadge: {
     backgroundColor: '#FAF5EA',
     borderWidth: 1,
     borderColor: '#E2D7C5',
-    borderRadius: 10,
-    paddingHorizontal: 7,
+    borderRadius: 8,
+    paddingHorizontal: 6,
     paddingVertical: 1,
-    marginLeft: 8,
+    marginLeft: 6,
   },
   counterBadgeText: {
-    fontSize: 10,
+    fontSize: 9.5,
     fontWeight: 'bold',
     color: '#7D5E19',
   },
@@ -2412,30 +2419,30 @@ const styles = StyleSheet.create({
   formRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 6,
+    marginBottom: 4,
   },
   inputLabel: {
-    fontSize: 11,
+    fontSize: 10.5,
     fontWeight: 'bold',
     color: '#4A3B2C',
     marginBottom: 2,
   },
   inlineFormLabel: {
-    fontSize: 11,
+    fontSize: 10.5,
     fontWeight: 'bold',
     color: '#4A3B2C',
-    width: 95,
+    width: 85,
     marginRight: 6,
   },
   input: {
-    height: 28,
+    height: 24,
     backgroundColor: '#FFFFFF',
     borderWidth: 1,
     borderColor: '#E2D7C5',
-    borderRadius: 6,
-    paddingHorizontal: 8,
+    borderRadius: 4,
+    paddingHorizontal: 6,
     paddingVertical: 0,
-    fontSize: 12,
+    fontSize: 11,
     color: '#2B2118',
   },
   readonlyInput: {
@@ -2444,19 +2451,19 @@ const styles = StyleSheet.create({
     color: '#554736',
   },
   lookupBtn: {
-    width: 28,
-    height: 28,
+    width: 24,
+    height: 24,
     backgroundColor: '#FAF5EA',
     borderWidth: 1,
     borderColor: '#D4C3A3',
-    borderRadius: 5,
+    borderRadius: 4,
     marginLeft: 4,
     alignItems: 'center',
     justifyContent: 'center',
     flexShrink: 0,
   },
   lookupBtnText: {
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: 'bold',
     color: '#6E5528',
     letterSpacing: 1,
@@ -2469,73 +2476,73 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     borderWidth: 1,
     borderColor: '#DFD3BC',
-    borderRadius: 14,
-    paddingHorizontal: 6,
-    paddingVertical: 2,
+    borderRadius: 12,
+    paddingHorizontal: 5,
+    paddingVertical: 1,
     backgroundColor: '#FBF8F2',
   },
   radioContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginHorizontal: 5,
+    marginHorizontal: 4,
   },
   radioCircle: {
-    width: 13,
-    height: 13,
-    borderRadius: 7,
+    width: 12,
+    height: 12,
+    borderRadius: 6,
     borderWidth: 1.5,
     borderColor: '#B8903B',
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 4,
+    marginRight: 3,
     backgroundColor: '#FFFFFF',
   },
   radioCircleSelected: {
     borderColor: '#B8903B',
   },
   radioInner: {
-    width: 5,
-    height: 5,
-    borderRadius: 2.5,
+    width: 4,
+    height: 4,
+    borderRadius: 2,
     backgroundColor: '#B8903B',
   },
   radioLabel: {
-    fontSize: 10,
+    fontSize: 9.5,
     color: '#362B1A',
     fontWeight: 'bold',
   },
 
   // ===== SUMMARY PANEL =====
   summaryBody: {
-    padding: 8,
-    gap: 4,
+    padding: 6,
+    gap: 2,
   },
   summaryRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingVertical: 2,
+    paddingVertical: 1,
   },
   summaryLabel: {
-    fontSize: 11,
+    fontSize: 10.5,
     color: '#5A4A38',
     fontWeight: '500',
   },
   summaryValue: {
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: 'bold',
     color: '#2B2118',
   },
   summaryInput: {
-    height: 24,
-    width: 80,
+    height: 22,
+    width: 75,
     backgroundColor: '#FFFFFF',
     borderWidth: 1,
     borderColor: '#E2D7C5',
     borderRadius: 4,
-    paddingHorizontal: 6,
+    paddingHorizontal: 5,
     paddingVertical: 0,
-    fontSize: 11,
+    fontSize: 10.5,
     fontWeight: 'bold',
     color: '#2B2118',
     textAlign: 'right',
@@ -2543,23 +2550,23 @@ const styles = StyleSheet.create({
   summaryTotalRow: {
     borderTopWidth: 1,
     borderTopColor: '#EBE2D2',
-    marginTop: 4,
-    paddingTop: 6,
+    marginTop: 2,
+    paddingTop: 3,
   },
   summaryTotalLabel: {
-    fontSize: 13,
+    fontSize: 11.5,
     fontWeight: 'bold',
     color: '#3B2D17',
   },
   summaryTotalValue: {
-    fontSize: 14,
+    fontSize: 12.5,
     fontWeight: 'bold',
     color: '#B48218',
   },
 
   // ===== ENTRY FORM LABELS & BUTTONS =====
   entryLabel: {
-    fontSize: 10,
+    fontSize: 9.5,
     fontWeight: 'bold',
     color: '#6E5528',
     marginBottom: 2,
@@ -2570,12 +2577,12 @@ const styles = StyleSheet.create({
     backgroundColor: '#FAF2DE',
     borderWidth: 1,
     borderColor: '#DECFA9',
-    borderRadius: 5,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
+    borderRadius: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
   },
   addItemBtnText: {
-    fontSize: 11,
+    fontSize: 10.5,
     fontWeight: 'bold',
     color: '#7D5E19',
   },
@@ -2584,14 +2591,14 @@ const styles = StyleSheet.create({
   tableHeader: {
     flexDirection: 'row',
     backgroundColor: '#F5E7CA',
-    paddingVertical: 6,
+    paddingVertical: 4,
     paddingHorizontal: 8,
     borderBottomWidth: 1,
     borderBottomColor: '#E2D3B3',
     alignItems: 'center',
   },
   tableHeaderText: {
-    fontSize: 11,
+    fontSize: 10.5,
     fontWeight: 'bold',
     color: '#3B2D17',
     textTransform: 'uppercase',
@@ -2599,7 +2606,7 @@ const styles = StyleSheet.create({
   tableRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 6,
+    height: 22,
     paddingHorizontal: 8,
     borderBottomWidth: 1,
     borderBottomColor: '#F3EBDD',
@@ -2614,20 +2621,20 @@ const styles = StyleSheet.create({
     color: '#3B2D17',
   },
   emptyTableState: {
-    padding: 30,
+    padding: 18,
     alignItems: 'center',
     justifyContent: 'center',
   },
   emptyTableTitle: {
-    fontSize: 12,
+    fontSize: 11.5,
     fontWeight: 'bold',
     color: '#3B2D17',
-    marginTop: 4,
+    marginTop: 3,
   },
   emptyTableSubtitle: {
-    fontSize: 11,
+    fontSize: 10,
     color: '#8F816E',
-    marginTop: 2,
+    marginTop: 1,
     textAlign: 'center',
   },
 

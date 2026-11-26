@@ -100,7 +100,6 @@ export default function JobSheetScreen() {
   const [selectedMatchRow, setSelectedMatchRow] = useState<any | null>(null);
 
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
-  const [detailModalVisible, setDetailModalVisible] = useState(false);
   const [toast, setToast] = useState<{ message: string, type: 'success' | 'error' } | null>(null);
 
   const showToast = (message: string, type: 'success' | 'error' = 'success') => {
@@ -505,7 +504,6 @@ export default function JobSheetScreen() {
       TotalCost: ''
     });
     await saveJobSheet(newDetails, 'Catalogue added successfully!');
-    setDetailModalVisible(false);
   };
 
   const deleteSelectedDetail = async () => {
@@ -541,7 +539,6 @@ export default function JobSheetScreen() {
             setSelectedIndex(null);
             setCurrentDetail({ CatalogueCode: '', CategoryCode: '', Description: '', Weight: '', CostPerGram: '', MC: '', PCS: '', GoldLoss: '', TotalCost: '' });
             showToast('Catalogue deleted successfully!', 'success');
-            setDetailModalVisible(false);
           } catch (err: any) {
             Alert.alert('Error', err.message || 'Error deleting catalogue');
           }
@@ -710,7 +707,7 @@ export default function JobSheetScreen() {
     const wt = parseFloat(headerState.MatchWeight || selectedMatchRow.Weight) || 0;
     const pcs = parseInt(headerState.MatchPCS || selectedMatchRow.PCS) || 1;
 
-    // Prefill into Add Line Detail modal
+    // Prefill into Add Line Detail form
     setSelectedIndex(null);
     setCurrentDetail({
       CatalogueCode: catCode,
@@ -739,8 +736,6 @@ export default function JobSheetScreen() {
         })
         .catch(err => console.log('Error looking up catalogue for match:', err));
     }
-
-    setDetailModalVisible(true);
   };
 
   const calculateDueDateFromDays = (baseDateStr: string, daysToAdd: number) => {
@@ -1160,25 +1155,25 @@ export default function JobSheetScreen() {
         </View>
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'flex-end', alignItems: 'center', flex: 1 }}>
           <TouchableOpacity
-            style={[styles.mainActionBtn, { backgroundColor: '#FFFFFF', borderColor: '#DFD5C3', marginBottom: 0, paddingVertical: 6, paddingHorizontal: 10 }]}
+            style={[styles.mainActionBtn, { backgroundColor: '#FFFFFF', borderColor: '#DFD5C3', marginBottom: 0, paddingVertical: 4, paddingHorizontal: 8 }]}
             onPress={() => router.push('/goldbarissue')}
           >
-            <ThemedText style={{ color: '#5C4A28', fontWeight: 'bold', fontSize: 12 }}>Gold Bar Issue</ThemedText>
+            <ThemedText style={{ color: '#5C4A28', fontWeight: 'bold', fontSize: 11 }}>Gold Bar Issue</ThemedText>
           </TouchableOpacity>
           <TouchableOpacity
-            style={[styles.mainActionBtn, { backgroundColor: '#FFFFFF', borderColor: '#DFD5C3', marginBottom: 0, paddingVertical: 6, paddingHorizontal: 10 }]}
+            style={[styles.mainActionBtn, { backgroundColor: '#FFFFFF', borderColor: '#DFD5C3', marginBottom: 0, paddingVertical: 4, paddingHorizontal: 8 }]}
             onPress={() => router.push({ pathname: '/goldbarfix', params: { jobSheetNo: headerState.JobSheetNo } } as any)}
           >
-            <ThemedText style={{ color: '#5C4A28', fontWeight: 'bold', fontSize: 12 }}>GoldBar Fix</ThemedText>
+            <ThemedText style={{ color: '#5C4A28', fontWeight: 'bold', fontSize: 11 }}>GoldBar Fix</ThemedText>
           </TouchableOpacity>
           <TouchableOpacity style={[styles.mainActionBtn, { backgroundColor: '#FFFFFF', borderColor: '#DFD5C3', marginBottom: 0 }]} onPress={clearForm}>
-            <ThemedText style={{ color: '#5C4A28', fontWeight: 'bold', fontSize: 12 }}>Clear</ThemedText>
+            <ThemedText style={{ color: '#5C4A28', fontWeight: 'bold', fontSize: 11 }}>Clear</ThemedText>
           </TouchableOpacity>
           <TouchableOpacity style={[styles.mainActionBtn, { backgroundColor: '#F9F2E2', borderColor: '#B8903B', marginBottom: 0 }]} onPress={() => saveJobSheet(undefined, undefined, true)}>
-            <ThemedText style={{ color: '#9E6D08', fontWeight: 'bold', fontSize: 12 }}>Save</ThemedText>
+            <ThemedText style={{ color: '#9E6D08', fontWeight: 'bold', fontSize: 11 }}>Save</ThemedText>
           </TouchableOpacity>
           <TouchableOpacity style={[styles.mainActionBtn, { backgroundColor: '#FFFFFF', borderColor: '#F2A8A2', marginBottom: 0 }]} onPress={deleteJobSheet}>
-            <ThemedText style={{ color: '#D93829', fontWeight: 'bold', fontSize: 12 }}>Delete</ThemedText>
+            <ThemedText style={{ color: '#D93829', fontWeight: 'bold', fontSize: 11 }}>Delete</ThemedText>
           </TouchableOpacity>
         </View>
       </View>
@@ -1189,14 +1184,6 @@ export default function JobSheetScreen() {
           <View style={{ flexDirection: 'row', width: '100%', minWidth: 1100 }}>
             {/* LEFT: JOBSHEET DETAILS CARD */}
             <View style={[styles.goldCard, { flex: 7, minWidth: 730, marginRight: 14 }]}>
-              {/* Card Header Banner */}
-              <View style={styles.cardHeaderBanner}>
-                <View style={styles.headerIconBadge}>
-                  <Ionicons name="document-text" size={15} color="#B48218" />
-                </View>
-                <ThemedText style={styles.cardHeaderTitle}>JobSheet Details</ThemedText>
-              </View>
-
               <View style={styles.cardBody}>
                 {/* Row 1: JobSheet No, Invoice No, Invoice Date */}
                 <View style={styles.row}>
@@ -1516,14 +1503,6 @@ export default function JobSheetScreen() {
 
             {/* RIGHT: COST SUMMARY CARD */}
             <View style={[styles.goldCard, { flex: 3.4, minWidth: 350 }]}>
-              {/* Header Banner */}
-              <View style={styles.cardHeaderBanner}>
-                <View style={styles.headerIconBadge}>
-                  <Ionicons name="layers" size={15} color="#B48218" />
-                </View>
-                <ThemedText style={styles.cardHeaderTitle}>Cost Summary</ThemedText>
-              </View>
-
               <View style={[styles.cardBody, { justifyContent: 'space-between', flex: 1 }]}>
                 <View>
                   {renderRightSideField('Gold Value', 'TotalLocalCost', headerState.TotalLocalCost, true)}
@@ -1567,28 +1546,6 @@ export default function JobSheetScreen() {
           <View style={{ width: '100%', minWidth: 1000 }}>
             {/* Card wrapper for Line Details */}
             <View style={styles.goldCard}>
-              {/* Card Header Banner with Add Line button */}
-              <View style={[styles.cardHeaderBanner, { justifyContent: 'space-between' }]}>
-                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                  <View style={styles.headerIconBadge}>
-                    <Ionicons name="list" size={15} color="#B48218" />
-                  </View>
-                  <ThemedText style={styles.cardHeaderTitle}>Line Details</ThemedText>
-                </View>
-
-                <TouchableOpacity
-                  style={styles.addLineBtn}
-                  onPress={() => {
-                    setSelectedIndex(null);
-                    setCurrentDetail({ CatalogueCode: '', CategoryCode: '', Description: '', Weight: '', CostPerGram: '', MC: '', PCS: '', GoldLoss: '', TotalCost: '' });
-                    setDetailModalVisible(true);
-                  }}
-                >
-                  <Ionicons name="add" size={14} color="#FFF" style={{ marginRight: 4 }} />
-                  <ThemedText style={styles.addLineBtnText}>Add Line</ThemedText>
-                </TouchableOpacity>
-              </View>
-
               {/* Table Header */}
               <View style={styles.tableHeader}>
                 <ThemedText style={[styles.tableHeaderText, { flex: 15 }]}>Catalogue Code</ThemedText>
@@ -1619,7 +1576,6 @@ export default function JobSheetScreen() {
                       onPress={() => {
                         setSelectedIndex(index);
                         setCurrentDetail(item);
-                        setDetailModalVisible(true);
                       }}
                     >
                       <ThemedText style={[styles.tableCellText, { flex: 15 }]}>{item.CatalogueCode}</ThemedText>
@@ -1660,30 +1616,250 @@ export default function JobSheetScreen() {
           </View>
         </ScrollView>
 
+        {/* ADD / EDIT LINE DETAIL SECTION */}
+        <ScrollView horizontal style={{ marginBottom: 8 }} contentContainerStyle={{ flexGrow: 1 }}>
+          <View style={{ width: '100%', minWidth: 1000 }}>
+            <View style={[styles.goldCard, { paddingVertical: 6, paddingHorizontal: 10 }]}>
+              <View style={[styles.gridHeader, { backgroundColor: '#F5E7CA', borderBottomColor: '#E2D3B3' }]}>
+                <ThemedText style={[styles.gridHeaderText, { flex: 15, color: '#3B2D17' }]}>Catalogue Code</ThemedText>
+                <ThemedText style={[styles.gridHeaderText, { flex: 13, color: '#3B2D17' }]}>Category Code</ThemedText>
+                <ThemedText style={[styles.gridHeaderText, { flex: 20, color: '#3B2D17' }]}>Description</ThemedText>
+                <ThemedText style={[styles.gridHeaderText, { flex: 10, color: '#3B2D17' }]}>Weight</ThemedText>
+                <ThemedText style={[styles.gridHeaderText, { flex: 12, color: '#3B2D17' }]}>Cost/Gm</ThemedText>
+                <ThemedText style={[styles.gridHeaderText, { flex: 10, color: '#3B2D17' }]}>MC</ThemedText>
+                <ThemedText style={[styles.gridHeaderText, { flex: 8, color: '#3B2D17' }]}>PCS</ThemedText>
+                <ThemedText style={[styles.gridHeaderText, { flex: 12, color: '#3B2D17' }]}>Total Cost</ThemedText>
+              </View>
 
-        {/* BOTTOM SECTION: Actions & Match JobSheet Panel */}
-        <View style={styles.footerSection}>
-          <View style={{ flex: 1 }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: matchJobSheetVisible ? 12 : 4 }}>
-              <Checkbox
-                label="Match Jobsheet"
-                selected={matchJobSheetVisible}
-                onPress={() => {
-                  const nextVisible = !matchJobSheetVisible;
-                  setMatchJobSheetVisible(nextVisible);
-                  if (!nextVisible) {
-                    updateHeader('MatchJobSheetNo', '');
-                    updateHeader('MatchWeight', '');
-                    updateHeader('MatchPCS', '');
-                    setMatchAccessoriesData([]);
-                    setSelectedMatchRow(null);
-                  }
-                }}
-              />
+              <View style={[styles.gridRow, { borderBottomWidth: 0, paddingVertical: 4 }]}>
+                <View style={{ flex: 15, paddingRight: 4 }}>
+                  <View style={styles.lookupContainer}>
+                    <TextInput
+                      style={[styles.input, { flex: 1, padding: 3, height: 26, borderTopRightRadius: 0, borderBottomRightRadius: 0 }]}
+                      value={currentDetail.CatalogueCode}
+                      onChangeText={(t: string) => updateDetail('CatalogueCode', t)}
+                      onBlur={async () => {
+                        const code = String(currentDetail.CatalogueCode ?? '').trim();
+                        if (!code) return;
+                        try {
+                          const res = await fetch(`${API_URL}/lookup/catalogue/${encodeURIComponent(code)}`);
+                          const data = await res.json();
+                          if (data.success && data.data) {
+                            updateDetail('CategoryCode', data.data.CategoryCode || '');
+                            updateDetail('Description', data.data.CatalogueName || '');
+                            if (!currentDetail.CostPerGram && headerState.CostPerGram) {
+                              updateDetail('CostPerGram', headerState.CostPerGram);
+                            }
+                            if (!currentDetail.PCS) updateDetail('PCS', '1');
+                          } else {
+                            showToast('Invalid CatalogueCode', 'error');
+                          }
+                        } catch (e) {
+                          console.log('Error looking up catalogue:', e);
+                        }
+                      }}
+                    />
+                    <TouchableOpacity
+                      style={[styles.lookupBtn, { width: 26, height: 26 }]}
+                      onPress={openCatalogueLov}
+                    >
+                      <ThemedText style={styles.lookupBtnText}>...</ThemedText>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+
+                <View style={{ flex: 13, paddingRight: 4 }}>
+                  <TextInput
+                    style={[styles.input, { flex: 1, padding: 3, height: 26 }]}
+                    value={currentDetail.CategoryCode}
+                    onChangeText={(t: string) => updateDetail('CategoryCode', t)}
+                    onBlur={async () => {
+                      const code = String(currentDetail.CategoryCode ?? '').trim();
+                      if (!code) return;
+                      try {
+                        const res = await fetch(`${API_URL}/lookup/category/${encodeURIComponent(code)}`);
+                        const data = await res.json();
+                        if (data.success && data.data) {
+                          if (!currentDetail.Description) updateDetail('Description', data.data.CategoryName || '');
+                          if (!currentDetail.CostPerGram && headerState.CostPerGram) {
+                            updateDetail('CostPerGram', headerState.CostPerGram);
+                          }
+                          if (!currentDetail.PCS) updateDetail('PCS', '1');
+                        } else {
+                          showToast('Invalid CategoryCode', 'error');
+                        }
+                      } catch (e) {
+                        console.log('Error looking up category:', e);
+                      }
+                    }}
+                  />
+                </View>
+
+                <View style={{ flex: 20, paddingRight: 4 }}>
+                  <TextInput
+                    style={[styles.input, { flex: 1, padding: 3, height: 26 }]}
+                    value={currentDetail.Description}
+                    onChangeText={(t: string) => updateDetail('Description', t)}
+                  />
+                </View>
+
+                <View style={{ flex: 10, paddingRight: 4 }}>
+                  <TextInput
+                    style={[styles.input, { flex: 1, padding: 3, height: 26 }]}
+                    value={currentDetail.Weight}
+                    onChangeText={(t: string) => {
+                      const clean = t.replace(/[^0-9.]/g, '');
+                      updateDetail('Weight', clean);
+                    }}
+                    keyboardType="numeric"
+                    onBlur={() => {
+                      const w = parseFloat(currentDetail.Weight);
+                      if (isNaN(w) || w <= 0) {
+                        updateDetail('Weight', '0.00');
+                      } else {
+                        updateDetail('Weight', w.toFixed(2));
+                      }
+                    }}
+                  />
+                </View>
+
+                <View style={{ flex: 12, paddingRight: 4 }}>
+                  <TextInput
+                    style={[styles.input, { flex: 1, padding: 3, height: 26 }]}
+                    value={currentDetail.CostPerGram}
+                    onChangeText={(t: string) => {
+                      const clean = t.replace(/[^0-9.]/g, '');
+                      updateDetail('CostPerGram', clean);
+                    }}
+                    keyboardType="numeric"
+                    onBlur={() => {
+                      const c = parseFloat(currentDetail.CostPerGram);
+                      if (isNaN(c) || c <= 0) {
+                        updateDetail('CostPerGram', '0.00');
+                      } else {
+                        updateDetail('CostPerGram', c.toFixed(2));
+                      }
+                    }}
+                  />
+                </View>
+
+                <View style={{ flex: 10, paddingRight: 4 }}>
+                  <TextInput
+                    style={[styles.input, { flex: 1, padding: 3, height: 26 }]}
+                    value={currentDetail.MC}
+                    onChangeText={(t: string) => {
+                      const clean = t.replace(/[^0-9.]/g, '');
+                      updateDetail('MC', clean);
+                    }}
+                    keyboardType="numeric"
+                    onBlur={() => {
+                      const mc = parseFloat(currentDetail.MC);
+                      if (isNaN(mc) || mc <= 0) {
+                        updateDetail('MC', '0.00');
+                      } else {
+                        updateDetail('MC', mc.toFixed(2));
+                      }
+                    }}
+                  />
+                </View>
+
+                <View style={{ flex: 8, paddingRight: 4 }}>
+                  <TextInput
+                    style={[styles.input, { flex: 1, padding: 3, height: 26 }]}
+                    value={currentDetail.PCS}
+                    onChangeText={(t: string) => {
+                      const clean = t.replace(/[^0-9]/g, '');
+                      updateDetail('PCS', clean);
+                    }}
+                    keyboardType="numeric"
+                    onBlur={() => {
+                      const p = parseInt(currentDetail.PCS);
+                      if (isNaN(p) || p <= 0) {
+                        updateDetail('PCS', '1');
+                      } else {
+                        updateDetail('PCS', p.toString());
+                      }
+                    }}
+                  />
+                </View>
+
+                <View style={{ flex: 12 }}>
+                  <TextInput
+                    style={[styles.input, styles.readonlyInput, { flex: 1, padding: 3, height: 26 }]}
+                    value={currentDetail.TotalCost}
+                    editable={false}
+                    keyboardType="numeric"
+                  />
+                </View>
+              </View>
+
+              <View style={[styles.row, { justifyContent: 'space-between', alignItems: 'center', marginTop: 4, paddingRight: 4, flexWrap: 'nowrap' }]}>
+                {/* Match Jobsheet Checkbox */}
+                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                  <Checkbox
+                    label="Match Jobsheet"
+                    selected={matchJobSheetVisible}
+                    onPress={() => {
+                      const nextVisible = !matchJobSheetVisible;
+                      setMatchJobSheetVisible(nextVisible);
+                      if (!nextVisible) {
+                        updateHeader('MatchJobSheetNo', '');
+                        updateHeader('MatchWeight', '');
+                        updateHeader('MatchPCS', '');
+                        setMatchAccessoriesData([]);
+                        setSelectedMatchRow(null);
+                      }
+                    }}
+                  />
+                </View>
+
+                {/* Action Buttons */}
+                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                  <TouchableOpacity
+                    style={[styles.actionBtn, { backgroundColor: '#F9F2E2', borderColor: '#B8903B' }]}
+                    onPress={addDetail}
+                  >
+                    <ThemedText style={{ color: '#9E6D08', fontWeight: 'bold', fontSize: 12 }}>
+                      {selectedIndex !== null ? 'Update' : 'Add'}
+                    </ThemedText>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.actionBtn, { backgroundColor: '#FFFFFF', borderColor: '#F2A8A2' }]}
+                    onPress={deleteSelectedDetail}
+                  >
+                    <ThemedText style={{ color: '#D93829', fontWeight: 'bold', fontSize: 12 }}>Delete</ThemedText>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.actionBtn, { backgroundColor: '#FFFFFF', borderColor: '#DFD5C3' }]}
+                    onPress={() => {
+                      setSelectedIndex(null);
+                      setCurrentDetail({
+                        CatalogueCode: '',
+                        CategoryCode: '',
+                        Description: '',
+                        Weight: '',
+                        CostPerGram: headerState.CostPerGram || '',
+                        MC: '',
+                        PCS: '1',
+                        GoldLoss: '',
+                        TotalCost: ''
+                      });
+                    }}
+                  >
+                    <ThemedText style={{ color: '#5C4A28', fontWeight: 'bold', fontSize: 12 }}>Clear</ThemedText>
+                  </TouchableOpacity>
+                </View>
+              </View>
             </View>
+          </View>
+        </ScrollView>
 
-            {/* Match Jobsheet Floating/Embedded Panel (Matches VB frmJobSheet grpMatchJobsheet) */}
-            {matchJobSheetVisible && (
+
+        {/* BOTTOM SECTION: Match JobSheet Panel (when toggled on) */}
+        {matchJobSheetVisible && (
+          <View style={[styles.footerSection, { borderTopWidth: 0, paddingTop: 4 }]}>
+            <View style={{ flex: 1 }}>
+              {/* Match Jobsheet Floating/Embedded Panel (Matches VB frmJobSheet grpMatchJobsheet) */}
               <View style={[styles.goldCard, { maxWidth: 520, marginTop: 4, padding: 10, borderColor: '#D4AF37', backgroundColor: '#FFFDF9' }]}>
                 {/* Header Row: Match JobSheet No Lookup */}
                 <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 10 }}>
@@ -1783,192 +1959,11 @@ export default function JobSheetScreen() {
                   </TouchableOpacity>
                 </View>
               </View>
-            )}
+            </View>
           </View>
-        </View>
+        )}
 
       </ScrollView>
-
-      {/* Detail Modal */}
-      <Modal visible={detailModalVisible} transparent={true} animationType="fade">
-        <View style={styles.modalOverlay}>
-          <View style={[styles.modalContainer, { backgroundColor: cardColor, borderColor: borderColor, width: '90%' }]}>
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-              <ThemedText style={[styles.modalTitle, { color: textColor, marginBottom: 0 }]}>{selectedIndex !== null ? 'Edit Line Detail' : 'Add Line Detail'}</ThemedText>
-              <TouchableOpacity onPress={() => setDetailModalVisible(false)}>
-                <Ionicons name="close" size={24} color={textColor} />
-              </TouchableOpacity>
-            </View>
-            <View style={[styles.gridHeader, { backgroundColor: backgroundColor, borderBottomColor: borderColor }]}>
-              <ThemedText style={[styles.gridHeaderText, { flex: 15, color: textColor }]} >Catalogue Code</ThemedText>
-              <ThemedText style={[styles.gridHeaderText, { flex: 13, color: textColor }]} >Category Code</ThemedText>
-              <ThemedText style={[styles.gridHeaderText, { flex: 20, color: textColor }]} >Description</ThemedText>
-              <ThemedText style={[styles.gridHeaderText, { flex: 10, color: textColor }]} >Weight</ThemedText>
-              <ThemedText style={[styles.gridHeaderText, { flex: 12, color: textColor }]} >Cost/Gm</ThemedText>
-              <ThemedText style={[styles.gridHeaderText, { flex: 10, color: textColor }]} >MC</ThemedText>
-              <ThemedText style={[styles.gridHeaderText, { flex: 8, color: textColor }]} >PCS</ThemedText>
-              <ThemedText style={[styles.gridHeaderText, { flex: 12, color: textColor }]} >Total Cost</ThemedText>
-            </View>
-            <View style={[styles.gridRow, { borderBottomWidth: 0, paddingVertical: 8 }]}>
-              <View style={{ flex: 15, paddingRight: 4 }}>
-                <View style={styles.lookupContainer}>
-                  <TextInput
-                    style={[inputStyle, { flex: 1, padding: 4, height: 30 }]}
-                    value={currentDetail.CatalogueCode}
-                    onChangeText={(t: string) => updateDetail('CatalogueCode', t)}
-                    onBlur={async () => {
-                      const code = String(currentDetail.CatalogueCode ?? '').trim();
-                      if (!code) return;
-                      try {
-                        const res = await fetch(`${API_URL}/lookup/catalogue/${encodeURIComponent(code)}`);
-                        const data = await res.json();
-                        if (data.success && data.data) {
-                          updateDetail('CategoryCode', data.data.CategoryCode || '');
-                          updateDetail('Description', data.data.CatalogueName || '');
-                          if (!currentDetail.CostPerGram && headerState.CostPerGram) {
-                            updateDetail('CostPerGram', headerState.CostPerGram);
-                          }
-                          if (!currentDetail.PCS) updateDetail('PCS', '1');
-                        } else {
-                          showToast('Invalid CatalogueCode', 'error');
-                        }
-                      } catch (e) {
-                        console.log('Error looking up catalogue:', e);
-                      }
-                    }}
-                  />
-                  <TouchableOpacity style={[styles.lookupBtn, { backgroundColor: cardColor, borderColor: borderColor, width: 24, height: 30 }]} onPress={openCatalogueLov}><ThemedText style={{ color: textColor, fontSize: 10 }}>...</ThemedText></TouchableOpacity>
-                </View>
-              </View>
-              <View style={{ flex: 13, paddingRight: 4 }}>
-                <TextInput
-                  style={[inputStyle, { flex: 1, padding: 4, height: 30 }]}
-                  value={currentDetail.CategoryCode}
-                  onChangeText={(t: string) => updateDetail('CategoryCode', t)}
-                  onBlur={async () => {
-                    const code = String(currentDetail.CategoryCode ?? '').trim();
-                    if (!code) return;
-                    try {
-                      const res = await fetch(`${API_URL}/lookup/category/${encodeURIComponent(code)}`);
-                      const data = await res.json();
-                      if (data.success && data.data) {
-                        if (!currentDetail.Description) updateDetail('Description', data.data.CategoryName || '');
-                        if (!currentDetail.CostPerGram && headerState.CostPerGram) {
-                          updateDetail('CostPerGram', headerState.CostPerGram);
-                        }
-                        if (!currentDetail.PCS) updateDetail('PCS', '1');
-                      } else {
-                        showToast('Invalid CategoryCode', 'error');
-                      }
-                    } catch (e) {
-                      console.log('Error looking up category:', e);
-                    }
-                  }}
-                />
-              </View>
-              <View style={{ flex: 20, paddingRight: 4 }}>
-                <TextInput style={[inputStyle, { flex: 1, padding: 4, height: 30 }]} value={currentDetail.Description} onChangeText={(t: string) => updateDetail('Description', t)} />
-              </View>
-              <View style={{ flex: 10, paddingRight: 4 }}>
-                <TextInput
-                  style={[inputStyle, { flex: 1, padding: 4, height: 30 }]}
-                  value={currentDetail.Weight}
-                  onChangeText={(t: string) => {
-                    const clean = t.replace(/[^0-9.]/g, '');
-                    updateDetail('Weight', clean);
-                  }}
-                  keyboardType="numeric"
-                  onBlur={() => {
-                    const w = parseFloat(currentDetail.Weight);
-                    if (isNaN(w) || w <= 0) {
-                      updateDetail('Weight', '0.00');
-                    } else {
-                      updateDetail('Weight', w.toFixed(2));
-                    }
-                  }}
-                />
-              </View>
-              <View style={{ flex: 12, paddingRight: 4 }}>
-                <TextInput
-                  style={[inputStyle, { flex: 1, padding: 4, height: 30 }]}
-                  value={currentDetail.CostPerGram}
-                  onChangeText={(t: string) => {
-                    const clean = t.replace(/[^0-9.]/g, '');
-                    updateDetail('CostPerGram', clean);
-                  }}
-                  keyboardType="numeric"
-                  onBlur={() => {
-                    const c = parseFloat(currentDetail.CostPerGram);
-                    if (isNaN(c) || c <= 0) {
-                      updateDetail('CostPerGram', '0.00');
-                    } else {
-                      updateDetail('CostPerGram', c.toFixed(2));
-                    }
-                  }}
-                />
-              </View>
-              <View style={{ flex: 10, paddingRight: 4 }}>
-                <TextInput
-                  style={[inputStyle, { flex: 1, padding: 4, height: 30 }]}
-                  value={currentDetail.MC}
-                  onChangeText={(t: string) => {
-                    const clean = t.replace(/[^0-9.]/g, '');
-                    updateDetail('MC', clean);
-                  }}
-                  keyboardType="numeric"
-                  onBlur={() => {
-                    const mc = parseFloat(currentDetail.MC);
-                    if (isNaN(mc) || mc <= 0) {
-                      updateDetail('MC', '0.00');
-                    } else {
-                      updateDetail('MC', mc.toFixed(2));
-                    }
-                  }}
-                />
-              </View>
-              <View style={{ flex: 8, paddingRight: 4 }}>
-                <TextInput
-                  style={[inputStyle, { flex: 1, padding: 4, height: 30 }]}
-                  value={currentDetail.PCS}
-                  onChangeText={(t: string) => {
-                    const clean = t.replace(/[^0-9]/g, '');
-                    updateDetail('PCS', clean);
-                  }}
-                  keyboardType="numeric"
-                  onBlur={() => {
-                    const p = parseInt(currentDetail.PCS);
-                    if (isNaN(p) || p <= 0) {
-                      updateDetail('PCS', '1');
-                    } else {
-                      updateDetail('PCS', p.toString());
-                    }
-                  }}
-                />
-              </View>
-              <View style={{ flex: 12 }}>
-                <TextInput
-                  style={[inputStyle, { flex: 1, padding: 4, height: 30 }]}
-                  value={currentDetail.TotalCost}
-                  editable={false}
-                  onChangeText={(t: string) => updateDetail('TotalCost', t)}
-                  keyboardType="numeric"
-                />
-              </View>
-            </View>
-            <View style={[styles.row, { justifyContent: 'flex-end', marginTop: 12, paddingRight: 8 }]}>
-              <TouchableOpacity style={[styles.actionBtn, { backgroundColor: cardColor, borderColor: accentColor }]} onPress={addDetail}>
-                <ThemedText style={{ color: accentColor, fontWeight: 'bold' }}>{selectedIndex !== null ? 'Update' : 'Add'}</ThemedText>
-              </TouchableOpacity>
-              <TouchableOpacity style={[styles.actionBtn, { backgroundColor: cardColor, borderColor: '#ff3b30' }]} onPress={deleteSelectedDetail}>
-                <ThemedText style={{ color: '#ff3b30', fontWeight: 'bold' }}>Delete</ThemedText>
-              </TouchableOpacity>
-              <TouchableOpacity style={[styles.actionBtn, { backgroundColor: cardColor, borderColor: borderColor }]} onPress={() => { setSelectedIndex(null); setCurrentDetail({ CatalogueCode: '', CategoryCode: '', Description: '', Weight: '', CostPerGram: '', MC: '', PCS: '', GoldLoss: '', TotalCost: '' }); }}>
-                <ThemedText style={{ color: textColor, fontWeight: 'bold' }}>Clear</ThemedText>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
 
       {/* LOV Modal */}
       <Modal visible={lovVisible} transparent={true} animationType="fade">
@@ -2296,10 +2291,10 @@ export default function JobSheetScreen() {
 
 const styles = StyleSheet.create({
   safeArea: { flex: 1 },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 10, borderBottomWidth: 1 },
-  backButton: { padding: 4, marginRight: 12 },
-  title: { fontSize: 20, fontWeight: '400', letterSpacing: 1 },
-  container: { flex: 1, paddingVertical: 12, paddingHorizontal: 16 },
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 5, borderBottomWidth: 1 },
+  backButton: { padding: 2, marginRight: 8 },
+  title: { fontSize: 17, fontWeight: '400', letterSpacing: 0.5 },
+  container: { flex: 1, paddingVertical: 8, paddingHorizontal: 16 },
   contentContainer: { paddingBottom: 40 },
 
   // Luxury Gold Card Styling
@@ -2343,11 +2338,11 @@ const styles = StyleSheet.create({
   },
   cardBody: {
     paddingHorizontal: 8,
-    paddingVertical: 5,
+    paddingVertical: 3,
   },
 
   // Rows and Labels
-  row: { flexDirection: 'row', alignItems: 'center', marginBottom: 4, flexWrap: 'wrap' },
+  row: { flexDirection: 'row', alignItems: 'center', marginBottom: 2, flexWrap: 'wrap' },
   fieldContainer: { marginBottom: 2, paddingHorizontal: 4 },
   label: { fontSize: 11, fontWeight: 'bold', width: 96, marginRight: 6, color: '#3A2E19' },
   labelRight: { fontSize: 11, fontWeight: 'bold', textAlign: 'right', marginRight: 8, color: '#3A2E19' },
@@ -2501,25 +2496,25 @@ const styles = StyleSheet.create({
     backgroundColor: '#F5E7CA',
     borderBottomWidth: 1,
     borderBottomColor: '#E2D3B3',
-    paddingVertical: 7,
+    paddingVertical: 3,
     paddingHorizontal: 6,
   },
   tableHeaderText: {
-    fontSize: 11,
+    fontSize: 10,
     fontWeight: 'bold',
     color: '#3B2D17',
     paddingHorizontal: 4,
   },
   tableRow: {
     flexDirection: 'row',
-    paddingVertical: 6,
+    paddingVertical: 4,
     paddingHorizontal: 6,
     borderBottomWidth: 1,
     borderBottomColor: '#F0E6D2',
     alignItems: 'center',
   },
   tableCellText: {
-    fontSize: 11,
+    fontSize: 10.5,
     color: '#332717',
     paddingHorizontal: 4,
   },
@@ -2534,12 +2529,12 @@ const styles = StyleSheet.create({
     backgroundColor: '#F9F1DF',
     borderTopWidth: 1,
     borderTopColor: '#E5D6B6',
-    paddingVertical: 7,
+    paddingVertical: 3,
     paddingHorizontal: 6,
     alignItems: 'center',
   },
   tableTotalCellText: {
-    fontSize: 11,
+    fontSize: 10,
     fontWeight: 'bold',
     color: '#32230D',
     paddingHorizontal: 4,
@@ -2547,14 +2542,14 @@ const styles = StyleSheet.create({
 
   // Legacy Grid / Modals & Actions
   gridSection: { borderWidth: 1, borderRadius: 6, marginBottom: 12 },
-  gridHeader: { flexDirection: 'row', paddingVertical: 6, paddingHorizontal: 4, borderBottomWidth: 1 },
-  gridHeaderText: { fontSize: 12, fontWeight: 'bold', paddingHorizontal: 4 },
+  gridHeader: { flexDirection: 'row', paddingVertical: 3, paddingHorizontal: 4, borderBottomWidth: 1 },
+  gridHeaderText: { fontSize: 10, fontWeight: 'bold', paddingHorizontal: 4 },
   gridRow: { flexDirection: 'row', paddingVertical: 4, paddingHorizontal: 4, borderBottomWidth: 1 },
   gridCellText: { fontSize: 12, paddingHorizontal: 4 },
   entrySection: { marginBottom: 16 },
-  actionBtn: { paddingVertical: 6, paddingHorizontal: 16, borderRadius: 4, marginLeft: 8, borderWidth: 1 },
+  actionBtn: { paddingVertical: 4, paddingHorizontal: 14, borderRadius: 4, marginLeft: 8, borderWidth: 1 },
   footerSection: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', paddingTop: 8, borderTopWidth: 1, borderTopColor: '#EADBCA' },
-  mainActionBtn: { paddingVertical: 6, paddingHorizontal: 12, borderRadius: 5, marginLeft: 8, borderWidth: 1 },
+  mainActionBtn: { paddingVertical: 4, paddingHorizontal: 10, borderRadius: 5, marginLeft: 6, borderWidth: 1 },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center' },
   modalContainer: { width: '80%', maxHeight: '80%', borderWidth: 1, borderRadius: 8, padding: 16 },
   modalTitle: { fontSize: 18, fontWeight: 'bold', marginBottom: 12 },

@@ -344,12 +344,12 @@ export default function SupplierPaymentAmendmentScreen() {
 
         <View style={styles.headerActions}>
           <TouchableOpacity style={styles.headerBtnSecondary} onPress={handleReprint}>
-            <Ionicons name="print-outline" size={14} color="#7D6F5B" style={{ marginRight: 4 }} />
+            <Ionicons name="print-outline" size={14} color="#5C4A28" style={{ marginRight: 4 }} />
             <ThemedText style={styles.headerBtnSecondaryText}>RePrint</ThemedText>
           </TouchableOpacity>
 
           <TouchableOpacity style={styles.headerBtnSecondary} onPress={handleClearAll}>
-            <Ionicons name="refresh-outline" size={14} color="#7D6F5B" style={{ marginRight: 4 }} />
+            <Ionicons name="refresh-outline" size={14} color="#5C4A28" style={{ marginRight: 4 }} />
             <ThemedText style={styles.headerBtnSecondaryText}>Clear</ThemedText>
           </TouchableOpacity>
 
@@ -362,7 +362,7 @@ export default function SupplierPaymentAmendmentScreen() {
               <ActivityIndicator size="small" color="#9E6D08" />
             ) : (
               <>
-                <Ionicons name="checkmark-circle-outline" size={14} color="#7D5800" style={{ marginRight: 4 }} />
+                <Ionicons name="checkmark-circle-outline" size={14} color="#9E6D08" style={{ marginRight: 4 }} />
                 <ThemedText style={styles.headerBtnPrimaryText}>Update</ThemedText>
               </>
             )}
@@ -458,18 +458,6 @@ export default function SupplierPaymentAmendmentScreen() {
 
         {/* MIDDLE SECTION: Payments List Grid (dgvSupplier matching frmSupplierPaymentAmendment.vb) */}
         <View style={styles.goldCard}>
-          <View style={styles.cardHeaderBanner}>
-            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-              <View style={styles.headerIconBadge}>
-                <Ionicons name="list" size={14} color="#B48218" />
-              </View>
-              <ThemedText style={styles.cardHeaderTitle}>Payment Records</ThemedText>
-              <View style={styles.counterBadge}>
-                <ThemedText style={styles.counterBadgeText}>{payments.length} Records</ThemedText>
-              </View>
-            </View>
-          </View>
-
           <View style={{ width: '100%' }}>
             {/* Table Header with proportional flex widths */}
             <View style={styles.tableHeader}>
@@ -536,15 +524,6 @@ export default function SupplierPaymentAmendmentScreen() {
 
         {/* BOTTOM SECTION: Selected Payment Amendment Entry Card (GroupBox4) */}
         <View style={styles.goldCard}>
-          <View style={styles.cardHeaderBanner}>
-            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-              <View style={styles.headerIconBadge}>
-                <Ionicons name="create-outline" size={14} color="#B48218" />
-              </View>
-              <ThemedText style={styles.cardHeaderTitle}>Amend Payment Details</ThemedText>
-            </View>
-          </View>
-
           <View style={styles.cardBody}>
             {/* Read-only reference fields: Payment No, Payment Date, Paymode, Amount */}
             <View style={styles.row}>
@@ -804,32 +783,32 @@ const styles = StyleSheet.create({
   headerBtnSecondary: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    borderRadius: 6,
+    paddingVertical: 5,
+    paddingHorizontal: 10,
+    borderRadius: 4,
     borderWidth: 1,
     borderColor: '#DFD5C3',
     backgroundColor: '#FFFFFF',
   },
   headerBtnSecondaryText: {
-    fontSize: 12,
-    fontWeight: '600',
+    fontSize: 11,
+    fontWeight: 'bold',
     color: '#5C4A28',
   },
   headerBtnPrimary: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 6,
-    paddingHorizontal: 14,
-    borderRadius: 6,
-    backgroundColor: '#F5C842',
+    paddingVertical: 5,
+    paddingHorizontal: 12,
+    borderRadius: 4,
+    backgroundColor: '#F5E7CA',
     borderWidth: 1,
-    borderColor: '#D4A41B',
+    borderColor: '#D4C3A3',
   },
   headerBtnPrimaryText: {
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: 'bold',
-    color: '#3D2C04',
+    color: '#9E6D08',
   },
   headerBtnClose: {
     paddingVertical: 6,

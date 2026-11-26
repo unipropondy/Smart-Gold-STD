@@ -1367,26 +1367,6 @@ export default function InstallmentOrderEntryScreen() {
 
           {/* MIDDLE CARD: LINE ITEMS DATA TABLE */}
           <View style={[styles.goldCard, { marginTop: 10 }]}>
-            <View style={styles.cardHeaderBanner}>
-              <View style={styles.headerTitleContainer}>
-                <View style={styles.headerIconBadgeSmall}>
-                  <Ionicons name="list-outline" size={13} color="#B48218" />
-                </View>
-                <ThemedText style={styles.cardHeaderTitleSmall}>Line Items</ThemedText>
-                <View style={styles.counterBadge}>
-                  <ThemedText style={styles.counterBadgeText}>{gridItems.length} items</ThemedText>
-                </View>
-              </View>
-
-              {selectedRowIndex !== null && (
-                <View style={styles.selectedRowIndicator}>
-                  <ThemedText style={styles.selectedRowIndicatorText}>
-                    Selected Row #{selectedRowIndex + 1}
-                  </ThemedText>
-                </View>
-              )}
-            </View>
-
             <ScrollView horizontal={false} style={{ width: '100%' }}>
               <View style={{ width: '100%' }}>
                 {/* Table Header */}
@@ -1526,10 +1506,6 @@ export default function InstallmentOrderEntryScreen() {
 
             {/* BOTTOM ENTRY INPUT FIELDS */}
             <View style={styles.entrySection}>
-              <View style={styles.entrySectionHeader}>
-                <ThemedText style={styles.entrySectionTitle}>Add / Edit Item Details</ThemedText>
-              </View>
-
               {mode === 'Installment' ? (
                 <>
                   <View style={styles.entryGridTable}>

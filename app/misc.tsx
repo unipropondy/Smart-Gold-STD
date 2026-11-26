@@ -1194,29 +1194,29 @@ export default function MiscScreen() {
               </View>
 
               <View style={styles.cardBody}>
-                {/* Row 1: Type Selection (Pill Box) & Voucher No */}
+                {/* Row 1: Type * & Voucher No * */}
                 <View style={styles.formRow}>
                   {/* Type Selector */}
-                  <View style={{ flex: 1.2, marginRight: 8 }}>
-                    <ThemedText style={styles.inputLabel}>Type *</ThemedText>
+                  <View style={{ flex: 1.1, flexDirection: 'row', alignItems: 'center', marginRight: 12 }}>
+                    <ThemedText style={styles.inlineLabel}>Type *</ThemedText>
                     <TouchableOpacity
-                      style={styles.dropdownSelector}
+                      style={[styles.dropdownSelector, { flex: 1 }]}
                       onPress={() => setIsTypeDropdownOpen(true)}
                       activeOpacity={0.8}
                     >
-                      <ThemedText style={[styles.dropdownSelectorText, !selectedType && { color: '#9E8D77' }]}>
+                      <ThemedText style={[styles.dropdownSelectorText, !selectedType && { color: '#9E8D77' }]} numberOfLines={1}>
                         {selectedType ? selectedType.label : 'Select Type...'}
                       </ThemedText>
-                      <Ionicons name="chevron-down" size={14} color="#7D6F5B" />
+                      <Ionicons name="chevron-down" size={13} color="#7D6F5B" />
                     </TouchableOpacity>
                   </View>
 
                   {/* Voucher No & Fetch Button */}
-                  <View style={{ flex: 1 }}>
-                    <ThemedText style={styles.inputLabel}>Voucher No *</ThemedText>
-                    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                  <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center' }}>
+                    <ThemedText style={[styles.inlineLabel, { width: 85 }]}>Voucher No *</ThemedText>
+                    <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center' }}>
                       <TextInput
-                        style={[styles.input, { flex: 1 }]}
+                        style={[styles.input, { flex: 1, borderTopRightRadius: 0, borderBottomRightRadius: 0 }]}
                         value={voucherNo}
                         onChangeText={setVoucherNo}
                         keyboardType="numeric"
@@ -1224,37 +1224,37 @@ export default function MiscScreen() {
                         placeholderTextColor="#9E8D77"
                       />
                       <TouchableOpacity style={styles.searchBtn} onPress={handleFetch} activeOpacity={0.8}>
-                        <Ionicons name="search" size={13} color="#7D5E19" style={{ marginRight: 3 }} />
+                        <Ionicons name="search" size={12} color="#7D5E19" style={{ marginRight: 3 }} />
                         <ThemedText style={styles.searchBtnText}>Fetch</ThemedText>
                       </TouchableOpacity>
                     </View>
                   </View>
                 </View>
 
-                {/* Row 2: Date & Person */}
+                {/* Row 2: Date * & Person */}
                 <View style={styles.formRow}>
                   {/* Date Input */}
-                  <View style={{ flex: 1.2, marginRight: 8 }}>
-                    <ThemedText style={styles.inputLabel}>Date *</ThemedText>
-                    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                  <View style={{ flex: 1.1, flexDirection: 'row', alignItems: 'center', marginRight: 12 }}>
+                    <ThemedText style={styles.inlineLabel}>Date *</ThemedText>
+                    <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center' }}>
                       <TextInput
-                        style={[styles.input, { flex: 1 }]}
+                        style={[styles.input, { flex: 1, borderTopRightRadius: 0, borderBottomRightRadius: 0 }]}
                         value={date}
                         onChangeText={setDate}
                         placeholder="dd/MM/yyyy"
                         placeholderTextColor="#9E8D77"
                       />
                       <TouchableOpacity style={styles.lookupBtn} onPress={() => setIsCalendarOpen(true)} activeOpacity={0.8}>
-                        <Ionicons name="calendar-outline" size={15} color="#6E5528" />
+                        <Ionicons name="calendar-outline" size={13} color="#6E5528" />
                       </TouchableOpacity>
                     </View>
                   </View>
 
                   {/* Person Input */}
-                  <View style={{ flex: 1 }}>
-                    <ThemedText style={styles.inputLabel}>Person</ThemedText>
+                  <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center' }}>
+                    <ThemedText style={[styles.inlineLabel, { width: 85 }]}>Person</ThemedText>
                     <TextInput
-                      style={styles.input}
+                      style={[styles.input, { flex: 1 }]}
                       value={person}
                       onChangeText={setPerson}
                       placeholder="Name of Person"
@@ -1263,12 +1263,12 @@ export default function MiscScreen() {
                   </View>
                 </View>
 
-                {/* Row 3: Weight & Remarks */}
+                {/* Row 3: Weight (g) & Remarks */}
                 <View style={styles.formRow}>
-                  <View style={{ flex: 0.8, marginRight: 8 }}>
-                    <ThemedText style={styles.inputLabel}>Weight (g)</ThemedText>
+                  <View style={{ flex: 1.1, flexDirection: 'row', alignItems: 'center', marginRight: 12 }}>
+                    <ThemedText style={styles.inlineLabel}>Weight (g)</ThemedText>
                     <TextInput
-                      style={[styles.input, { textAlign: 'right' }]}
+                      style={[styles.input, { flex: 1, textAlign: 'right' }]}
                       value={weight}
                       onChangeText={setWeight}
                       keyboardType="numeric"
@@ -1277,10 +1277,10 @@ export default function MiscScreen() {
                     />
                   </View>
 
-                  <View style={{ flex: 1.4 }}>
-                    <ThemedText style={styles.inputLabel}>Remarks</ThemedText>
+                  <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center' }}>
+                    <ThemedText style={[styles.inlineLabel, { width: 85 }]}>Remarks</ThemedText>
                     <TextInput
-                      style={styles.input}
+                      style={[styles.input, { flex: 1 }]}
                       value={remarks}
                       onChangeText={setRemarks}
                       placeholder="Voucher remarks"
@@ -1291,15 +1291,16 @@ export default function MiscScreen() {
 
                 {/* Row 4: User Id */}
                 <View style={styles.formRow}>
-                  <View style={{ flex: 0.8 }}>
-                    <ThemedText style={styles.inputLabel}>User Id</ThemedText>
+                  <View style={{ flex: 1.1, flexDirection: 'row', alignItems: 'center', marginRight: 12 }}>
+                    <ThemedText style={styles.inlineLabel}>User Id</ThemedText>
                     <TextInput
-                      style={[styles.input, styles.readonlyInput]}
+                      style={[styles.input, styles.readonlyInput, { flex: 1 }]}
                       value={userId}
                       onChangeText={setUserId}
                       editable={false}
                     />
                   </View>
+                  <View style={{ flex: 1 }} />
                 </View>
               </View>
             </View>
@@ -1598,6 +1599,7 @@ const styles = StyleSheet.create({
 
   // ===== TOP HEADER BAR =====
   header: {
+    height: 38,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
@@ -1605,18 +1607,17 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: '#EBE2D2',
     paddingHorizontal: 12,
-    paddingVertical: 8,
   },
   headerLeft: {
     flexDirection: 'row',
     alignItems: 'center',
   },
   backButton: {
-    padding: 4,
-    marginRight: 8,
+    padding: 3,
+    marginRight: 6,
   },
   headerTitle: {
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: 'bold',
     color: '#3B2D17',
     letterSpacing: 0.3,
@@ -1624,7 +1625,7 @@ const styles = StyleSheet.create({
   headerActions: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: 6,
   },
   headerBtnSecondary: {
     flexDirection: 'row',
@@ -1632,9 +1633,9 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
     borderWidth: 1,
     borderColor: '#DFD3BC',
-    borderRadius: 6,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
+    borderRadius: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
   },
   headerBtnSecondaryText: {
     fontSize: 11,
@@ -1647,9 +1648,9 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFF6F6',
     borderWidth: 1,
     borderColor: '#F2A8A2',
-    borderRadius: 6,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
+    borderRadius: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
   },
   headerBtnDangerText: {
     fontSize: 11,
@@ -1662,9 +1663,9 @@ const styles = StyleSheet.create({
     backgroundColor: '#F5E7CA',
     borderWidth: 1,
     borderColor: '#D4C3A3',
-    borderRadius: 6,
-    paddingHorizontal: 12,
-    paddingVertical: 5,
+    borderRadius: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 3,
   },
   headerBtnPrimaryText: {
     fontSize: 11,
@@ -1742,7 +1743,13 @@ const styles = StyleSheet.create({
   formRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 8,
+    marginBottom: 6,
+  },
+  inlineLabel: {
+    width: 70,
+    fontSize: 11,
+    fontWeight: 'bold',
+    color: '#4A3B2C',
   },
   inputLabel: {
     fontSize: 11,
@@ -1751,45 +1758,48 @@ const styles = StyleSheet.create({
     marginBottom: 2,
   },
   input: {
-    height: 28,
+    height: 24,
     backgroundColor: '#FFFFFF',
     borderWidth: 1,
     borderColor: '#E2D7C5',
-    borderRadius: 6,
-    paddingHorizontal: 8,
-    paddingVertical: 0,
-    fontSize: 12,
+    borderRadius: 4,
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+    fontSize: 11,
     color: '#2B2118',
   },
   readonlyInput: {
-    backgroundColor: '#F8F5EE',
+    backgroundColor: '#FAF7F0',
     borderColor: '#EADBCA',
     color: '#554736',
+    fontWeight: 'bold',
   },
   searchBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#FAF5EA',
     borderWidth: 1,
+    borderLeftWidth: 0,
     borderColor: '#DFD3BC',
-    borderRadius: 6,
+    borderTopRightRadius: 4,
+    borderBottomRightRadius: 4,
     paddingHorizontal: 8,
-    marginLeft: 5,
-    height: 28,
+    height: 24,
   },
   searchBtnText: {
-    fontSize: 11,
+    fontSize: 10.5,
     fontWeight: 'bold',
     color: '#7D5E19',
   },
   lookupBtn: {
-    width: 28,
-    height: 28,
+    width: 24,
+    height: 24,
     backgroundColor: '#FAF5EA',
     borderWidth: 1,
+    borderLeftWidth: 0,
     borderColor: '#D4C3A3',
-    borderRadius: 5,
-    marginLeft: 4,
+    borderTopRightRadius: 4,
+    borderBottomRightRadius: 4,
     alignItems: 'center',
     justifyContent: 'center',
     flexShrink: 0,
@@ -1797,12 +1807,12 @@ const styles = StyleSheet.create({
 
   // ===== DROPDOWN SELECTOR =====
   dropdownSelector: {
-    height: 28,
+    height: 24,
     backgroundColor: '#FFFFFF',
     borderWidth: 1,
     borderColor: '#E2D7C5',
-    borderRadius: 6,
-    paddingHorizontal: 8,
+    borderRadius: 4,
+    paddingHorizontal: 6,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
@@ -1892,8 +1902,8 @@ const styles = StyleSheet.create({
 
   // ===== SUMMARY PANEL =====
   summaryBody: {
-    padding: 10,
-    gap: 6,
+    padding: 8,
+    gap: 4,
   },
   summaryRow: {
     flexDirection: 'row',
@@ -1909,18 +1919,18 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: '#ECD8AB',
     backgroundColor: '#FFF4DC',
-    borderRadius: 5,
+    borderRadius: 4,
     paddingHorizontal: 8,
-    paddingVertical: 6,
-    marginTop: 4,
+    paddingVertical: 4,
+    marginTop: 2,
   },
   summaryTotalLabel: {
-    fontSize: 12,
+    fontSize: 11.5,
     fontWeight: 'bold',
     color: '#9E6D08',
   },
   summaryTotalValue: {
-    fontSize: 15,
+    fontSize: 13.5,
     fontWeight: 'bold',
     color: '#9E6D08',
   },

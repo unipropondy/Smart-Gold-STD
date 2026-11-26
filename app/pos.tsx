@@ -155,7 +155,6 @@ export default function PosScreen() {
     type: 'success'
   });
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
-  const [lineDetailModalVisible, setLineDetailModalVisible] = useState(false);
   const [classRates, setClassRates] = useState<any[]>([]);
   const [auditStats, setAuditStats] = useState<any>({
     LocationCode: '',
@@ -807,7 +806,6 @@ export default function PosScreen() {
     setCurrentDetail({
       InventoryCode: '', Description: '', Class: '', Weight: '', GoldLoss: '', CostPerGram: '', DailyClassRate: '', DailyRate: '', SMC: '', PCS: '1', TotalValue: '', GST: ''
     });
-    setLineDetailModalVisible(false);
   };
 
   const deleteItem = () => {
@@ -819,7 +817,6 @@ export default function PosScreen() {
         InventoryCode: '', Description: '', Class: '', Weight: '', GoldLoss: '', CostPerGram: '', SMC: '', PCS: '1', TotalValue: '', GST: ''
       });
       showToast("Line item deleted", 'info');
-      setLineDetailModalVisible(false);
     }
   };
 
@@ -2031,43 +2028,6 @@ export default function PosScreen() {
 
           {/* Middle 100% Full-Width Items Table */}
           <View style={[styles.goldCard, { flex: 1, marginTop: 8 }]}>
-            <View style={[styles.cardHeaderBanner, { justifyContent: 'space-between' }]}>
-              <View style={styles.headerTitleContainer}>
-                <View style={styles.headerIconBadgeSmall}>
-                  <Ionicons name="cart-outline" size={13} color="#B48218" />
-                </View>
-                <ThemedText style={styles.cardHeaderTitleSmall}>
-                  Invoice Line Items ({details.length})
-                </ThemedText>
-              </View>
-
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                {selectedIndex !== null && (
-                  <TouchableOpacity
-                    style={[styles.actionBtn, styles.destructiveBtn, { paddingVertical: 3, paddingHorizontal: 8 }]}
-                    onPress={deleteItem}
-                  >
-                    <Ionicons name="trash-outline" size={12} color="#D93829" />
-                    <ThemedText style={[styles.destructiveBtnText, { fontSize: 11 }]}>Delete</ThemedText>
-                  </TouchableOpacity>
-                )}
-                <TouchableOpacity
-                  style={[styles.actionBtn, styles.saveBtn, { paddingVertical: 4, paddingHorizontal: 12, backgroundColor: '#9E6D08' }]}
-                  onPress={() => {
-                    setSelectedIndex(null);
-                    setCurrentDetail({
-                      InventoryCode: '', Description: '', Class: '', Weight: '', GoldLoss: '', CostPerGram: '', SMC: '', PCS: '1', TotalValue: '', GST: ''
-                    });
-                    setLineDetailModalVisible(true);
-                  }}
-                  activeOpacity={0.8}
-                >
-                  <Ionicons name="add" size={14} color="#FFFFFF" />
-                  <ThemedText style={{ color: '#FFFFFF', fontSize: 11, fontWeight: 'bold' }}>Line Add</ThemedText>
-                </TouchableOpacity>
-              </View>
-            </View>
-
             {/* Table Header */}
             <View style={styles.tableHeaderRow}>
               <ThemedText style={[styles.tableHeadCell, { flex: 1.1 }]}>Item Code</ThemedText>
@@ -2100,7 +2060,6 @@ export default function PosScreen() {
                     onPress={() => {
                       setSelectedIndex(i);
                       setCurrentDetail(d);
-                      setLineDetailModalVisible(true);
                     }}
                   >
                     <ThemedText style={[styles.tableRowText, styles.codeCell, { flex: 1.1 }]}>
@@ -2147,36 +2106,36 @@ export default function PosScreen() {
 
           {/* Totals Breakdown Card */}
           <View style={[styles.goldCard, { marginTop: 6 }]}>
-            <View style={styles.cardHeaderBanner}>
+            <View style={[styles.cardHeaderBanner, { paddingVertical: 8, paddingHorizontal: 10 }]}>
               <View style={styles.headerIconBadgeSmall}>
-                <Ionicons name="calculator-outline" size={13} color="#B48218" />
+                <Ionicons name="calculator-outline" size={14} color="#B48218" />
               </View>
-              <ThemedText style={styles.cardHeaderTitleSmall}>Invoice Summary</ThemedText>
+              <ThemedText style={[styles.cardHeaderTitleSmall, { fontSize: 13 }]}>Invoice Summary</ThemedText>
             </View>
 
-            <View style={styles.cardBody}>
-              <View style={styles.totalRow}>
+            <View style={[styles.cardBody, { paddingVertical: 8, paddingHorizontal: 10 }]}>
+              <View style={[styles.totalRow, { paddingVertical: 8 }]}>
                 <ThemedText style={styles.totalLbl}>Total Qty</ThemedText>
                 <ThemedText style={styles.totalVal}>{paymentState.TotalQty}</ThemedText>
               </View>
-              <View style={styles.totalRow}>
+              <View style={[styles.totalRow, { paddingVertical: 8 }]}>
                 <ThemedText style={styles.totalLbl}>Sales Amount</ThemedText>
                 <ThemedText style={styles.totalVal}>$ {paymentState.TotalSalesAmt}</ThemedText>
               </View>
-              <View style={styles.totalRow}>
+              <View style={[styles.totalRow, { paddingVertical: 6 }]}>
                 <ThemedText style={styles.totalLbl}>Net Discount</ThemedText>
                 <TextInput
-                  style={[styles.formInput, { width: 70, height: 24, textAlign: 'right', fontSize: 11, marginLeft: 12 }]}
+                  style={[styles.formInput, { width: 70, height: 26, textAlign: 'right', fontSize: 11, marginLeft: 12 }]}
                   value={paymentState.NetDiscount}
                   onChangeText={(val) => updatePayment('NetDiscount', val)}
                   keyboardType="numeric"
                 />
               </View>
-              <View style={styles.totalRow}>
+              <View style={[styles.totalRow, { paddingVertical: 8 }]}>
                 <ThemedText style={styles.totalLbl}>Net Value</ThemedText>
                 <ThemedText style={styles.totalVal}>$ {paymentState.NetValue}</ThemedText>
               </View>
-              <View style={[styles.totalRow, { borderBottomWidth: 0 }]}>
+              <View style={[styles.totalRow, { borderBottomWidth: 0, paddingVertical: 8 }]}>
                 <ThemedText style={styles.totalLbl}>Tax (GST 9%)</ThemedText>
                 <ThemedText style={[styles.totalVal, { color: '#9E6D08' }]}>
                   $ {paymentState.Tax}
@@ -2195,7 +2154,180 @@ export default function PosScreen() {
         </View>
       </View>
 
-      {/* FOOTER AUDIT STATUS BAR */}
+      {/* LINE DETAIL SECTION (INSERT / UPDATE) */}
+      <View style={[styles.imageMatchedModalCard, { width: '100%', maxWidth: '100%', borderRadius: 0, borderWidth: 0, borderTopWidth: 1, borderTopColor: '#E8DCB8', elevation: 0, shadowOpacity: 0 }]}>
+        {/* Body: Inputs matching the exact horizontal screenshot layout with Action Buttons at the end */}
+        <View style={styles.imageMatchedBodyRow}>
+          {/* 1. Inventory Code with inline ... lookup button */}
+          <View style={[styles.imageMatchedFieldCol, { flex: 1.5, minWidth: 125, marginRight: 4 }]}>
+            <ThemedText style={styles.imageMatchedFieldLabel}>Inventory Code</ThemedText>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+              <TextInput
+                style={[styles.imageMatchedInput, { flex: 1, minWidth: 0, paddingHorizontal: 6 }]}
+                value={currentDetail.InventoryCode}
+                onChangeText={(text) => updateDetail('InventoryCode', text)}
+                onBlur={handleInventoryCodeBlur}
+                onSubmitEditing={handleInventoryCodeBlur}
+                placeholder="Select..."
+                placeholderTextColor="#9E8D77"
+              />
+              <TouchableOpacity
+                style={[styles.imageMatchedStandaloneLookupBtn, { width: 22, flexShrink: 0 }]}
+                onPress={fetchInventory}
+                activeOpacity={0.7}
+              >
+                <ThemedText style={styles.imageMatchedLookupBtnText}>...</ThemedText>
+              </TouchableOpacity>
+            </View>
+          </View>
+
+          {/* 1.5 Class */}
+          <View style={[styles.imageMatchedFieldCol, { flex: 0.6, minWidth: 45, marginLeft: 2 }]}>
+            <ThemedText style={styles.imageMatchedFieldLabel}>Class</ThemedText>
+            <TextInput
+              style={[styles.imageMatchedInput, styles.readonlyInputStyle, { textAlign: 'center', fontWeight: 'bold', paddingHorizontal: 4, minWidth: 0 }]}
+              value={currentDetail.Class}
+              editable={false}
+              placeholder=""
+              placeholderTextColor="#9E8D77"
+            />
+          </View>
+
+          {/* 2. Description */}
+          <View style={[styles.imageMatchedFieldCol, { flex: 2, minWidth: 130 }]}>
+            <ThemedText style={styles.imageMatchedFieldLabel}>Description</ThemedText>
+            <TextInput
+              style={[styles.imageMatchedInput, styles.readonlyInputStyle, { paddingHorizontal: 6 }]}
+              value={currentDetail.Description}
+              editable={false}
+              placeholder=""
+              placeholderTextColor="#9E8D77"
+            />
+          </View>
+
+          {/* 3. Weight */}
+          <View style={[styles.imageMatchedFieldCol, { flex: 0.8, minWidth: 55 }]}>
+            <ThemedText style={styles.imageMatchedFieldLabel}>Weight</ThemedText>
+            <TextInput
+              style={[styles.imageMatchedInput, { textAlign: 'right', paddingHorizontal: 4 }]}
+              value={currentDetail.Weight}
+              onChangeText={(text) => updateDetail('Weight', text.replace(/[^0-9.]/g, ''))}
+              keyboardType="numeric"
+              placeholder=""
+              placeholderTextColor="#9E8D77"
+            />
+          </View>
+
+          {/* 4. Gold Loss */}
+          <View style={[styles.imageMatchedFieldCol, { flex: 0.8, minWidth: 55 }]}>
+            <ThemedText style={styles.imageMatchedFieldLabel}>Gold Loss</ThemedText>
+            <TextInput
+              style={[styles.imageMatchedInput, { textAlign: 'right', paddingHorizontal: 4 }]}
+              value={currentDetail.GoldLoss}
+              onChangeText={(text) => updateDetail('GoldLoss', text.replace(/[^0-9.]/g, ''))}
+              keyboardType="numeric"
+              placeholder=""
+              placeholderTextColor="#9E8D77"
+            />
+          </View>
+
+          {/* 5. Cost/g */}
+          <View style={[styles.imageMatchedFieldCol, { flex: 0.8, minWidth: 55 }]}>
+            <ThemedText style={styles.imageMatchedFieldLabel}>Cost/g</ThemedText>
+            <TextInput
+              style={[styles.imageMatchedInput, { textAlign: 'right', paddingHorizontal: 4 }]}
+              value={currentDetail.CostPerGram}
+              onChangeText={(text) => updateDetail('CostPerGram', text.replace(/[^0-9.]/g, ''))}
+              keyboardType="numeric"
+              placeholder=""
+              placeholderTextColor="#9E8D77"
+            />
+          </View>
+
+          {/* 6. PCS */}
+          <View style={[styles.imageMatchedFieldCol, { flex: 0.5, minWidth: 40 }]}>
+            <ThemedText style={[styles.imageMatchedFieldLabel, { textAlign: 'center' }]}>PCS</ThemedText>
+            <TextInput
+              style={[
+                styles.imageMatchedInput,
+                { textAlign: 'center', paddingHorizontal: 2 },
+                (currentDetail.ClassSalesType !== 'P' && currentDetail.ClassSalesType !== 'B' && (currentDetail.Class || '').toUpperCase() !== 'P') && styles.readonlyInputStyle
+              ]}
+              value={currentDetail.PCS}
+              onChangeText={(text) => updateDetail('PCS', text.replace(/[^0-9]/g, ''))}
+              editable={currentDetail.ClassSalesType === 'P' || currentDetail.ClassSalesType === 'B' || (currentDetail.Class || '').toUpperCase() === 'P'}
+              keyboardType="numeric"
+              placeholder="1"
+              placeholderTextColor="#9E8D77"
+            />
+          </View>
+
+          {/* 7. SMC */}
+          <View style={[styles.imageMatchedFieldCol, { flex: 0.8, minWidth: 55 }]}>
+            <ThemedText style={styles.imageMatchedFieldLabel}>SMC</ThemedText>
+            <TextInput
+              style={[styles.imageMatchedInput, { textAlign: 'right', paddingHorizontal: 4 }]}
+              value={currentDetail.SMC}
+              onChangeText={(text) => updateDetail('SMC', text.replace(/[^0-9.]/g, ''))}
+              keyboardType="numeric"
+              placeholder=""
+              placeholderTextColor="#9E8D77"
+            />
+          </View>
+
+          {/* 8. GST */}
+          <View style={[styles.imageMatchedFieldCol, { flex: 0.8, minWidth: 55 }]}>
+            <ThemedText style={styles.imageMatchedFieldLabel}>GST</ThemedText>
+            <TextInput
+              style={[styles.imageMatchedInput, styles.readonlyInputStyle, { textAlign: 'right', paddingHorizontal: 4 }]}
+              value={currentDetail.GST}
+              editable={false}
+              placeholder=""
+              placeholderTextColor="#9E8D77"
+            />
+          </View>
+
+          {/* 9. Total Value */}
+          <View style={[styles.imageMatchedFieldCol, { flex: 1, minWidth: 70 }]}>
+            <ThemedText style={styles.imageMatchedFieldLabel}>Total Value</ThemedText>
+            <TextInput
+              style={[styles.imageMatchedInput, styles.readonlyInputStyle, { textAlign: 'right', fontWeight: 'bold', paddingHorizontal: 4 }]}
+              value={currentDetail.TotalValue}
+              editable={false}
+              placeholder=""
+              placeholderTextColor="#9E8D77"
+            />
+          </View>
+
+          {/* 10. Action Buttons (Clear Item & Add Item) positioned directly after Total Value */}
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'flex-end', paddingBottom: 1, marginLeft: 4 }}>
+            <TouchableOpacity
+              style={[styles.imageMatchedClearBtn, { height: 26, justifyContent: 'center', paddingHorizontal: 8 }]}
+              onPress={() => {
+                setSelectedIndex(null);
+                setCurrentDetail({
+                  InventoryCode: '', Description: '', Class: '', Weight: '', GoldLoss: '', CostPerGram: '', SMC: '', PCS: '1', TotalValue: '', GST: ''
+                });
+              }}
+              activeOpacity={0.8}
+            >
+              <ThemedText style={styles.imageMatchedClearBtnText}>Clear Item</ThemedText>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.imageMatchedAddBtn, { height: 26, justifyContent: 'center', paddingHorizontal: 10 }]}
+              onPress={addItem}
+              activeOpacity={0.8}
+            >
+              <ThemedText style={styles.imageMatchedAddBtnText}>
+                {selectedIndex !== null ? 'Update Item' : '+ Add Item'}
+              </ThemedText>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </View>
+
+      {/* FOOTER AUDIT STATUS BAR - Docked at the bottom of the screen */}
       <View style={styles.footerStatusBar}>
         <View style={styles.footerCol}>
           <ThemedText style={styles.footerLabel}>Location</ThemedText>
@@ -2236,222 +2368,6 @@ export default function PosScreen() {
           <ThemedText style={styles.footerVal}>${paymentState.ReturnAmt || '0.00'}</ThemedText>
         </View>
       </View>
-
-      {/* LINE DETAIL MODAL (INSERT / UPDATE) - Matches image layout */}
-      <Modal visible={lineDetailModalVisible} transparent animationType="fade" onRequestClose={() => setLineDetailModalVisible(false)}>
-        <TouchableOpacity
-          style={styles.modalOverlay}
-          activeOpacity={1}
-          onPress={() => setLineDetailModalVisible(false)}
-        >
-          <TouchableWithoutFeedback>
-            <View style={styles.imageMatchedModalCard}>
-              {/* Header Banner - Exactly like image */}
-              <View style={styles.imageMatchedHeaderBanner}>
-                <View style={styles.imageMatchedHeaderLeft}>
-                  <View style={styles.imageMatchedIconBox}>
-                    <Ionicons name="create-outline" size={15} color="#B48218" />
-                  </View>
-                  <ThemedText style={styles.imageMatchedHeaderTitle}>
-                    {selectedIndex !== null ? 'Edit Item in Invoice' : 'Add Item to Invoice'}
-                  </ThemedText>
-                </View>
-
-                <View style={styles.imageMatchedHeaderActions}>
-                  {selectedIndex !== null && (
-                    <TouchableOpacity
-                      style={[styles.actionBtn, styles.destructiveBtn, { paddingVertical: 5, paddingHorizontal: 12, marginRight: 4 }]}
-                      onPress={deleteItem}
-                      activeOpacity={0.8}
-                    >
-                      <Ionicons name="trash-outline" size={13} color="#D93829" />
-                      <ThemedText style={styles.destructiveBtnText}>Delete</ThemedText>
-                    </TouchableOpacity>
-                  )}
-
-                  <TouchableOpacity
-                    style={styles.imageMatchedClearBtn}
-                    onPress={() => {
-                      setCurrentDetail({
-                        InventoryCode: '', Description: '', Class: '', Weight: '', GoldLoss: '', CostPerGram: '', SMC: '', PCS: '1', TotalValue: '', GST: ''
-                      });
-                    }}
-                    activeOpacity={0.8}
-                  >
-                    <ThemedText style={styles.imageMatchedClearBtnText}>Clear Item</ThemedText>
-                  </TouchableOpacity>
-
-                  <TouchableOpacity
-                    style={styles.imageMatchedAddBtn}
-                    onPress={addItem}
-                    activeOpacity={0.8}
-                  >
-                    <ThemedText style={styles.imageMatchedAddBtnText}>
-                      {selectedIndex !== null ? 'Update Item' : '+ Add Item'}
-                    </ThemedText>
-                  </TouchableOpacity>
-
-                  <TouchableOpacity
-                    onPress={() => setLineDetailModalVisible(false)}
-                    style={styles.imageMatchedCloseBtn}
-                    activeOpacity={0.7}
-                  >
-                    <Ionicons name="close" size={18} color="#5C4A28" />
-                  </TouchableOpacity>
-                </View>
-              </View>
-
-              {/* Body: Inputs matching the exact horizontal screenshot layout */}
-              <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={styles.imageMatchedBodyRow}
-              >
-                {/* 1. Inventory Code with inline ... lookup button */}
-                <View style={[styles.imageMatchedFieldCol, { width: 175 }]}>
-                  <ThemedText style={styles.imageMatchedFieldLabel}>Inventory Code</ThemedText>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                    <TextInput
-                      style={[styles.imageMatchedInput, { flex: 1 }]}
-                      value={currentDetail.InventoryCode}
-                      onChangeText={(text) => updateDetail('InventoryCode', text)}
-                      onBlur={handleInventoryCodeBlur}
-                      onSubmitEditing={handleInventoryCodeBlur}
-                      placeholder="Select..."
-                      placeholderTextColor="#9E8D77"
-                    />
-                    <TouchableOpacity
-                      style={styles.imageMatchedStandaloneLookupBtn}
-                      onPress={fetchInventory}
-                      activeOpacity={0.7}
-                    >
-                      <ThemedText style={styles.imageMatchedLookupBtnText}>...</ThemedText>
-                    </TouchableOpacity>
-                  </View>
-                </View>
-
-                {/* 1.5 Class */}
-                <View style={[styles.imageMatchedFieldCol, { width: 75 }]}>
-                  <ThemedText style={styles.imageMatchedFieldLabel}>Class</ThemedText>
-                  <TextInput
-                    style={[styles.imageMatchedInput, styles.readonlyInputStyle, { textAlign: 'center', fontWeight: 'bold' }]}
-                    value={currentDetail.Class}
-                    editable={false}
-                    placeholder=""
-                    placeholderTextColor="#9E8D77"
-                  />
-                </View>
-
-                {/* 2. Description */}
-                <View style={[styles.imageMatchedFieldCol, { width: 220 }]}>
-                  <ThemedText style={styles.imageMatchedFieldLabel}>Description</ThemedText>
-                  <TextInput
-                    style={[styles.imageMatchedInput, styles.readonlyInputStyle]}
-                    value={currentDetail.Description}
-                    editable={false}
-                    placeholder=""
-                    placeholderTextColor="#9E8D77"
-                  />
-                </View>
-
-                {/* 3. Weight */}
-                <View style={[styles.imageMatchedFieldCol, { width: 90 }]}>
-                  <ThemedText style={styles.imageMatchedFieldLabel}>Weight</ThemedText>
-                  <TextInput
-                    style={[styles.imageMatchedInput, { textAlign: 'right' }]}
-                    value={currentDetail.Weight}
-                    onChangeText={(text) => updateDetail('Weight', text.replace(/[^0-9.]/g, ''))}
-                    keyboardType="numeric"
-                    placeholder=""
-                    placeholderTextColor="#9E8D77"
-                  />
-                </View>
-
-                {/* 4. Gold Loss */}
-                <View style={[styles.imageMatchedFieldCol, { width: 90 }]}>
-                  <ThemedText style={styles.imageMatchedFieldLabel}>Gold Loss</ThemedText>
-                  <TextInput
-                    style={[styles.imageMatchedInput, { textAlign: 'right' }]}
-                    value={currentDetail.GoldLoss}
-                    onChangeText={(text) => updateDetail('GoldLoss', text.replace(/[^0-9.]/g, ''))}
-                    keyboardType="numeric"
-                    placeholder=""
-                    placeholderTextColor="#9E8D77"
-                  />
-                </View>
-
-                {/* 5. Cost/g */}
-                <View style={[styles.imageMatchedFieldCol, { width: 90 }]}>
-                  <ThemedText style={styles.imageMatchedFieldLabel}>Cost/g</ThemedText>
-                  <TextInput
-                    style={[styles.imageMatchedInput, { textAlign: 'right' }]}
-                    value={currentDetail.CostPerGram}
-                    onChangeText={(text) => updateDetail('CostPerGram', text.replace(/[^0-9.]/g, ''))}
-                    keyboardType="numeric"
-                    placeholder=""
-                    placeholderTextColor="#9E8D77"
-                  />
-                </View>
-
-                {/* 6. PCS */}
-                <View style={[styles.imageMatchedFieldCol, { width: 60 }]}>
-                  <ThemedText style={[styles.imageMatchedFieldLabel, { textAlign: 'center' }]}>PCS</ThemedText>
-                  <TextInput
-                    style={[
-                      styles.imageMatchedInput,
-                      { textAlign: 'center' },
-                      (currentDetail.ClassSalesType !== 'P' && currentDetail.ClassSalesType !== 'B' && (currentDetail.Class || '').toUpperCase() !== 'P') && styles.readonlyInputStyle
-                    ]}
-                    value={currentDetail.PCS}
-                    onChangeText={(text) => updateDetail('PCS', text.replace(/[^0-9]/g, ''))}
-                    editable={currentDetail.ClassSalesType === 'P' || currentDetail.ClassSalesType === 'B' || (currentDetail.Class || '').toUpperCase() === 'P'}
-                    keyboardType="numeric"
-                    placeholder="1"
-                    placeholderTextColor="#9E8D77"
-                  />
-                </View>
-
-                {/* 7. SMC */}
-                <View style={[styles.imageMatchedFieldCol, { width: 85 }]}>
-                  <ThemedText style={styles.imageMatchedFieldLabel}>SMC</ThemedText>
-                  <TextInput
-                    style={[styles.imageMatchedInput, { textAlign: 'right' }]}
-                    value={currentDetail.SMC}
-                    onChangeText={(text) => updateDetail('SMC', text.replace(/[^0-9.]/g, ''))}
-                    keyboardType="numeric"
-                    placeholder=""
-                    placeholderTextColor="#9E8D77"
-                  />
-                </View>
-
-                {/* 8. GST */}
-                <View style={[styles.imageMatchedFieldCol, { width: 85 }]}>
-                  <ThemedText style={styles.imageMatchedFieldLabel}>GST</ThemedText>
-                  <TextInput
-                    style={[styles.imageMatchedInput, styles.readonlyInputStyle, { textAlign: 'right' }]}
-                    value={currentDetail.GST}
-                    editable={false}
-                    placeholder=""
-                    placeholderTextColor="#9E8D77"
-                  />
-                </View>
-
-                {/* 9. Total Value */}
-                <View style={[styles.imageMatchedFieldCol, { width: 105 }]}>
-                  <ThemedText style={styles.imageMatchedFieldLabel}>Total Value</ThemedText>
-                  <TextInput
-                    style={[styles.imageMatchedInput, styles.readonlyInputStyle, { textAlign: 'right', fontWeight: 'bold' }]}
-                    value={currentDetail.TotalValue}
-                    editable={false}
-                    placeholder=""
-                    placeholderTextColor="#9E8D77"
-                  />
-                </View>
-              </ScrollView>
-            </View>
-          </TouchableWithoutFeedback>
-        </TouchableOpacity>
-      </Modal>
 
       {/* LOV SELECTION MODAL (Placed on top so it always layers in front of lineDetailModal) */}
       <Modal visible={lovVisible} animationType="fade" transparent onRequestClose={() => setLovVisible(false)}>
@@ -3095,13 +3011,13 @@ const styles = StyleSheet.create({
   tableHeaderRow: {
     flexDirection: 'row',
     backgroundColor: '#F5E7CA',
-    paddingVertical: 6,
+    paddingVertical: 3,
     paddingHorizontal: 8,
     borderBottomWidth: 1,
     borderBottomColor: '#E2D3B3',
   },
   tableHeadCell: {
-    fontSize: 11,
+    fontSize: 10,
     fontWeight: 'bold',
     color: '#3B2D17',
     textTransform: 'uppercase',
@@ -3109,7 +3025,7 @@ const styles = StyleSheet.create({
   tableRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 7,
+    paddingVertical: 4,
     paddingHorizontal: 8,
     borderBottomWidth: 1,
     borderBottomColor: '#F3EBDD',
@@ -3229,7 +3145,7 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: '#EBE2D2',
     flexDirection: 'row',
-    paddingVertical: 6,
+    paddingVertical: 2,
     paddingHorizontal: 8,
   },
   footerCol: {
@@ -3239,10 +3155,11 @@ const styles = StyleSheet.create({
     borderRightWidth: 1,
     borderRightColor: '#F2E8D7',
     textAlign: 'center' as any,
+    paddingVertical: 1,
   },
   footerLabel: {
     width: '100%',
-    fontSize: 9,
+    fontSize: 8.5,
     fontWeight: '600',
     color: '#8F816E',
     textTransform: 'uppercase',
@@ -3251,10 +3168,10 @@ const styles = StyleSheet.create({
   },
   footerVal: {
     width: '100%',
-    fontSize: 11,
+    fontSize: 10.5,
     fontWeight: 'bold',
     color: '#3B2D17',
-    marginTop: 1,
+    marginTop: 0,
     textAlign: 'center',
     alignSelf: 'center',
   },
@@ -3492,43 +3409,43 @@ const styles = StyleSheet.create({
   imageMatchedBodyRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    flexGrow: 1,
-    gap: 8,
-    paddingHorizontal: 14,
-    paddingVertical: 14,
+    width: '100%',
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
     backgroundColor: '#FFFFFF',
   },
   imageMatchedFieldCol: {
     justifyContent: 'flex-start',
   },
   imageMatchedFieldLabel: {
-    fontSize: 11,
+    fontSize: 10,
     fontWeight: '600',
     color: '#554428',
-    marginBottom: 5,
+    marginBottom: 3,
   },
   imageMatchedInputWithBtn: {
     flexDirection: 'row',
     alignItems: 'center',
   },
   imageMatchedInput: {
-    height: 32,
+    height: 26,
     borderWidth: 1,
     borderColor: '#D8CDBA',
-    borderRadius: 5,
-    paddingHorizontal: 8,
+    borderRadius: 4,
+    paddingHorizontal: 6,
     paddingVertical: 0,
     fontSize: 11,
     color: '#3B2D17',
     backgroundColor: '#FFFFFF',
   },
   imageMatchedStandaloneLookupBtn: {
-    width: 28,
-    height: 32,
+    width: 24,
+    height: 26,
     backgroundColor: '#F7EDD5',
     borderWidth: 1,
     borderColor: '#D8CDBA',
-    borderRadius: 5,
+    borderRadius: 4,
     justifyContent: 'center',
     alignItems: 'center',
   },

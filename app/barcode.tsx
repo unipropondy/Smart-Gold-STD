@@ -3,7 +3,7 @@ import { API_BASE_URL } from '@/constants/api';
 import { useThemeContext } from '@/contexts/ThemeContext';
 import { useThemeColors } from '@/hooks/useThemeColors';
 import { Ionicons } from '@expo/vector-icons';
-import { Stack, useRouter } from 'expo-router';
+import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -26,12 +26,14 @@ export default function BarcodeScreen() {
   const { accentColor } = useThemeContext();
   const { background: backgroundColor, card: cardColor, text: textColor, border: borderColor, primaryGold: GOLD_COLOR, subtitle: subtitleColor } = themeColors;
   const router = useRouter();
+  const params = useLocalSearchParams<{ inventoryCode?: string }>();
 
   // Field states matching frmBarcode.vb
   const [company, setCompany] = useState('');
+  const [shortCode, setShortCode] = useState('');
   const [defaultCompany, setDefaultCompany] = useState('');
   const [barCode, setBarCode] = useState('');
-  const [inventoryCode, setInventoryCode] = useState('');
+  const [inventoryCode, setInventoryCode] = useState(params.inventoryCode ? String(params.inventoryCode).trim() : '');
   const [description, setDescription] = useState('');
   const [weight, setWeight] = useState('');
   const [category, setCategory] = useState('');
@@ -45,8 +47,13 @@ export default function BarcodeScreen() {
   const [loading, setLoading] = useState(false);
   const [printing, setPrinting] = useState(false);
 
-  // Focus ref
+  // Print Preview Dialog
+  const [showPrintModal, setShowPrintModal] = useState(false);
+  const [printData, setPrintData] = useState<any>(null);
+
+  // Focus refs
   const inventoryCodeRef = useRef<TextInput>(null);
+  const newTrayIdRef = useRef<TextInput>(null);
   const noOfLabelsRef = useRef<TextInput>(null);
 
   // Fetch company details on mount matching frmBarcode.vb Load
@@ -58,25 +65,29 @@ export default function BarcodeScreen() {
         if (json.success && json.company) {
           setCompany(json.company);
           setDefaultCompany(json.company);
+          setShortCode(json.shortCode || '');
         }
       } catch (err) {
         console.warn('Failed to fetch company:', err);
       }
     };
     fetchCompany();
-  }, []);
+    if (params.inventoryCode && String(params.inventoryCode).trim()) {
+      fetchInventoryDetails(String(params.inventoryCode).trim());
+    }
+  }, [params.inventoryCode]);
 
   // In-App Toast Notification
   const [toast, setToast] = useState<{ visible: boolean; message: string; type: 'success' | 'error' | 'info' }>({
     visible: false,
     message: '',
-    type: 'success'
+    type: 'success',
   });
 
   const showToast = (message: string, type: 'success' | 'error' | 'info' = 'success') => {
     setToast({ visible: true, message, type });
     setTimeout(() => {
-      setToast(prev => ({ ...prev, visible: false }));
+      setToast((prev) => ({ ...prev, visible: false }));
     }, 3500);
   };
 
@@ -118,7 +129,7 @@ export default function BarcodeScreen() {
     );
   }, [lovData, lovSearch]);
 
-  // subGetInventory logic
+  // subGetInventory logic matching frmBarcode.vb
   const fetchInventoryDetails = async (code: string) => {
     if (!code || !code.trim()) return;
     setLoading(true);
@@ -138,10 +149,15 @@ export default function BarcodeScreen() {
         const cat = item.CategoryCode || '';
         setCategory(cat);
         setInitialCategory(cat);
-        setTimeout(() => noOfLabelsRef.current?.focus(), 100);
+        if (noOfLabelsRef.current) {
+          setTimeout(() => noOfLabelsRef.current?.focus(), 100);
+        }
       } else {
-        const msg = json.message || 'InventoryCode Not Found';
-        showToast(msg, 'error');
+        if (json.noStock) {
+          showToast('No Stock for this InventoryCode', 'error');
+        } else {
+          showToast(json.message || 'InventoryCode Not Found', 'error');
+        }
         handleClear(false);
         setTimeout(() => inventoryCodeRef.current?.focus(), 150);
       }
@@ -153,7 +169,7 @@ export default function BarcodeScreen() {
     }
   };
 
-  // btnNew_Click
+  // btnNew_Click matching frmBarcode.vb
   const handleClear = (fullClear = true) => {
     if (fullClear) {
       setCompany(defaultCompany || '');
@@ -175,9 +191,8 @@ export default function BarcodeScreen() {
     }
   };
 
-  // btnPrint_Click
+  // btnPrint_Click matching frmBarcode.vb validations and workflows
   const handlePrint = async () => {
-    // Exact validations from frmBarcode.vb
     if (!inventoryCode || !inventoryCode.trim()) {
       showToast('Please Enter InventoryCode', 'error');
       inventoryCodeRef.current?.focus();
@@ -221,18 +236,20 @@ export default function BarcodeScreen() {
           oldCategoryCode: initialCategory.trim(),
           noOfLabels: parseInt(noOfLabels, 10) || 1,
           company: company.trim(),
+          shortCode: shortCode.trim(),
           description: description.trim(),
           weight: weight.trim(),
           goldLoss: goldLoss.trim(),
           smc: smc.trim(),
-          classCode: classCode.trim()
+          classCode: classCode.trim(),
         }),
       });
 
       const json = await response.json();
       if (json.success) {
+        setPrintData(json);
+        setShowPrintModal(true);
         showToast(json.message || 'Barcode printed successfully!', 'success');
-        handleClear(true);
       } else {
         showToast(json.message || 'Error in updation.', 'error');
       }
@@ -242,6 +259,14 @@ export default function BarcodeScreen() {
     } finally {
       setPrinting(false);
     }
+  };
+
+  const handlePrintConfirm = () => {
+    setShowPrintModal(false);
+    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      window.print();
+    }
+    handleClear(true);
   };
 
   // Keyboard Shortcuts (F6: Clear, F9: Print, Esc: Close)
@@ -255,7 +280,9 @@ export default function BarcodeScreen() {
           e.preventDefault();
           handlePrint();
         } else if (e.key === 'Escape') {
-          if (isLOVVisible) {
+          if (showPrintModal) {
+            setShowPrintModal(false);
+          } else if (isLOVVisible) {
             setIsLOVVisible(false);
           } else {
             router.back();
@@ -265,7 +292,22 @@ export default function BarcodeScreen() {
       window.addEventListener('keydown', handleKeyDown);
       return () => window.removeEventListener('keydown', handleKeyDown);
     }
-  }, [inventoryCode, smc, trayId, newTrayId, classCode, description, weight, company, barCode, category, initialCategory, noOfLabels, isLOVVisible]);
+  }, [
+    inventoryCode,
+    smc,
+    trayId,
+    newTrayId,
+    classCode,
+    description,
+    weight,
+    company,
+    barCode,
+    category,
+    initialCategory,
+    noOfLabels,
+    isLOVVisible,
+    showPrintModal,
+  ]);
 
   const renderLOVItem = ({ item }: { item: any }) => {
     if (lovType === 'inventory') {
@@ -287,7 +329,9 @@ export default function BarcodeScreen() {
           <ThemedText style={[styles.tableCellText, { width: 85, textAlign: 'center' }]}>
             {item.SupplierCode || '-'}
           </ThemedText>
-          <ThemedText style={[styles.tableCellText, { width: 75, textAlign: 'right', fontWeight: 'bold', color: '#8D6409' }]}>
+          <ThemedText
+            style={[styles.tableCellText, { width: 75, textAlign: 'right', fontWeight: 'bold', color: '#8D6409' }]}
+          >
             {item.Weight != null ? Number(item.Weight).toFixed(2) : '-'}
           </ThemedText>
         </TouchableOpacity>
@@ -327,10 +371,7 @@ export default function BarcodeScreen() {
 
       {/* Floating In-App Toast Banner */}
       {toast.visible && (
-        <View style={[
-          styles.toastBanner,
-          toast.type === 'error' ? styles.toastError : styles.toastSuccess
-        ]}>
+        <View style={[styles.toastBanner, toast.type === 'error' ? styles.toastError : styles.toastSuccess]}>
           <Ionicons
             name={toast.type === 'error' ? 'alert-circle' : 'checkmark-circle'}
             size={18}
@@ -341,25 +382,52 @@ export default function BarcodeScreen() {
         </View>
       )}
 
-      {/* Custom Header */}
+      {/* Top Header Bar */}
       <View style={styles.header}>
-        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+        <View style={styles.headerLeft}>
           <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
-            <Ionicons name="arrow-back" size={22} color="#3B2D17" />
+            <Ionicons name="arrow-back" size={18} color="#3B2D17" />
           </TouchableOpacity>
           <ThemedText style={styles.title}>Barcode</ThemedText>
         </View>
         <View style={styles.toolbarBtns}>
-          <TouchableOpacity style={styles.toolbarBtn} onPress={() => handleClear(true)}>
-            <ThemedText style={styles.toolbarBtnText}>Clear</ThemedText>
+          <TouchableOpacity style={styles.headerBtnSecondary} onPress={() => handleClear(true)}>
+            <ThemedText style={styles.headerBtnSecondaryText}>Clear</ThemedText>
           </TouchableOpacity>
           <TouchableOpacity
-            style={[styles.toolbarBtn, { backgroundColor: '#F9F2E2', borderColor: '#B8903B' }]}
+            style={styles.headerBtnPreview}
+            onPress={() => {
+              if (!inventoryCode || !inventoryCode.trim()) {
+                showToast('Please Enter InventoryCode', 'error');
+                inventoryCodeRef.current?.focus();
+                return;
+              }
+              setPrintData({
+                printerModel: 'On-Screen Label Preview',
+                labelData: {
+                  company: company || 'SRI PINANG',
+                  description: description || 'N/A',
+                  smc: smc || '0.00',
+                  trayId: newTrayId || trayId || 'N/A',
+                  classCode: classCode || 'N/A',
+                  weight: weight || '0.00',
+                  inventoryCode: barCode || inventoryCode,
+                  noOfLabels: noOfLabels || '1'
+                }
+              });
+              setShowPrintModal(true);
+            }}
+          >
+            <Ionicons name="eye-outline" size={13} color="#8D6007" style={{ marginRight: 4 }} />
+            <ThemedText style={styles.headerBtnPreviewText}>Preview</ThemedText>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.headerBtnPrimary, printing && { opacity: 0.7 }]}
             onPress={handlePrint}
             disabled={printing}
           >
-            <ThemedText style={[styles.toolbarBtnText, { color: '#9E6D08' }]}>
-              {printing ? "Printing..." : "Print"}
+            <ThemedText style={styles.headerBtnPrimaryText}>
+              {printing ? 'Printing...' : 'Print'}
             </ThemedText>
           </TouchableOpacity>
         </View>
@@ -368,162 +436,193 @@ export default function BarcodeScreen() {
       <ScrollView contentContainerStyle={styles.scrollContent}>
         {loading && <ActivityIndicator size="large" color="#9E6D08" style={styles.loader} />}
 
-        {/* Luxury Gold Card */}
-        <View style={styles.goldCard}>
-          {/* Card Header Banner */}
-          <View style={styles.cardHeaderBanner}>
-            <View style={styles.headerIconBadge}>
-              <Ionicons name="barcode-outline" size={15} color="#B48218" />
-            </View>
-            <ThemedText style={styles.cardHeaderTitle}>Barcode Generation Details</ThemedText>
-          </View>
-
-          <View style={styles.cardBody}>
-            {/* Company */}
-            <View style={styles.formRow}>
-              <ThemedText style={styles.label}>Company</ThemedText>
-              <TextInput
-                style={styles.inputDisabled}
-                value={company}
-                editable={false}
-              />
-            </View>
-
-            {/* BarCode */}
-            <View style={styles.formRow}>
-              <ThemedText style={styles.label}>BarCode</ThemedText>
-              <TextInput
-                style={styles.inputDisabled}
-                value={barCode}
-                editable={false}
-              />
-            </View>
-
-            {/* Inventory Code */}
-            <View style={styles.formRow}>
-              <ThemedText style={styles.label}>Inventory Code</ThemedText>
-              <View style={styles.rowInputGroup}>
-                <TextInput
-                  ref={inventoryCodeRef}
-                  style={[styles.input, { borderTopRightRadius: 0, borderBottomRightRadius: 0, borderRightWidth: 0 }]}
-                  value={inventoryCode}
-                  onChangeText={setInventoryCode}
-                  onBlur={() => fetchInventoryDetails(inventoryCode)}
-                  onSubmitEditing={() => fetchInventoryDetails(inventoryCode)}
-                  autoCapitalize="characters"
-                  placeholder="Enter or search Inventory Code"
-                />
-                <TouchableOpacity style={styles.searchBtn} onPress={() => fetchLOV('inventory')}>
-                  <ThemedText style={styles.searchBtnText}>...</ThemedText>
-                </TouchableOpacity>
+        <View style={styles.horizontalWrapper}>
+          {/* Form Card (Left) */}
+          <View style={styles.formCard}>
+            <View style={styles.cardHeaderBanner}>
+              <View style={styles.headerIconBadge}>
+                <Ionicons name="document-text-outline" size={13} color="#9E6D08" />
               </View>
+              <ThemedText style={styles.cardHeaderTitle}>Barcode Generation Details</ThemedText>
             </View>
 
-            {/* Description */}
-            <View style={styles.formRow}>
-              <ThemedText style={styles.label}>Description</ThemedText>
-              <TextInput
-                style={styles.inputDisabled}
-                value={description}
-                editable={false}
-              />
-            </View>
-
-            {/* Weight & Category Row */}
-            <View style={styles.formRowMulti}>
-              <View style={styles.flexRow}>
-                <ThemedText style={styles.label}>Weight</ThemedText>
-                <TextInput
-                  style={[styles.inputDisabled, { textAlign: 'right' }]}
-                  value={weight}
-                  editable={false}
-                />
+            <View style={styles.cardBody}>
+              {/* Company */}
+              <View style={styles.formRow}>
+                <ThemedText style={styles.label}>Company</ThemedText>
+                <TextInput style={styles.inputDisabled} value={company} editable={false} />
               </View>
-              <View style={styles.flexRow}>
-                <ThemedText style={styles.labelMulti}>Category</ThemedText>
+
+              {/* BarCode */}
+              <View style={styles.formRow}>
+                <ThemedText style={styles.label}>BarCode</ThemedText>
+                <TextInput style={styles.inputDisabled} value={barCode} editable={false} />
+              </View>
+
+              {/* Inventory Code */}
+              <View style={styles.formRow}>
+                <ThemedText style={styles.label}>Inventory Code</ThemedText>
                 <View style={styles.rowInputGroup}>
                   <TextInput
+                    ref={inventoryCodeRef}
                     style={[styles.input, { borderTopRightRadius: 0, borderBottomRightRadius: 0, borderRightWidth: 0 }]}
-                    value={category}
-                    onChangeText={setCategory}
+                    value={inventoryCode}
+                    onChangeText={setInventoryCode}
+                    onBlur={() => fetchInventoryDetails(inventoryCode)}
+                    onSubmitEditing={() => fetchInventoryDetails(inventoryCode)}
                     autoCapitalize="characters"
+                    placeholder="Enter or select Inventory Code"
+                    placeholderTextColor="#A99C89"
                   />
-                  <TouchableOpacity style={styles.searchBtn} onPress={() => fetchLOV('category')}>
+                  <TouchableOpacity style={styles.searchBtn} onPress={() => fetchLOV('inventory')}>
                     <ThemedText style={styles.searchBtnText}>...</ThemedText>
                   </TouchableOpacity>
                 </View>
               </View>
-            </View>
 
-            {/* Gold Loss */}
-            <View style={styles.formRow}>
-              <ThemedText style={styles.label}>Gold Loss</ThemedText>
-              <TextInput
-                style={[styles.inputDisabled, { textAlign: 'right' }]}
-                value={goldLoss}
-                editable={false}
-              />
-            </View>
+              {/* Description */}
+              <View style={styles.formRow}>
+                <ThemedText style={styles.label}>Description</ThemedText>
+                <TextInput style={styles.inputDisabled} value={description} editable={false} />
+              </View>
 
-            {/* SMC */}
-            <View style={styles.formRow}>
-              <ThemedText style={styles.label}>SMC</ThemedText>
-              <TextInput
-                style={[styles.inputDisabled, { textAlign: 'right' }]}
-                value={smc}
-                editable={false}
-              />
-            </View>
+              {/* Weight & Category Row */}
+              <View style={styles.formRowMulti}>
+                <View style={styles.flexRow}>
+                  <ThemedText style={styles.label}>Weight</ThemedText>
+                  <TextInput style={[styles.inputDisabled, { textAlign: 'right' }]} value={weight} editable={false} />
+                </View>
+                <View style={styles.flexRow}>
+                  <ThemedText style={styles.labelMulti}>Category</ThemedText>
+                  <View style={styles.rowInputGroup}>
+                    <TextInput
+                      style={[styles.input, { borderTopRightRadius: 0, borderBottomRightRadius: 0, borderRightWidth: 0 }]}
+                      value={category}
+                      onChangeText={setCategory}
+                      autoCapitalize="characters"
+                    />
+                    <TouchableOpacity style={styles.searchBtn} onPress={() => fetchLOV('category')}>
+                      <ThemedText style={styles.searchBtnText}>...</ThemedText>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              </View>
 
-            {/* Class */}
-            <View style={styles.formRow}>
-              <ThemedText style={styles.label}>Class</ThemedText>
-              <TextInput
-                style={styles.inputDisabled}
-                value={classCode}
-                editable={false}
-              />
-            </View>
+              {/* Gold Loss */}
+              <View style={styles.formRow}>
+                <ThemedText style={styles.label}>Gold Loss</ThemedText>
+                <TextInput style={[styles.inputDisabled, { textAlign: 'right' }]} value={goldLoss} editable={false} />
+              </View>
 
-            {/* Tray ID */}
-            <View style={styles.formRow}>
-              <ThemedText style={styles.label}>Tray ID</ThemedText>
-              <View style={styles.rowInputGroup}>
+              {/* SMC */}
+              <View style={styles.formRow}>
+                <ThemedText style={styles.label}>SMC</ThemedText>
+                <TextInput style={[styles.inputDisabled, { textAlign: 'right' }]} value={smc} editable={false} />
+              </View>
+
+              {/* Class */}
+              <View style={styles.formRow}>
+                <ThemedText style={styles.label}>Class</ThemedText>
+                <TextInput style={styles.inputDisabled} value={classCode} editable={false} />
+              </View>
+
+              {/* Tray ID */}
+              <View style={styles.formRow}>
+                <ThemedText style={styles.label}>Tray ID</ThemedText>
+                <View style={styles.rowInputGroup}>
+                  <TextInput style={[styles.inputDisabled, { flex: 1, marginRight: 6 }]} value={trayId} editable={false} />
+                  <TextInput
+                    ref={newTrayIdRef}
+                    style={[styles.input, { flex: 1, borderTopRightRadius: 0, borderBottomRightRadius: 0, borderRightWidth: 0 }]}
+                    value={newTrayId}
+                    onChangeText={setNewTrayId}
+                    placeholder="New Tray"
+                    placeholderTextColor="#A99C89"
+                  />
+                  <TouchableOpacity style={styles.searchBtn} onPress={() => fetchLOV('tray')}>
+                    <ThemedText style={styles.searchBtnText}>...</ThemedText>
+                  </TouchableOpacity>
+                </View>
+              </View>
+
+              {/* No of Labels */}
+              <View style={styles.formRow}>
+                <ThemedText style={styles.label}>No of Labels</ThemedText>
                 <TextInput
-                  style={[styles.inputDisabled, { flex: 1, marginRight: 8 }]}
-                  value={trayId}
-                  editable={false}
+                  ref={noOfLabelsRef}
+                  style={[styles.input, { maxWidth: 100, flex: 0, width: 100, textAlign: 'center' }]}
+                  value={noOfLabels}
+                  onChangeText={setNoOfLabels}
+                  keyboardType="numeric"
                 />
-                <TextInput
-                  style={[styles.input, { flex: 1, borderTopRightRadius: 0, borderBottomRightRadius: 0, borderRightWidth: 0 }]}
-                  value={newTrayId}
-                  onChangeText={setNewTrayId}
-                  placeholder="New Tray"
-                  placeholderTextColor="#998973"
-                />
-                <TouchableOpacity style={styles.searchBtn} onPress={() => fetchLOV('tray')}>
-                  <ThemedText style={styles.searchBtnText}>...</ThemedText>
-                </TouchableOpacity>
               </View>
             </View>
-
-            {/* No of Labels */}
-            <View style={styles.formRow}>
-              <ThemedText style={styles.label}>No of Labels</ThemedText>
-              <TextInput
-                ref={noOfLabelsRef}
-                style={[styles.input, { maxWidth: 120, flex: 0, width: 120 }]}
-                value={noOfLabels}
-                onChangeText={setNoOfLabels}
-                keyboardType="numeric"
-              />
-            </View>
           </View>
+
+          {/* Live Barcode Label Card (Right) - Only shows when barcode is populated/generated */}
+          {barCode && barCode.trim() ? (
+            <View style={styles.previewContainer}>
+              <View style={styles.previewHeaderRow}>
+                <View style={styles.headerIconBadge}>
+                  <Ionicons name="barcode-outline" size={13} color="#9E6D08" />
+                </View>
+                <ThemedText style={styles.previewHeaderTitle}>Live Barcode Label (No Printer Needed)</ThemedText>
+              </View>
+
+              <View style={styles.labelCard}>
+                <ThemedText style={styles.labelCompHeader}>{company || 'SRI PINANG'}</ThemedText>
+                <ThemedText style={styles.labelDesc}>{description || 'ITEM DESCRIPTION'}</ThemedText>
+
+                <View style={styles.labelDetailsRow}>
+                  <ThemedText style={styles.labelDetailText}>
+                    MC: <ThemedText style={{ fontWeight: 'bold' }}>{smc || '0.00'}</ThemedText>
+                  </ThemedText>
+                  <ThemedText style={styles.labelDetailText}>
+                    Tray: <ThemedText style={{ fontWeight: 'bold' }}>{newTrayId || trayId || '-'}</ThemedText>
+                  </ThemedText>
+                </View>
+
+                <View style={styles.labelDetailsRow}>
+                  <ThemedText style={styles.labelDetailText}>
+                    Class: <ThemedText style={{ fontWeight: 'bold' }}>{classCode || '-'}</ThemedText>
+                  </ThemedText>
+                  <ThemedText style={styles.labelDetailText}>
+                    Wt: <ThemedText style={{ fontWeight: 'bold' }}>{weight ? `${weight} gm` : '-'}</ThemedText>
+                  </ThemedText>
+                </View>
+
+                {/* Graphical Barcode visualization */}
+                <View style={styles.barcodeVisual}>
+                  <View style={styles.barcodeLines}>
+                    {[...Array(38)].map((_, i) => (
+                      <View
+                        key={i}
+                        style={{
+                          width: (i % 4 === 0 ? 3 : i % 2 === 0 ? 2 : 1),
+                          height: 38,
+                          backgroundColor: '#1A1A1A',
+                          marginHorizontal: 1,
+                        }}
+                      />
+                    ))}
+                  </View>
+                  <ThemedText style={styles.barcodeTextVal}>{barCode}</ThemedText>
+                </View>
+
+                <View style={styles.previewFootnote}>
+                  <Ionicons name="checkmark-circle-outline" size={13} color="#276749" style={{ marginRight: 5 }} />
+                  <ThemedText style={styles.previewFootnoteText}>
+                    Live barcode generated for {barCode} ({noOfLabels || 1} {parseInt(noOfLabels || '1', 10) > 1 ? 'copies' : 'copy'})
+                  </ThemedText>
+                </View>
+              </View>
+            </View>
+          ) : null}
         </View>
       </ScrollView>
 
       {/* LOV Modal */}
-      <Modal visible={isLOVVisible} animationType="slide" transparent={true}>
+      <Modal visible={isLOVVisible} animationType="fade" transparent={true}>
         <TouchableWithoutFeedback onPress={() => setIsLOVVisible(false)}>
           <View style={styles.modalOverlay}>
             <TouchableWithoutFeedback>
@@ -531,13 +630,13 @@ export default function BarcodeScreen() {
                 <View style={styles.modalHeader}>
                   <ThemedText style={styles.modalTitle}>Select {lovType}</ThemedText>
                   <TouchableOpacity onPress={() => setIsLOVVisible(false)}>
-                    <Ionicons name="close" size={20} color="#3B2D17" />
+                    <Ionicons name="close" size={18} color="#3B2D17" />
                   </TouchableOpacity>
                 </View>
 
                 {/* Filter Search Input */}
                 <View style={styles.modalSearchBox}>
-                  <Ionicons name="search" size={15} color="#8D6409" />
+                  <Ionicons name="search" size={14} color="#8D6409" />
                   <TextInput
                     style={styles.modalSearchInput}
                     value={lovSearch}
@@ -548,7 +647,7 @@ export default function BarcodeScreen() {
                   />
                   {lovSearch ? (
                     <TouchableOpacity onPress={() => setLovSearch('')}>
-                      <Ionicons name="close-circle" size={16} color="#999" />
+                      <Ionicons name="close-circle" size={14} color="#999" />
                     </TouchableOpacity>
                   ) : null}
                 </View>
@@ -581,6 +680,91 @@ export default function BarcodeScreen() {
           </View>
         </TouchableWithoutFeedback>
       </Modal>
+
+      {/* Barcode Print Preview & Confirmation Modal */}
+      <Modal visible={showPrintModal} animationType="fade" transparent={true}>
+        <TouchableWithoutFeedback onPress={() => setShowPrintModal(false)}>
+          <View style={styles.modalOverlay}>
+            <TouchableWithoutFeedback>
+              <View style={[styles.modalContainer, { maxWidth: 440, backgroundColor: '#FFFFFF', borderColor: '#E8DCB8' }]}>
+                <View style={styles.modalHeader}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                    <Ionicons name="print-outline" size={16} color="#3B2D17" style={{ marginRight: 6 }} />
+                    <ThemedText style={styles.modalTitle}>Barcode Print Preview</ThemedText>
+                  </View>
+                  <TouchableOpacity onPress={() => setShowPrintModal(false)}>
+                    <Ionicons name="close" size={18} color="#3B2D17" />
+                  </TouchableOpacity>
+                </View>
+
+                <View style={{ padding: 16 }}>
+                  {printData?.labelData && (
+                    <View style={styles.printLabelPreview}>
+                      <ThemedText style={styles.labelCompHeader}>{printData.labelData.company}</ThemedText>
+                      <ThemedText style={styles.labelDesc}>{printData.labelData.description}</ThemedText>
+
+                      <View style={styles.labelDetailsRow}>
+                        <ThemedText style={styles.labelDetailText}>
+                          MC: <ThemedText style={{ fontWeight: 'bold' }}>{printData.labelData.smc}</ThemedText>
+                        </ThemedText>
+                        <ThemedText style={styles.labelDetailText}>
+                          Tray: <ThemedText style={{ fontWeight: 'bold' }}>{printData.labelData.trayId}</ThemedText>
+                        </ThemedText>
+                      </View>
+
+                      <View style={styles.labelDetailsRow}>
+                        <ThemedText style={styles.labelDetailText}>
+                          Class: <ThemedText style={{ fontWeight: 'bold' }}>{printData.labelData.classCode}</ThemedText>
+                        </ThemedText>
+                        <ThemedText style={styles.labelDetailText}>
+                          Wt: <ThemedText style={{ fontWeight: 'bold' }}>{printData.labelData.weight} gm</ThemedText>
+                        </ThemedText>
+                      </View>
+
+                      {/* Barcode representation */}
+                      <View style={styles.barcodeVisual}>
+                        <View style={styles.barcodeLines}>
+                          {[...Array(32)].map((_, i) => (
+                            <View
+                              key={i}
+                              style={{
+                                width: (i % 3 === 0 ? 3 : 1.5),
+                                height: 34,
+                                backgroundColor: '#000000',
+                                marginHorizontal: 1,
+                              }}
+                            />
+                          ))}
+                        </View>
+                        <ThemedText style={styles.barcodeTextVal}>{printData.labelData.inventoryCode}</ThemedText>
+                      </View>
+
+                      <ThemedText style={styles.printTargetInfo}>
+                        Printer: {printData.printerModel || 'POSTEK G-2108'} | Copies: {printData.labelData.noOfLabels}
+                      </ThemedText>
+                    </View>
+                  )}
+
+                  <View style={styles.printModalFooter}>
+                    <TouchableOpacity
+                      style={[styles.toolbarBtn, { paddingHorizontal: 16 }]}
+                      onPress={() => setShowPrintModal(false)}
+                    >
+                      <ThemedText style={styles.toolbarBtnText}>Cancel</ThemedText>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.toolbarBtn, { backgroundColor: '#A26E08', borderColor: '#8D6007', paddingHorizontal: 20 }]}
+                      onPress={handlePrintConfirm}
+                    >
+                      <ThemedText style={[styles.toolbarBtnText, { color: '#FFFFFF' }]}>Send to Printer</ThemedText>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              </View>
+            </TouchableWithoutFeedback>
+          </View>
+        </TouchableWithoutFeedback>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -588,65 +772,144 @@ export default function BarcodeScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#FBF9F5' },
   header: {
+    height: 48,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 16,
-    paddingVertical: 10,
     backgroundColor: '#FFFFFF',
     borderBottomWidth: 1,
-    borderBottomColor: '#EBE2D2',
+    borderBottomColor: '#E8DCB8',
+  },
+  headerLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
   },
   backButton: {
-    padding: 4,
-    marginRight: 12,
-  },
-  title: {
-    fontSize: 20,
-    fontWeight: '500',
-    color: '#3B2D17',
-  },
-  toolbarBtns: {
-    flexDirection: 'row',
-    gap: 8,
-  },
-  toolbarBtn: {
-    paddingVertical: 6,
-    paddingHorizontal: 14,
-    borderRadius: 5,
+    width: 32,
+    height: 32,
+    borderRadius: 6,
     borderWidth: 1,
     borderColor: '#DFD5C3',
     backgroundColor: '#FFFFFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 10,
+  },
+  title: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#3B2D17',
+    fontFamily: Platform.OS === 'web' ? 'Cambria, Georgia, serif' : undefined,
+  },
+  toolbarBtns: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    flexShrink: 0,
+  },
+  headerBtnSecondary: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 6,
+    paddingHorizontal: 14,
+    borderRadius: 4,
+    borderWidth: 1,
+    borderColor: '#DFD5C3',
+    backgroundColor: '#FFFFFF',
+    minHeight: 32,
+  },
+  headerBtnSecondaryText: {
+    fontSize: 12,
+    fontWeight: 'bold',
+    color: '#5C4A28',
+  },
+  headerBtnPreview: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 6,
+    paddingHorizontal: 14,
+    borderRadius: 4,
+    backgroundColor: '#FAF5EA',
+    borderWidth: 1,
+    borderColor: '#D8C39E',
+    minHeight: 32,
+  },
+  headerBtnPreviewText: {
+    fontSize: 12,
+    fontWeight: 'bold',
+    color: '#8D6007',
+  },
+  headerBtnPrimary: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 6,
+    paddingHorizontal: 16,
+    borderRadius: 4,
+    backgroundColor: '#A26E08',
+    borderWidth: 1,
+    borderColor: '#8D6007',
+    minHeight: 32,
+  },
+  headerBtnPrimaryText: {
+    fontSize: 12,
+    fontWeight: 'bold',
+    color: '#FFFFFF',
+  },
+  toolbarBtn: {
+    paddingVertical: 4,
+    paddingHorizontal: 12,
+    borderRadius: 4,
+    borderWidth: 1,
+    borderColor: '#DFD5C3',
+    backgroundColor: '#FFFFFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: 30,
   },
   toolbarBtnText: {
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: 'bold',
     color: '#5C4A28',
   },
   scrollContent: {
     padding: 16,
-    alignItems: 'center',
     flexGrow: 1,
-    paddingBottom: 60,
+    paddingBottom: 40,
+    alignItems: 'center',
   },
-  loader: { marginVertical: 10 },
+  loader: { marginVertical: 6 },
+
+  // Horizontal Side-by-Side Wrapper
+  horizontalWrapper: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    alignItems: 'flex-start',
+    gap: 16,
+    width: '100%',
+    maxWidth: 1100,
+  },
 
   // Toast Banner
   toastBanner: {
     position: 'absolute',
-    top: 60,
+    top: 48,
     alignSelf: 'center',
     zIndex: 9999,
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 18,
-    paddingVertical: 10,
-    borderRadius: 24,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 20,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.25,
-    shadowRadius: 8,
-    elevation: 8,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 6,
+    elevation: 6,
   },
   toastError: {
     backgroundColor: '#C53030',
@@ -656,25 +919,25 @@ const styles = StyleSheet.create({
   },
   toastText: {
     color: '#FFFFFF',
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: 'bold',
   },
 
-  // Luxury Gold Card
-  goldCard: {
-    width: '100%',
-    maxWidth: 620,
+  // Compact Form Card (Left)
+  formCard: {
+    flex: 1,
+    minWidth: 320,
+    maxWidth: 520,
     backgroundColor: '#FFFFFF',
-    borderRadius: 8,
+    borderRadius: 6,
     borderWidth: 1,
     borderColor: '#E8DCB8',
     overflow: 'hidden',
     shadowColor: '#A38035',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08,
-    shadowRadius: 6,
-    elevation: 2,
-    marginTop: 8,
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 1,
   },
   cardHeaderBanner: {
     flexDirection: 'row',
@@ -682,13 +945,13 @@ const styles = StyleSheet.create({
     backgroundColor: '#F5E7CA',
     borderBottomWidth: 1,
     borderBottomColor: '#E2D3B3',
-    paddingVertical: 10,
-    paddingHorizontal: 14,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
   },
   headerIconBadge: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
     backgroundColor: '#FFF8EA',
     borderWidth: 1,
     borderColor: '#E2D2AF',
@@ -697,14 +960,14 @@ const styles = StyleSheet.create({
     marginRight: 8,
   },
   cardHeaderTitle: {
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: 'bold',
     color: '#3B2D17',
     letterSpacing: 0.3,
   },
   cardBody: {
-    padding: 16,
-    gap: 10,
+    padding: 14,
+    gap: 8,
   },
   formRow: {
     flexDirection: 'row',
@@ -713,7 +976,7 @@ const styles = StyleSheet.create({
   formRowMulti: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 16,
+    gap: 12,
   },
   flexRow: {
     flexDirection: 'row',
@@ -721,15 +984,15 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   label: {
-    width: 125,
-    fontSize: 12,
+    width: 115,
+    fontSize: 11,
     fontWeight: 'bold',
     color: '#3A2E19',
     flexShrink: 0,
   },
   labelMulti: {
-    width: 70,
-    fontSize: 12,
+    width: 65,
+    fontSize: 11,
     fontWeight: 'bold',
     color: '#3A2E19',
     flexShrink: 0,
@@ -738,11 +1001,11 @@ const styles = StyleSheet.create({
     flex: 1,
     borderWidth: 1,
     borderColor: '#E2D7C5',
-    borderRadius: 6,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    fontSize: 12,
-    height: 32,
+    borderRadius: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    fontSize: 11,
+    height: 26,
     backgroundColor: '#FFFFFF',
     color: '#2C2519',
   },
@@ -750,11 +1013,11 @@ const styles = StyleSheet.create({
     flex: 1,
     borderWidth: 1,
     borderColor: '#EADBCA',
-    borderRadius: 6,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    fontSize: 12,
-    height: 32,
+    borderRadius: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    fontSize: 11,
+    height: 26,
     backgroundColor: '#F8F5EE',
     color: '#554736',
   },
@@ -764,53 +1027,53 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   searchBtn: {
-    width: 32,
-    height: 32,
+    width: 26,
+    height: 26,
     borderWidth: 1,
     borderColor: '#E2D7C5',
     borderLeftWidth: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    borderTopRightRadius: 6,
-    borderBottomRightRadius: 6,
+    borderTopRightRadius: 4,
+    borderBottomRightRadius: 4,
     backgroundColor: '#FAF5EA',
   },
   searchBtnText: {
     color: '#6E5528',
     fontWeight: 'bold',
-    fontSize: 12,
+    fontSize: 11,
   },
 
   // Modal
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
+    backgroundColor: 'rgba(0,0,0,0.45)',
     justifyContent: 'center',
     alignItems: 'center',
-    padding: 16,
+    padding: 14,
   },
   modalContainer: {
     width: '100%',
-    maxWidth: 580,
+    maxWidth: 520,
     maxHeight: '80%',
     backgroundColor: '#FFFFFF',
     borderWidth: 1,
     borderColor: '#E8DCB8',
-    borderRadius: 8,
+    borderRadius: 6,
     overflow: 'hidden',
   },
   modalHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: 14,
-    paddingVertical: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
     backgroundColor: '#F5E7CA',
     borderBottomWidth: 1,
     borderBottomColor: '#E2D3B3',
   },
   modalTitle: {
-    fontSize: 15,
+    fontSize: 13,
     fontWeight: 'bold',
     color: '#3B2D17',
     textTransform: 'capitalize',
@@ -818,8 +1081,8 @@ const styles = StyleSheet.create({
   modalSearchBox: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 10,
-    paddingVertical: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
     backgroundColor: '#FAF7F0',
     borderBottomWidth: 1,
     borderBottomColor: '#EADBCA',
@@ -827,14 +1090,14 @@ const styles = StyleSheet.create({
   },
   modalSearchInput: {
     flex: 1,
-    fontSize: 12,
+    fontSize: 11,
     color: '#2C2519',
-    height: 28,
-    paddingHorizontal: 8,
+    height: 24,
+    paddingHorizontal: 6,
     backgroundColor: '#FFFFFF',
     borderWidth: 1,
     borderColor: '#E2D7C5',
-    borderRadius: 5,
+    borderRadius: 4,
   },
   tableHeadRow: {
     flexDirection: 'row',
@@ -842,43 +1105,159 @@ const styles = StyleSheet.create({
     backgroundColor: '#F8F3E8',
     borderBottomWidth: 1,
     borderBottomColor: '#E2D3B3',
-    paddingVertical: 6,
-    paddingHorizontal: 10,
+    paddingVertical: 5,
+    paddingHorizontal: 8,
   },
   tableHeadText: {
-    fontSize: 11,
+    fontSize: 10,
     fontWeight: 'bold',
     color: '#5C4A28',
   },
   lovList: {
-    maxHeight: 320,
+    maxHeight: 280,
   },
   lovRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 8,
-    paddingHorizontal: 10,
+    paddingVertical: 6,
+    paddingHorizontal: 8,
     borderBottomWidth: 1,
     borderBottomColor: '#F0E6D2',
   },
   tableCellText: {
-    fontSize: 12,
+    fontSize: 11,
     color: '#2C2519',
   },
   lovItem: {
-    paddingVertical: 10,
-    paddingHorizontal: 14,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
     borderBottomWidth: 1,
     borderBottomColor: '#F0E6D2',
   },
   lovItemTitle: {
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: 'bold',
     color: '#2C2519',
   },
   lovItemSub: {
-    fontSize: 12,
+    fontSize: 11,
     color: '#6E5D46',
-    marginTop: 2,
+    marginTop: 1,
+  },
+
+  // Live Preview Section (Right)
+  previewContainer: {
+    flex: 1,
+    minWidth: 320,
+    maxWidth: 480,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#E8DCB8',
+    overflow: 'hidden',
+    shadowColor: '#A38035',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 1,
+  },
+  previewHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    backgroundColor: '#F5E7CA',
+    borderBottomWidth: 1,
+    borderBottomColor: '#E2D3B3',
+  },
+  previewHeaderTitle: {
+    fontSize: 11,
+    fontWeight: 'bold',
+    color: '#3B2D17',
+  },
+  labelCard: {
+    padding: 12,
+    alignItems: 'center',
+    backgroundColor: '#FCFAF6',
+  },
+  previewFootnote: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 8,
+    paddingTop: 6,
+    borderTopWidth: 1,
+    borderTopColor: '#EBE2D2',
+    width: '100%',
+    justifyContent: 'center',
+  },
+  previewFootnoteText: {
+    fontSize: 10,
+    color: '#276749',
+    fontWeight: '500',
+  },
+
+  // Print Label Preview
+  printLabelPreview: {
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#B8903B',
+    borderRadius: 6,
+    padding: 12,
+    alignItems: 'center',
+    borderStyle: 'dashed',
+    marginBottom: 14,
+  },
+  labelCompHeader: {
+    fontSize: 13,
+    fontWeight: 'bold',
+    color: '#3B2D17',
+    marginBottom: 2,
+    letterSpacing: 0.5,
+  },
+  labelDesc: {
+    fontSize: 11,
+    color: '#4A3B22',
+    marginBottom: 8,
+  },
+  labelDetailsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    width: '100%',
+    paddingHorizontal: 14,
+    marginBottom: 4,
+  },
+  labelDetailText: {
+    fontSize: 11,
+    color: '#3B2D17',
+  },
+  barcodeVisual: {
+    alignItems: 'center',
+    marginTop: 8,
+    marginBottom: 6,
+  },
+  barcodeLines: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 2,
+  },
+  barcodeTextVal: {
+    fontSize: 11,
+    fontWeight: 'bold',
+    letterSpacing: 1.5,
+    color: '#000000',
+  },
+  printTargetInfo: {
+    fontSize: 10,
+    color: '#8A7A64',
+    marginTop: 4,
+  },
+  printModalFooter: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: 8,
+    borderTopWidth: 1,
+    borderTopColor: '#EBE2D2',
+    paddingTop: 12,
   },
 });

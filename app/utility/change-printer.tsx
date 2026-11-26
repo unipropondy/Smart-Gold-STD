@@ -290,6 +290,35 @@ export default function ChangePrinterScreen() {
           </TouchableOpacity>
           <ThemedText style={styles.headerTitle}>Change Printer</ThemedText>
         </View>
+
+        <View style={styles.headerActions}>
+          <TouchableOpacity
+            style={styles.headerBtnSecondary}
+            onPress={() => router.back()}
+            activeOpacity={0.8}
+          >
+            <ThemedText style={styles.headerBtnSecondaryText}>Close</ThemedText>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[
+              styles.headerBtnPrimary,
+              saving && { opacity: 0.7 },
+            ]}
+            onPress={handleSetAsDefault}
+            disabled={saving}
+            activeOpacity={0.8}
+          >
+            {saving ? (
+              <ActivityIndicator size="small" color="#9E6D08" />
+            ) : (
+              <>
+                <Ionicons name="checkmark-circle-outline" size={14} color="#9E6D08" style={{ marginRight: 4 }} />
+                <ThemedText style={styles.headerBtnPrimaryText}>Set as Default</ThemedText>
+              </>
+            )}
+          </TouchableOpacity>
+        </View>
       </View>
 
       {/* MAIN CONTENT WRAPPER */}
@@ -390,35 +419,6 @@ export default function ChangePrinterScreen() {
               style={{ flex: 1 }}
             />
           )}
-        </View>
-
-        {/* BOTTOM ACTION AREA */}
-        <View style={styles.bottomSection}>
-          <View style={styles.buttonGroup}>
-            <TouchableOpacity
-              style={[
-                styles.primaryButton,
-                saving && { opacity: 0.7 },
-              ]}
-              onPress={handleSetAsDefault}
-              disabled={saving}
-              activeOpacity={0.8}
-            >
-              {saving ? (
-                <ActivityIndicator size="small" color="#FFFFFF" />
-              ) : (
-                <ThemedText style={styles.primaryButtonText}>Set as Default</ThemedText>
-              )}
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={styles.secondaryButton}
-              onPress={() => router.back()}
-              activeOpacity={0.8}
-            >
-              <ThemedText style={styles.secondaryButtonText}>Close</ThemedText>
-            </TouchableOpacity>
-          </View>
         </View>
       </View>
 
@@ -543,6 +543,45 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: '#3B2D17',
     fontFamily: Platform.OS === 'web' ? 'Cambria, Georgia, serif' : undefined,
+  },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  headerBtnSecondary: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 5,
+    paddingHorizontal: 12,
+    borderRadius: 4,
+    borderWidth: 1,
+    borderColor: '#DFD5C3',
+    backgroundColor: '#FFFFFF',
+    height: 28,
+  },
+  headerBtnSecondaryText: {
+    fontSize: 11.5,
+    fontWeight: 'bold',
+    color: '#5C4A28',
+  },
+  headerBtnPrimary: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 5,
+    paddingHorizontal: 12,
+    borderRadius: 4,
+    backgroundColor: '#F5E7CA',
+    borderWidth: 1,
+    borderColor: '#D4C3A3',
+    height: 28,
+  },
+  headerBtnPrimaryText: {
+    fontSize: 11.5,
+    fontWeight: 'bold',
+    color: '#9E6D08',
   },
   newButton: {
     flexDirection: 'row',
