@@ -56,6 +56,52 @@ export default function BarcodeScreen() {
   const newTrayIdRef = useRef<TextInput>(null);
   const noOfLabelsRef = useRef<TextInput>(null);
 
+  // Barcode scanner buffer & listener for hardware/USB scanners
+  const scannerBuffer = useRef<string>('');
+  const lastKeyTime = useRef<number>(0);
+
+  useEffect(() => {
+    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      const handleKeyDown = (e: KeyboardEvent) => {
+        // Keyboard shortcuts matching frmBarcode.vb: F6 = Clear, F9 = Print
+        if (e.key === 'F6') {
+          e.preventDefault();
+          handleClear(true);
+          return;
+        }
+        if (e.key === 'F9') {
+          e.preventDefault();
+          handlePrint();
+          return;
+        }
+
+        const now = Date.now();
+        const diff = now - lastKeyTime.current;
+        lastKeyTime.current = now;
+
+        // Scanners typically send keystrokes with < 50ms intervals
+        if (diff > 100) {
+          scannerBuffer.current = '';
+        }
+
+        if (e.key === 'Enter') {
+          if (scannerBuffer.current.length >= 3) {
+            e.preventDefault();
+            const scannedCode = scannerBuffer.current.trim();
+            scannerBuffer.current = '';
+            setInventoryCode(scannedCode);
+            fetchInventoryDetails(scannedCode);
+          }
+        } else if (e.key.length === 1 && !e.ctrlKey && !e.altKey && !e.metaKey) {
+          scannerBuffer.current += e.key;
+        }
+      };
+
+      window.addEventListener('keydown', handleKeyDown);
+      return () => window.removeEventListener('keydown', handleKeyDown);
+    }
+  }, []);
+
   // Fetch company details on mount matching frmBarcode.vb Load
   useEffect(() => {
     const fetchCompany = async () => {
@@ -488,15 +534,15 @@ export default function BarcodeScreen() {
 
               {/* Weight & Category Row */}
               <View style={styles.formRowMulti}>
-                <View style={styles.flexRow}>
+                <View style={[styles.flexRow, { flex: 1.1 }]}>
                   <ThemedText style={styles.label}>Weight</ThemedText>
-                  <TextInput style={[styles.inputDisabled, { textAlign: 'right' }]} value={weight} editable={false} />
+                  <TextInput style={[styles.inputDisabled, { textAlign: 'right', minWidth: 60 }]} value={weight} editable={false} />
                 </View>
-                <View style={styles.flexRow}>
+                <View style={[styles.flexRow, { flex: 1.2, marginLeft: 10 }]}>
                   <ThemedText style={styles.labelMulti}>Category</ThemedText>
                   <View style={styles.rowInputGroup}>
                     <TextInput
-                      style={[styles.input, { borderTopRightRadius: 0, borderBottomRightRadius: 0, borderRightWidth: 0 }]}
+                      style={[styles.input, { borderTopRightRadius: 0, borderBottomRightRadius: 0, borderRightWidth: 0, minWidth: 60 }]}
                       value={category}
                       onChangeText={setCategory}
                       autoCapitalize="characters"
@@ -1178,7 +1224,7 @@ const styles = StyleSheet.create({
   labelCard: {
     padding: 12,
     alignItems: 'center',
-    backgroundColor: '#FCFAF6',
+    backgroundColor: '#FFFFFF',
   },
   previewFootnote: {
     flexDirection: 'row',

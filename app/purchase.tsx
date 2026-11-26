@@ -2,6 +2,7 @@ import { ThemedText } from '@/components/themed-text';
 import { API_BASE_URL } from '@/constants/api';
 import { useThemeContext } from '@/contexts/ThemeContext';
 import { useThemeColors } from '@/hooks/useThemeColors';
+import { scaleManager, SerialPortConfig, WeightReading } from '@/services/weighingMachineService';
 import { Ionicons } from '@expo/vector-icons';
 import { Stack, useRouter } from 'expo-router';
 import React, { useEffect, useRef, useState } from 'react';
@@ -107,6 +108,19 @@ export default function PurchaseScreen() {
   const [autoSMC, setAutoSMC] = useState(false);
   // Sales PCS Checkbox in purchase.txt
   const [salesPCS, setSalesPCS] = useState(false);
+
+  // Weighing Machine Connection State
+  const [scaleConnected, setScaleConnected] = useState(false);
+  const [scalePortName, setScalePortName] = useState('');
+  const [liveScaleWeight, setLiveScaleWeight] = useState('');
+  const [scaleConfigModal, setScaleConfigModal] = useState(false);
+  const [scaleConfig, setScaleConfig] = useState<SerialPortConfig>({
+    baudRate: 9600,
+    dataBits: 8,
+    stopBits: 1,
+    parity: 'none',
+  });
+  const weightInputRef = useRef<TextInput>(null);
 
   // Additional description sub-modal
   const [addlDescModalVisible, setAddlDescModalVisible] = useState(false);
@@ -738,6 +752,65 @@ export default function PurchaseScreen() {
     }
   };
 
+  // Subscribe to Weighing Machine Events
+  useEffect(() => {
+    const unsubStatus = scaleManager.subscribeStatus(({ connected, portName }) => {
+      setScaleConnected(connected);
+      if (portName) setScalePortName(portName);
+    });
+
+    const unsubWeight = scaleManager.subscribeWeight((reading) => {
+      setLiveScaleWeight(reading.weight);
+      // Process incoming weight directly
+      if (reading.weightNum > 0 && reading.isStable) {
+        handleProcessReceivedWeight(reading.weight);
+      }
+    });
+
+    return () => {
+      unsubStatus();
+      unsubWeight();
+    };
+  }, [isAutoManual, currentDetail.CatalogueCode, currentDetail.CategoryCode, headerState.TaelCostPerGram, autoSMC]);
+
+  const handleProcessReceivedWeight = async (weightVal: string) => {
+    const num = parseFloat(weightVal);
+    if (isNaN(num) || num <= 0) return;
+    const formatted = num.toFixed(2);
+
+    // Auto fetch GoldLoss by weight
+    let newGoldLoss = currentDetail.GoldLoss;
+    try {
+      const glRes = await fetch(`${API_URL}/purchase/goldloss/${num}`);
+      const glJson = await glRes.json();
+      if (glJson.success && glJson.goldLoss !== undefined && glJson.goldLoss !== null) {
+        newGoldLoss = parseFloat(glJson.goldLoss).toFixed(2);
+      }
+    } catch (err) {
+      console.error("Error fetching gold loss by weight:", err);
+    }
+
+    let calculated: any = null;
+    setCurrentDetail((prev: any) => {
+      const updated = {
+        ...prev,
+        Weight: formatted,
+        GoldLoss: newGoldLoss || prev.GoldLoss
+      };
+      calculated = recalculateDetailCosts(updated, autoSMC);
+      return calculated;
+    });
+
+    // In AUTO (F10) mode, automatic line addition matching VB.NET frmPurchase.vb
+    if (isAutoManual && num > 0) {
+      setTimeout(() => {
+        addDetail();
+        // Re-focus Weight field for next weighing
+        weightInputRef.current?.focus();
+      }, 150);
+    }
+  };
+
   const handleWeightOnBlur = async () => {
     const num = parseFloat(currentDetail.Weight);
     if (isNaN(num)) {
@@ -750,43 +823,7 @@ export default function PurchaseScreen() {
       showToast("Invalid weight!", "error");
       return;
     }
-    const formatted = num.toFixed(2);
-
-    // Validate inventory weight against catalogue weight on weight blur
-    checkWtPCS(num);
-
-    // Auto fetch GoldLoss by weight
-    let newGoldLoss = currentDetail.GoldLoss;
-    if (num > 0) {
-      try {
-        const glRes = await fetch(`${API_URL}/purchase/goldloss/${num}`);
-        const glJson = await glRes.json();
-        if (glJson.success && glJson.goldLoss !== undefined && glJson.goldLoss !== null) {
-          newGoldLoss = parseFloat(glJson.goldLoss).toFixed(2);
-        }
-      } catch (err) {
-        console.error("Error fetching gold loss by weight:", err);
-      }
-    }
-
-    let calculated: any = null;
-    setCurrentDetail((prev: any) => {
-      const updated = {
-        ...prev,
-        Weight: formatted,
-        GoldLoss: newGoldLoss || prev.GoldLoss
-      };
-      calculated = recalculateDetailCosts(updated);
-      return calculated;
-    });
-
-    // In AUTO (F10) mode, automatic line addition matching VB.NET frmPurchase.vb:
-    // If lblAutoManual.Text = "AUTO (F10)" ... btnAdd_Click
-    if (isAutoManual && num > 0) {
-      setTimeout(() => {
-        addDetail();
-      }, 100);
-    }
+    await handleProcessReceivedWeight(currentDetail.Weight);
   };
 
   const fetchCategories = async () => {
@@ -1484,6 +1521,30 @@ export default function PurchaseScreen() {
         </View>
 
         <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+          {/* Scale Connection Status & Config Button */}
+          <TouchableOpacity
+            style={[
+              styles.topActionBtn,
+              {
+                backgroundColor: scaleConnected ? '#E8F5E9' : '#FFF8E1',
+                borderColor: scaleConnected ? '#2E7D32' : '#FFA000',
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: 4
+              }
+            ]}
+            onPress={() => setScaleConfigModal(true)}
+          >
+            <Ionicons
+              name={scaleConnected ? "speedometer" : "speedometer-outline"}
+              size={13}
+              color={scaleConnected ? '#2E7D32' : '#E65100'}
+            />
+            <ThemedText style={{ color: scaleConnected ? '#2E7D32' : '#E65100', fontWeight: 'bold', fontSize: 11 }}>
+              {scaleConnected ? `Scale: ${liveScaleWeight || '0.00'}g` : 'Scale: Connect'}
+            </ThemedText>
+          </TouchableOpacity>
+
           {/* Auto / Manual Mode Pill Button */}
           <TouchableOpacity
             style={[
@@ -2208,13 +2269,16 @@ export default function PurchaseScreen() {
                       onChangeText={(t) => updateDetail('InventoryDescription', t)}
                     />
                   </View>
-                  <View style={{ width: 120, borderWidth: 1, borderColor: '#D8CDBA', borderTopWidth: 0, borderLeftWidth: 0, backgroundColor: '#FFFFFF', height: 23 }}>
+                  <View style={{ width: 120, borderWidth: 1, borderColor: scaleConnected ? '#2E7D32' : '#D8CDBA', borderTopWidth: 0, borderLeftWidth: 0, backgroundColor: scaleConnected ? '#FAFFF9' : '#FFFFFF', height: 23 }}>
                     <TextInput
-                      style={{ flex: 1, paddingHorizontal: 4, paddingVertical: 1, fontSize: 10.5, color: '#3B2D17', textAlign: 'right' }}
+                      ref={weightInputRef}
+                      style={{ flex: 1, paddingHorizontal: 4, paddingVertical: 1, fontSize: 10.5, color: '#3B2D17', textAlign: 'right', fontWeight: scaleConnected ? 'bold' : 'normal' }}
                       value={currentDetail.Weight}
                       onChangeText={(t) => updateDetail('Weight', t)}
                       onBlur={handleWeightOnBlur}
                       keyboardType="numeric"
+                      placeholder={scaleConnected ? "Live Scale" : "0.00"}
+                      placeholderTextColor="#81C784"
                     />
                   </View>
                   <View style={{ width: 120, borderWidth: 1, borderColor: '#D8CDBA', borderTopWidth: 0, borderLeftWidth: 0, flexDirection: 'row', backgroundColor: '#FFFFFF', height: 23 }}>
@@ -2551,6 +2615,177 @@ export default function PurchaseScreen() {
           </View>
         </View>
       </ScrollView>
+
+      {/* ================= WEIGHING MACHINE HARDWARE CONFIGURATION MODAL ================= */}
+      <Modal visible={scaleConfigModal} transparent={true} animationType="fade">
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContainer, { backgroundColor: '#FFFFFF', borderColor: '#B8903B', width: '90%', maxWidth: 520 }]}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14, paddingBottom: 8, borderBottomWidth: 1, borderColor: '#EBE2D2' }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                <Ionicons name="speedometer" size={20} color="#9E6D08" />
+                <ThemedText style={{ fontSize: 14, fontWeight: 'bold', color: '#3B2D17' }}>Weighing Machine Hardware Config</ThemedText>
+              </View>
+              <TouchableOpacity onPress={() => setScaleConfigModal(false)}>
+                <Ionicons name="close" size={20} color="#3B2D17" />
+              </TouchableOpacity>
+            </View>
+
+            {/* Connection Status Banner */}
+            <View style={{ backgroundColor: scaleConnected ? '#E8F5E9' : '#FFF3E0', padding: 10, borderRadius: 4, marginBottom: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+              <View>
+                <ThemedText style={{ fontWeight: 'bold', color: scaleConnected ? '#2E7D32' : '#E65100', fontSize: 12 }}>
+                  Status: {scaleConnected ? `Connected (${scalePortName || 'Serial Port'})` : 'Disconnected'}
+                </ThemedText>
+                <ThemedText style={{ fontSize: 10.5, color: '#555', marginTop: 2 }}>
+                  {scaleConnected ? 'Continuous serial weight detection is active' : 'Choose communication settings and click Connect'}
+                </ThemedText>
+              </View>
+              {scaleConnected && (
+                <View style={{ alignItems: 'flex-end' }}>
+                  <ThemedText style={{ fontSize: 10, color: '#2E7D32' }}>Live Weight</ThemedText>
+                  <ThemedText style={{ fontSize: 16, fontWeight: 'bold', color: '#2E7D32' }}>{liveScaleWeight || '0.00'} g</ThemedText>
+                </View>
+              )}
+            </View>
+
+            {/* Config Fields */}
+            <View style={{ gap: 8, marginBottom: 14 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                <ThemedText style={{ width: 100, fontSize: 11, fontWeight: 'bold', color: '#3B2D17' }}>Baud Rate:</ThemedText>
+                <View style={{ flexDirection: 'row', gap: 6 }}>
+                  {[2400, 4800, 9600, 19200, 38400].map((rate) => (
+                    <TouchableOpacity
+                      key={rate}
+                      style={{
+                        paddingHorizontal: 8,
+                        paddingVertical: 3,
+                        borderRadius: 3,
+                        borderWidth: 1,
+                        borderColor: scaleConfig.baudRate === rate ? '#9E6D08' : '#D8CDBA',
+                        backgroundColor: scaleConfig.baudRate === rate ? '#F5E7CA' : '#FFFFFF',
+                      }}
+                      onPress={() => setScaleConfig((prev) => ({ ...prev, baudRate: rate }))}
+                    >
+                      <ThemedText style={{ fontSize: 10.5, fontWeight: scaleConfig.baudRate === rate ? 'bold' : 'normal', color: '#3B2D17' }}>
+                        {rate}
+                      </ThemedText>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+
+              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                <ThemedText style={{ width: 100, fontSize: 11, fontWeight: 'bold', color: '#3B2D17' }}>Data Bits:</ThemedText>
+                <View style={{ flexDirection: 'row', gap: 6 }}>
+                  {[7, 8].map((bits) => (
+                    <TouchableOpacity
+                      key={bits}
+                      style={{
+                        paddingHorizontal: 12,
+                        paddingVertical: 3,
+                        borderRadius: 3,
+                        borderWidth: 1,
+                        borderColor: scaleConfig.dataBits === bits ? '#9E6D08' : '#D8CDBA',
+                        backgroundColor: scaleConfig.dataBits === bits ? '#F5E7CA' : '#FFFFFF',
+                      }}
+                      onPress={() => setScaleConfig((prev) => ({ ...prev, dataBits: bits }))}
+                    >
+                      <ThemedText style={{ fontSize: 10.5, fontWeight: scaleConfig.dataBits === bits ? 'bold' : 'normal', color: '#3B2D17' }}>
+                        {bits}
+                      </ThemedText>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+
+              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                <ThemedText style={{ width: 100, fontSize: 11, fontWeight: 'bold', color: '#3B2D17' }}>Parity:</ThemedText>
+                <View style={{ flexDirection: 'row', gap: 6 }}>
+                  {(['none', 'even', 'odd'] as const).map((par) => (
+                    <TouchableOpacity
+                      key={par}
+                      style={{
+                        paddingHorizontal: 10,
+                        paddingVertical: 3,
+                        borderRadius: 3,
+                        borderWidth: 1,
+                        borderColor: scaleConfig.parity === par ? '#9E6D08' : '#D8CDBA',
+                        backgroundColor: scaleConfig.parity === par ? '#F5E7CA' : '#FFFFFF',
+                      }}
+                      onPress={() => setScaleConfig((prev) => ({ ...prev, parity: par }))}
+                    >
+                      <ThemedText style={{ fontSize: 10.5, fontWeight: scaleConfig.parity === par ? 'bold' : 'normal', color: '#3B2D17', textTransform: 'capitalize' }}>
+                        {par}
+                      </ThemedText>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+
+              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                <ThemedText style={{ width: 100, fontSize: 11, fontWeight: 'bold', color: '#3B2D17' }}>Stop Bits:</ThemedText>
+                <View style={{ flexDirection: 'row', gap: 6 }}>
+                  {[1, 2].map((sb) => (
+                    <TouchableOpacity
+                      key={sb}
+                      style={{
+                        paddingHorizontal: 12,
+                        paddingVertical: 3,
+                        borderRadius: 3,
+                        borderWidth: 1,
+                        borderColor: scaleConfig.stopBits === sb ? '#9E6D08' : '#D8CDBA',
+                        backgroundColor: scaleConfig.stopBits === sb ? '#F5E7CA' : '#FFFFFF',
+                      }}
+                      onPress={() => setScaleConfig((prev) => ({ ...prev, stopBits: sb }))}
+                    >
+                      <ThemedText style={{ fontSize: 10.5, fontWeight: scaleConfig.stopBits === sb ? 'bold' : 'normal', color: '#3B2D17' }}>
+                        {sb}
+                      </ThemedText>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+            </View>
+
+            {/* Action Buttons */}
+            <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 8, borderTopWidth: 1, borderColor: '#EBE2D2', paddingTop: 10 }}>
+              {scaleConnected ? (
+                <TouchableOpacity
+                  style={[styles.actionBtn, { backgroundColor: '#FFEBEE', borderColor: '#E57373', minWidth: 100 }]}
+                  onPress={async () => {
+                    await scaleManager.disconnect();
+                    showToast("Weighing machine disconnected", "info");
+                  }}
+                >
+                  <ThemedText style={{ color: '#C62828', fontWeight: 'bold', fontSize: 11 }}>Disconnect</ThemedText>
+                </TouchableOpacity>
+              ) : (
+                <TouchableOpacity
+                  style={[styles.actionBtn, { backgroundColor: '#E8F5E9', borderColor: '#81C784', minWidth: 120 }]}
+                  onPress={async () => {
+                    try {
+                      await scaleManager.connectWebSerial(scaleConfig);
+                      showToast("Weighing machine connected successfully", "success");
+                      setScaleConfigModal(false);
+                    } catch (err: any) {
+                      showToast(err.message || "Failed to connect to scale", "error");
+                    }
+                  }}
+                >
+                  <ThemedText style={{ color: '#2E7D32', fontWeight: 'bold', fontSize: 11 }}>Connect Device</ThemedText>
+                </TouchableOpacity>
+              )}
+
+              <TouchableOpacity
+                style={[styles.actionBtn, { backgroundColor: '#F0EFE9', borderColor: '#CCC' }]}
+                onPress={() => setScaleConfigModal(false)}
+              >
+                <ThemedText style={{ color: '#555', fontWeight: 'bold', fontSize: 11 }}>Close</ThemedText>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
 
       {/* ================= ADDITIONAL DESCRIPTION MODAL (grpAddlDescription in purchase.txt) ================= */}
       <Modal visible={addlDescModalVisible} transparent={true} animationType="fade">
