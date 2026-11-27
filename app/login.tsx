@@ -78,91 +78,6 @@ const PremiumInput = ({ icon, placeholder, secureTextEntry, value, onChangeText,
   );
 };
 
-// Helper to detect if a name is a cloud/Docker container ID (e.g., "0ffe38acfd56")
-const isCloudContainerId = (name: string): boolean => {
-  if (!name) return true;
-  // 12-char hex string typical of Docker containers
-  return /^[0-9a-f]{12}$/i.test(name.trim()) || name.toLowerCase().includes('railway');
-};
-
-// Helper function to dynamically retrieve client system / PC name across LAN, Static Public IP, and Local environments
-const getSystemPcName = async (): Promise<string> => {
-  // 1. Process environment (Electron / Node / desktop wrapper)
-  if (typeof process !== 'undefined' && process.env) {
-    const pc = process.env.COMPUTERNAME || process.env.HOSTNAME || '';
-    if (pc && pc.trim() && !isCloudContainerId(pc)) return pc.trim();
-  }
-
-  // 2. Browser Node / Electron integration
-  if (Platform.OS === 'web' && typeof window !== 'undefined') {
-    // Check locally stored / registered PC name for this machine
-    try {
-      const cached = window.localStorage.getItem('clientPcName') ||
-                     window.sessionStorage.getItem('clientPcName');
-      if (cached && cached.trim() && !isCloudContainerId(cached)) return cached.trim();
-    } catch (_) {}
-
-    try {
-      // @ts-ignore
-      if (window.require) {
-        // @ts-ignore
-        const os = window.require('os');
-        if (os && typeof os.hostname === 'function') {
-          const h = os.hostname();
-          if (h && h.trim() && !isCloudContainerId(h)) return h.trim();
-        }
-      }
-    } catch (_) {}
-
-    // 3. Windows Script Host (Edge / IE ActiveX mode)
-    try {
-      // @ts-ignore
-      if (typeof (window as any).ActiveXObject !== 'undefined') {
-        // @ts-ignore
-        const net = new (window as any).ActiveXObject('WScript.Network');
-        if (net && net.ComputerName) {
-          const cn = String(net.ComputerName).trim();
-          if (cn && !isCloudContainerId(cn)) {
-            window.localStorage.setItem('clientPcName', cn);
-            return cn;
-          }
-        }
-      }
-    } catch (_) {}
-
-    // 4. Query client-pc-name endpoint
-    const endpoints = [
-      `${API_BASE_URL}/client-pc-name`,
-    ];
-
-    for (const ep of endpoints) {
-      try {
-        const res = await fetch(ep).catch(() => null);
-        if (res && res.ok) {
-          const json = await res.json();
-          if (json.pcName && json.pcName.trim()) {
-            const resolved = json.pcName.trim();
-            // Ignore cloud docker container IDs like 0ffe38acfd56
-            if (!isCloudContainerId(resolved)) {
-              window.localStorage.setItem('clientPcName', resolved);
-              return resolved;
-            }
-          }
-        }
-      } catch (_) {}
-    }
-  }
-
-  // 5. Native AsyncStorage
-  try {
-    const asyncCached = await AsyncStorage.getItem('@client_pc_name');
-    if (asyncCached && asyncCached.trim() && !isCloudContainerId(asyncCached)) return asyncCached.trim();
-  } catch (_) {}
-
-  // 6. Return dynamic client identifier or empty if not resolved
-  return '';
-};
-
 export default function LoginScreen() {
   const { setUserSession } = useUserPermissions();
   const [username, setUsername] = useState('');
@@ -170,15 +85,50 @@ export default function LoginScreen() {
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
 
+  // Local PC Name state & loading
+  const [retrievedPcName, setRetrievedPcName] = useState('');
+  const [pcStatusMsg, setPcStatusMsg] = useState('');
+  const [pcLoading, setPcLoading] = useState(false);
+
+  // Function to call http://127.0.0.1:5005/system-info
+  const handleGetPcName = async () => {
+    setPcLoading(true);
+    setPcStatusMsg('');
+    try {
+      const response = await fetch('http://127.0.0.1:5005/system-info', {
+        method: 'GET',
+        headers: { 'Content-Type': 'application/json' }
+      });
+
+      if (!response.ok) {
+        throw new Error('Local service responded with error status');
+      }
+
+      const data = await response.json();
+
+      if (data.success && data.pcName) {
+        const pcName = String(data.pcName).trim();
+        setRetrievedPcName(pcName);
+        setPcStatusMsg('');
+        console.log('%c====================================', 'color: #2E7D32; font-weight: bold;');
+        console.log('%c💻 RETRIEVED WINDOWS PC NAME:', 'color: #2E7D32; font-size: 15px; font-weight: bold;', pcName);
+        console.log('%c====================================', 'color: #2E7D32; font-weight: bold;');
+      } else {
+        setRetrievedPcName('');
+        setPcStatusMsg('Unable to retrieve Windows PC name. Please check whether the local service is running.');
+      }
+    } catch (err: any) {
+      console.error('Failed to connect to local service (127.0.0.1:5005):', err);
+      setRetrievedPcName('');
+      setPcStatusMsg('Unable to retrieve Windows PC name. Please check whether the local service is running.');
+    } finally {
+      setPcLoading(false);
+    }
+  };
+
   const handleLogin = async () => {
     Keyboard.dismiss();
     setErrorMsg('');
-
-    // Retrieve System / PC Name and log to browser console
-    const systemName = await getSystemPcName();
-    console.log('%c====================================', 'color: #E6AF2E; font-weight: bold;');
-    console.log('%c💻 RETRIEVED SYSTEM NAME (PC NAME):', 'color: #E6AF2E; font-size: 14px; font-weight: bold;', systemName);
-    console.log('%c====================================', 'color: #E6AF2E; font-weight: bold;');
 
     if (!username || !password) {
       setErrorMsg('Please enter both username and password.');
@@ -193,19 +143,10 @@ export default function LoginScreen() {
         body: JSON.stringify({
           username,
           password,
-          pcName: systemName,
         })
       });
 
       const data = await response.json();
-
-      // Block login if PC name does not match any existing terminal
-      if (data.wrongTerminal || response.status === 403 || data.message === 'Wrong Terminal.') {
-        setLoading(false);
-        setErrorMsg('Wrong Terminal.');
-        Alert.alert('Wrong Terminal', 'Wrong Terminal.');
-        return;
-      }
 
       if (data.success) {
         const uCode = data.user?.userCode || username;
@@ -340,6 +281,43 @@ export default function LoginScreen() {
               </>
             )}
           </TouchableOpacity>
+
+          {/* Designated Section: Retrieve Actual Windows PC Name using local service */}
+          <View style={styles.pcSection}>
+            <TouchableOpacity
+              style={styles.pcBtn}
+              onPress={handleGetPcName}
+              disabled={pcLoading}
+              activeOpacity={0.7}
+            >
+              {pcLoading ? (
+                <ActivityIndicator size="small" color="#9E6D08" />
+              ) : (
+                <>
+                  <Ionicons name="desktop-outline" size={15} color="#9E6D08" style={{ marginRight: 6 }} />
+                  <Text style={styles.pcBtnText}>Get PC Name</Text>
+                </>
+              )}
+            </TouchableOpacity>
+
+            {/* Display Retrieved PC Name */}
+            {retrievedPcName ? (
+              <View style={styles.pcSuccessCard}>
+                <Ionicons name="checkmark-circle" size={15} color="#2E7D32" style={{ marginRight: 6 }} />
+                <Text style={styles.pcSuccessText}>
+                  Windows PC Name: <Text style={{ fontWeight: 'bold' }}>{retrievedPcName}</Text>
+                </Text>
+              </View>
+            ) : null}
+
+            {/* Display Error if local service is not running */}
+            {pcStatusMsg ? (
+              <View style={styles.pcErrorCard}>
+                <Ionicons name="alert-circle" size={15} color="#C62828" style={{ marginRight: 6, marginTop: 1 }} />
+                <Text style={styles.pcErrorText}>{pcStatusMsg}</Text>
+              </View>
+            ) : null}
+          </View>
         </View>
 
       </KeyboardAvoidingView>
@@ -501,5 +479,66 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginBottom: 12,
     fontSize: 11,
+  },
+  pcSection: {
+    marginTop: 18,
+    width: '100%',
+    alignItems: 'center',
+    borderTopWidth: 1,
+    borderTopColor: '#F0E5D0',
+    paddingTop: 14,
+  },
+  pcBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#FAF5EA',
+    borderColor: '#E8DCB8',
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    width: '100%',
+  },
+  pcBtnText: {
+    color: '#9E6D08',
+    fontSize: 12,
+    fontWeight: '700',
+    letterSpacing: 0.5,
+  },
+  pcSuccessCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#E8F5E9',
+    borderColor: '#A5D6A7',
+    borderWidth: 1,
+    borderRadius: 6,
+    paddingVertical: 7,
+    paddingHorizontal: 10,
+    marginTop: 10,
+    width: '100%',
+  },
+  pcSuccessText: {
+    color: '#1B5E20',
+    fontSize: 12,
+    flex: 1,
+  },
+  pcErrorCard: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    backgroundColor: '#FFEBEE',
+    borderColor: '#FFCDD2',
+    borderWidth: 1,
+    borderRadius: 6,
+    paddingVertical: 7,
+    paddingHorizontal: 10,
+    marginTop: 10,
+    width: '100%',
+  },
+  pcErrorText: {
+    color: '#C62828',
+    fontSize: 11,
+    lineHeight: 15,
+    flex: 1,
   },
 });
