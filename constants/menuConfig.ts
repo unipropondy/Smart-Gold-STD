@@ -89,8 +89,9 @@ export const MENU_STRUCTURE: MenuStructure = {
     { id: 'purchaseentry', title: 'Purchase Entry', icon: 'log-in-outline', color: '#F43F5E', route: '/purchaseentry' },
   ],
   dailyprocedure: [
+    { id: 'settlement', title: 'Settlement', icon: 'wallet-outline', color: '#10B981', route: '/settlement' },
     { id: 'eodhistoryreport', title: 'Dayend Report', icon: 'time-outline', color: '#14B8A6', route: '/eod' },
-    { id: 'settlementreport', title: 'Settlement Report', icon: 'receipt-outline', color: '#F97316', route: '/settlementreports' },
+    // { id: 'settlementreport', title: 'Settlement Report', icon: 'receipt-outline', color: '#F97316', route: '/settlementreports' },
   ],
   sales: [
     { id: 'pos', title: 'POS', icon: 'calculator-outline', color: '#10B981', route: '/pos' },
@@ -130,7 +131,7 @@ export const MENU_STRUCTURE: MenuStructure = {
     { id: 'onlinetransfer', title: 'Online Transfer', icon: 'globe-outline', color: '#8B5CF6', route: '/onlinetransfer' },
     { id: 'stocktradeintransfer', title: 'Stock Trade-In Transfer', icon: 'swap-horizontal-outline', color: '#F59E0B', route: '/stocktradeintransfer' },
   ],
-    utility: [
+  utility: [
     { id: 'utility_stock_take', title: 'Stock Take', icon: 'clipboard-outline', color: '#3B82F6', hasSubmenu: true, route: '/utility/stock-take' },
     { id: 'changeprinter', title: 'Change Printer', icon: 'print-outline', color: '#10B981', route: '/utility/change-printer' },
     { id: 'etrsticket', title: 'eTRS Ticket', icon: 'receipt-outline', color: '#F59E0B', route: '/utility/etrs-ticket' },
@@ -146,7 +147,7 @@ export const MENU_STRUCTURE: MenuStructure = {
     { id: 'purchasetake', title: 'Purchase Take', icon: 'cart-outline', color: '#8B5CF6', route: '/utility/purchase-take' },
     { id: 'purchasetakereports', title: 'Purchase Take Reports', icon: 'bar-chart-outline', color: '#10B981', route: '/utility/purchase-take-reports' },
   ],
-reports: [
+  reports: [
     { id: 'masterreports', title: 'Master Reports', icon: 'document-text-outline', color: '#3B82F6', route: '/masterreports' },
     { id: 'customerreports', title: 'Customer Reports', icon: 'people-outline', color: '#10B981', route: '/customerreports' },
     { id: 'inventoryreports', title: 'Inventory Reports', icon: 'cube-outline', color: '#F59E0B', route: '/inventoryreports' },

@@ -78,6 +78,79 @@ const PremiumInput = ({ icon, placeholder, secureTextEntry, value, onChangeText,
   );
 };
 
+// Helper function to dynamically retrieve client system / PC name
+const getSystemPcName = async (): Promise<string> => {
+  // 1. Process environment (Electron / Node / desktop wrapper)
+  if (typeof process !== 'undefined' && process.env) {
+    const pc = process.env.COMPUTERNAME || process.env.HOSTNAME || '';
+    if (pc && pc.trim()) return pc.trim();
+  }
+
+  // 2. Browser Node / Electron integration
+  if (Platform.OS === 'web' && typeof window !== 'undefined') {
+    try {
+      // @ts-ignore
+      if (window.require) {
+        // @ts-ignore
+        const os = window.require('os');
+        if (os && typeof os.hostname === 'function') {
+          const h = os.hostname();
+          if (h && h.trim()) return h.trim();
+        }
+      }
+    } catch (_) {}
+
+    // 3. Windows Script Host (Edge / IE ActiveX mode)
+    try {
+      // @ts-ignore
+      if (typeof (window as any).ActiveXObject !== 'undefined') {
+        // @ts-ignore
+        const net = new (window as any).ActiveXObject('WScript.Network');
+        if (net && net.ComputerName) {
+          return String(net.ComputerName).trim();
+        }
+      }
+    } catch (_) {}
+
+    // 4. Query local server endpoints
+    const endpoints = [
+      'http://localhost:3000/api/client-pc-name',
+      'http://localhost:5000/api/client-pc-name',
+      'http://127.0.0.1:3000/api/client-pc-name',
+      `${API_BASE_URL}/client-pc-name`,
+    ];
+
+    for (const ep of endpoints) {
+      try {
+        const res = await fetch(ep).catch(() => null);
+        if (res && res.ok) {
+          const json = await res.json();
+          if (json.pcName && json.pcName.trim()) {
+            const resolved = json.pcName.trim();
+            window.localStorage.setItem('clientPcName', resolved);
+            return resolved;
+          }
+        }
+      } catch (_) {}
+    }
+
+    // 5. Check local/session storage cache on client PC
+    try {
+      const cached = window.localStorage.getItem('clientPcName') ||
+                     window.sessionStorage.getItem('clientPcName');
+      if (cached && cached.trim()) return cached.trim();
+    } catch (_) {}
+  }
+
+  // 6. Native AsyncStorage
+  try {
+    const asyncCached = await AsyncStorage.getItem('@client_pc_name');
+    if (asyncCached && asyncCached.trim()) return asyncCached.trim();
+  } catch (_) {}
+
+  return 'Unknown-PC';
+};
+
 export default function LoginScreen() {
   const { setUserSession } = useUserPermissions();
   const [username, setUsername] = useState('');
@@ -89,6 +162,12 @@ export default function LoginScreen() {
     Keyboard.dismiss();
     setErrorMsg('');
 
+    // Retrieve System / PC Name and log to browser console
+    const systemName = await getSystemPcName();
+    console.log('%c====================================', 'color: #E6AF2E; font-weight: bold;');
+    console.log('%c💻 RETRIEVED SYSTEM NAME (PC NAME):', 'color: #E6AF2E; font-size: 14px; font-weight: bold;', systemName);
+    console.log('%c====================================', 'color: #E6AF2E; font-weight: bold;');
+
     if (!username || !password) {
       setErrorMsg('Please enter both username and password.');
       return;
@@ -99,17 +178,28 @@ export default function LoginScreen() {
       const response = await fetch(`${API_BASE_URL}/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, password })
+        body: JSON.stringify({
+          username,
+          password,
+          pcName: systemName,
+        })
       });
 
       const data = await response.json();
+
+      // Block login if PC name does not match any existing terminal
+      if (data.wrongTerminal || response.status === 403 || data.message === 'Wrong Terminal.') {
+        setLoading(false);
+        setErrorMsg('Wrong Terminal.');
+        Alert.alert('Wrong Terminal', 'Wrong Terminal.');
+        return;
+      }
 
       if (data.success) {
         const uCode = data.user?.userCode || username;
         const uName = data.user?.userName || username;
         const uGroup = data.user?.userGroupCode || '';
         const companyData = data.company || {};
-        const terminalData = data.terminal || {};
 
         try {
           await AsyncStorage.setItem('@logged_user', JSON.stringify(data.user || { userCode: uCode, userName: uName, userGroupCode: uGroup }));
@@ -124,10 +214,6 @@ export default function LoginScreen() {
             if (companyData.locationCode) await AsyncStorage.setItem('@user_location', companyData.locationCode);
             if (companyData.defaultCurrency) await AsyncStorage.setItem('@default_currency', companyData.defaultCurrency);
           }
-          if (terminalData && Object.keys(terminalData).length > 0) {
-            await AsyncStorage.setItem('@terminal_info', JSON.stringify(terminalData));
-            if (terminalData.terminalCode) await AsyncStorage.setItem('@terminal_code', terminalData.terminalCode);
-          }
         } catch (_) { }
 
         if (Platform.OS === 'web' && typeof window !== 'undefined') {
@@ -141,9 +227,6 @@ export default function LoginScreen() {
               window.localStorage.setItem('companyConfig', JSON.stringify(companyData));
               if (companyData.gstPercentage !== undefined) window.localStorage.setItem('gstPercentage', String(companyData.gstPercentage));
               if (companyData.locationCode) window.localStorage.setItem('locationCode', companyData.locationCode);
-            }
-            if (terminalData && Object.keys(terminalData).length > 0) {
-              window.localStorage.setItem('terminalInfo', JSON.stringify(terminalData));
             }
 
             window.sessionStorage.setItem('userCode', uCode);
@@ -167,7 +250,7 @@ export default function LoginScreen() {
 
         router.replace({ pathname: '/(tabs)/home', params: { username: uCode, userId: uCode } });
       } else {
-        setErrorMsg(data.message || 'Invalid credentials');
+        setErrorMsg(data.message || 'Invalid Username/Password');
       }
     } catch (err) {
       console.error(err);

@@ -638,19 +638,7 @@ export default function SalesHistoryScreen() {
         </View>
 
         {/* SECTION 2: INVENTORY DETAILS DATA TABLE */}
-        <View style={[styles.goldCard, { marginTop: 8 }]}>
-          <View style={styles.cardHeaderBanner}>
-            <View style={styles.headerTitleContainer}>
-              <View style={styles.headerIconBadgeSmall}>
-                <Ionicons name="cube-outline" size={13} color="#B48218" />
-              </View>
-              <ThemedText style={styles.cardHeaderTitleSmall}>Inventory Details</ThemedText>
-              <View style={styles.counterBadge}>
-                <ThemedText style={styles.counterBadgeText}>{details.length} items</ThemedText>
-              </View>
-            </View>
-          </View>
-
+        <View style={[styles.goldCard, { marginTop: 6 }]}>
           {/* Table Header */}
           <View style={styles.tableHeaderRow}>
             <ThemedText style={[styles.tableHeadCell, { flex: 2 }]}>Inventory Code</ThemedText>
@@ -705,19 +693,7 @@ export default function SalesHistoryScreen() {
         </View>
 
         {/* SECTION 3: PAYMENT DETAILS TABLE */}
-        <View style={[styles.goldCard, { marginTop: 8 }]}>
-          <View style={styles.cardHeaderBanner}>
-            <View style={styles.headerTitleContainer}>
-              <View style={styles.headerIconBadgeSmall}>
-                <Ionicons name="card-outline" size={13} color="#B48218" />
-              </View>
-              <ThemedText style={styles.cardHeaderTitleSmall}>Payment Details</ThemedText>
-              <View style={styles.counterBadge}>
-                <ThemedText style={styles.counterBadgeText}>{payments.length} entries</ThemedText>
-              </View>
-            </View>
-          </View>
-
+        <View style={[styles.goldCard, { marginTop: 6 }]}>
           {/* Table Header */}
           <View style={styles.tableHeaderRow}>
             <ThemedText style={[styles.tableHeadCell, { flex: 3 }]}>Paymode</ThemedText>
@@ -925,13 +901,16 @@ const styles = StyleSheet.create({
     backgroundColor: '#FBF9F5',
   },
   contentContainer: {
-    padding: 8,
-    paddingBottom: 24,
+    padding: 6,
+    paddingBottom: 16,
+    maxWidth: 1100,
+    width: '100%',
+    alignSelf: 'center',
   },
 
   // ===== HEADER BAR =====
   headerBar: {
-    height: 48,
+    height: 42,
     backgroundColor: '#FFFFFF',
     flexDirection: 'row',
     alignItems: 'center',
@@ -951,17 +930,17 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   backBtn: {
-    padding: 6,
-    borderRadius: 6,
+    padding: 4,
+    borderRadius: 5,
     backgroundColor: '#FAF5EA',
     borderWidth: 1,
     borderColor: '#E8DCB8',
   },
   headerTitle: {
-    fontSize: 18,
+    fontSize: 15,
     fontWeight: 'bold',
     color: '#3B2D17',
-    letterSpacing: 0.5,
+    letterSpacing: 0.3,
   },
   headerRight: {
     flexDirection: 'row',
@@ -974,12 +953,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 5,
-    borderRadius: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 3,
+    borderRadius: 5,
     borderWidth: 1,
     gap: 4,
-    minHeight: 28,
+    minHeight: 25,
   },
   clearBtn: {
     backgroundColor: '#FFFFFF',
@@ -987,33 +966,33 @@ const styles = StyleSheet.create({
   },
   clearBtnText: {
     color: '#5C4A28',
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: 'bold',
   },
 
   // ===== TOP SPLIT =====
   topSplitRow: {
     flexDirection: 'row',
-    gap: 8,
+    gap: 6,
   },
 
   // ===== LUXURY GOLD CARD =====
   goldCard: {
     backgroundColor: '#FFFFFF',
-    borderRadius: 8,
+    borderRadius: 6,
     borderWidth: 1,
     borderColor: '#E8DCB8',
     shadowColor: '#A38035',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08,
-    shadowRadius: 4,
-    elevation: 2,
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.06,
+    shadowRadius: 3,
+    elevation: 1,
     overflow: 'hidden',
   },
   cardHeaderBanner: {
     backgroundColor: '#F5E7CA',
-    paddingHorizontal: 10,
-    paddingVertical: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
     borderBottomWidth: 1,
     borderBottomColor: '#E2D3B3',
     flexDirection: 'row',
@@ -1023,12 +1002,12 @@ const styles = StyleSheet.create({
   headerTitleContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    gap: 5,
   },
   headerIconBadgeSmall: {
-    width: 22,
-    height: 22,
-    borderRadius: 5,
+    width: 18,
+    height: 18,
+    borderRadius: 4,
     backgroundColor: '#FFF8EA',
     borderWidth: 1,
     borderColor: '#E2D2AF',
@@ -1036,22 +1015,22 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   cardHeaderTitleSmall: {
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: 'bold',
     color: '#3B2D17',
-    letterSpacing: 0.3,
+    letterSpacing: 0.2,
   },
   counterBadge: {
     backgroundColor: '#FAF5EA',
     borderWidth: 1,
     borderColor: '#E2D7C5',
-    borderRadius: 10,
-    paddingHorizontal: 7,
+    borderRadius: 8,
+    paddingHorizontal: 6,
     paddingVertical: 1,
     marginLeft: 6,
   },
   counterBadgeText: {
-    fontSize: 10,
+    fontSize: 9.5,
     fontWeight: 'bold',
     color: '#7D5E19',
   },
@@ -1059,33 +1038,33 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFF8EA',
     borderWidth: 1,
     borderColor: '#D8C59A',
-    borderRadius: 10,
-    paddingHorizontal: 8,
+    borderRadius: 8,
+    paddingHorizontal: 6,
     paddingVertical: 1,
   },
   statusBadgeText: {
-    fontSize: 10,
+    fontSize: 9.5,
     fontWeight: 'bold',
     color: '#8D6409',
   },
   cardBody: {
-    padding: 8,
+    padding: 6,
   },
 
   // ===== FORM ROWS & INPUTS =====
   formGridRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 4,
+    paddingVertical: 2.5,
     borderBottomWidth: 1,
     borderBottomColor: '#F7F2E9',
-    gap: 8,
+    gap: 6,
   },
   formLabel: {
-    fontSize: 11,
+    fontSize: 10.5,
     fontWeight: '600',
     color: '#4A3B2C',
-    width: 95,
+    width: 88,
     flexShrink: 0,
   },
   inputWithLookup: {
@@ -1095,14 +1074,14 @@ const styles = StyleSheet.create({
     minWidth: 0,
   },
   formInput: {
-    height: 26,
+    height: 23,
     backgroundColor: '#FFFFFF',
     borderWidth: 1,
     borderColor: '#E2D7C5',
-    borderRadius: 5,
-    paddingHorizontal: 8,
+    borderRadius: 4,
+    paddingHorizontal: 6,
     paddingVertical: 0,
-    fontSize: 11,
+    fontSize: 10.5,
     color: '#2B2118',
     flex: 1,
   },
@@ -1116,14 +1095,14 @@ const styles = StyleSheet.create({
     borderBottomRightRadius: 0,
   },
   attachedLookupBtn: {
-    width: 28,
-    height: 26,
+    width: 24,
+    height: 23,
     flexShrink: 0,
     backgroundColor: '#FAF5EA',
     borderWidth: 1,
     borderColor: '#D4C3A3',
-    borderRadius: 5,
-    marginLeft: 4,
+    borderRadius: 4,
+    marginLeft: 3,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -1134,19 +1113,19 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFF8EA',
     borderWidth: 1,
     borderColor: '#B8903B',
-    borderRadius: 6,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    marginTop: 6,
+    borderRadius: 5,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    marginTop: 4,
   },
   netTotalHighlightLabel: {
-    fontSize: 11,
+    fontSize: 10.5,
     fontWeight: 'bold',
     color: '#8D6409',
     textTransform: 'uppercase',
   },
   netTotalHighlightValue: {
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: 'bold',
     color: '#9E6D08',
   },
@@ -1155,13 +1134,13 @@ const styles = StyleSheet.create({
   tableHeaderRow: {
     flexDirection: 'row',
     backgroundColor: '#F5E7CA',
-    paddingVertical: 6,
-    paddingHorizontal: 8,
+    paddingVertical: 4,
+    paddingHorizontal: 6,
     borderBottomWidth: 1,
     borderBottomColor: '#E2D3B3',
   },
   tableHeadCell: {
-    fontSize: 11,
+    fontSize: 10,
     fontWeight: 'bold',
     color: '#3B2D17',
     textTransform: 'uppercase',
@@ -1169,24 +1148,24 @@ const styles = StyleSheet.create({
   tableRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 6,
-    paddingHorizontal: 8,
+    paddingVertical: 4,
+    paddingHorizontal: 6,
     borderBottomWidth: 1,
     borderBottomColor: '#F3EBDD',
   },
   tableRowText: {
-    fontSize: 11,
+    fontSize: 10.5,
     color: '#3B2D17',
   },
   tableInput: {
-    height: 24,
+    height: 22,
     backgroundColor: '#FFFFFF',
     borderWidth: 1,
     borderColor: '#E2D7C5',
-    borderRadius: 4,
-    paddingHorizontal: 6,
+    borderRadius: 3,
+    paddingHorizontal: 5,
     paddingVertical: 0,
-    fontSize: 11,
+    fontSize: 10.5,
     color: '#2B2118',
     marginHorizontal: 2,
   },
@@ -1204,13 +1183,13 @@ const styles = StyleSheet.create({
     color: '#9E6D08',
   },
   emptyTableContainer: {
-    padding: 24,
+    padding: 16,
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 6,
+    gap: 4,
   },
   emptyTableText: {
-    fontSize: 11,
+    fontSize: 10.5,
     color: '#8F816E',
   },
 

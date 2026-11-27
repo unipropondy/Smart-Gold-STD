@@ -1,6 +1,20 @@
 const express = require("express");
 const { sql } = require("../db");
+const os = require("os");
 const router = express.Router();
+
+// Endpoint to retrieve client PC name
+router.get("/client-pc-name", (req, res) => {
+  try {
+    const pcName = process.env.COMPUTERNAME || os.hostname() || "";
+    return res.status(200).json({
+      success: true,
+      pcName: pcName.trim(),
+    });
+  } catch (err) {
+    return res.status(500).json({ success: false, pcName: "", error: err.message });
+  }
+});
 
 // Helper to execute customer expiry updates equivalent to frmSignon.vb:
 // objCustomer.Customer180ExpiryUpdate() -> EXEC sp_CustomerUpdate180
@@ -29,12 +43,12 @@ async function executeCustomerExpiryUpdates(pool) {
 // ================= LOGIN ================= //
 router.post("/login", async (req, res) => {
   try {
-    let { username, password, workstation } = req.body;
+    let { username, password, workstation, pcName } = req.body;
 
     // ✅ Validation
     username = username ? String(username).trim() : '';
     password = password ? String(password).trim() : '';
-    workstation = workstation ? String(workstation).trim() : '';
+    const clientPc = (pcName || workstation || '').trim();
 
     if (!username || !password) {
       return res.status(400).json({
@@ -44,6 +58,24 @@ router.post("/login", async (req, res) => {
     }
 
     const pool = req.pool;
+
+    // Terminal Validation against tblTerminal.ComputerName
+    if (!clientPc) {
+      return res.status(403).json({ success: false, wrongTerminal: true, message: "Wrong Terminal." });
+    }
+
+    const termCheck = await pool.request()
+      .input("pc", sql.VarChar(100), clientPc)
+      .query(`
+        SELECT COUNT(1) AS TerminalCount 
+        FROM tblTerminal 
+        WHERE UPPER(LTRIM(RTRIM(ComputerName))) = UPPER(LTRIM(RTRIM(@pc)))
+      `);
+
+    const count = termCheck.recordset?.[0]?.TerminalCount || 0;
+    if (count === 0) {
+      return res.status(403).json({ success: false, wrongTerminal: true, message: "Wrong Terminal." });
+    }
 
     // Run background customer expiry maintenance (same as frmSignon.vb)
     executeCustomerExpiryUpdates(pool).catch(() => {});

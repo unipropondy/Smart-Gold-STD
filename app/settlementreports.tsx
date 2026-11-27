@@ -88,14 +88,14 @@ export default function SettlementReportsScreen() {
   const [toastMessage, setToastMessage] = useState('');
   const [toastType, setToastType] = useState<'success' | 'error'>('success');
 
-  const [settlementType, setSettlementType] = useState<'computer' | 'manual'>('computer');
+  const [settlementType, setSettlementType] = useState<'computer' | 'manual' | 'comparison'>('computer');
   const [selectedLocation, setSelectedLocation] = useState<string>('ALL');
   const [isLocationDropdownOpen, setIsLocationDropdownOpen] = useState(false);
   const [locations, setLocations] = useState<LocationItem[]>([]);
   const [actionOption, setActionOption] = useState<ActionOption>('Preview');
 
-  const [fromDate, setFromDate] = useState(formatDateLocal(new Date()));
-  const [toDate, setToDate] = useState(formatDateLocal(new Date()));
+  const [fromDate, setFromDate] = useState(getCurrentYearStartIso());
+  const [toDate, setToDate] = useState(getTodayIso());
   const [isLoading, setIsLoading] = useState(false);
 
   const [showDatePicker, setShowDatePicker] = useState<{ show: boolean; mode: 'from' | 'to' }>({
@@ -184,7 +184,13 @@ export default function SettlementReportsScreen() {
         return;
       }
 
-      const repTitle = json.reportTitle || (settlementType === 'manual' ? 'Manual Settlement Report' : 'Computer Settlement Report');
+      const repTitle =
+        json.reportTitle ||
+        (settlementType === 'manual'
+          ? 'Manual Settlement Report'
+          : settlementType === 'comparison'
+          ? 'Settlement Comparison Report (Computer vs Manual)'
+          : 'Computer Settlement Report');
       const rawCols = json.columns || Object.keys(json.data[0]).map((k) => ({ key: k, label: k }));
       const columns = rawCols.map((c: any) => ({ ...c, label: formatColumnHeader(c.label || c.key) }));
       const cleanName = repTitle.replace(/[^a-zA-Z0-9_-]/g, '_');
@@ -312,7 +318,7 @@ export default function SettlementReportsScreen() {
               {/* Settlement Type */}
               <View style={[styles.reportCol, { flex: 1.2 }]}>
                 <Text style={styles.fieldLabel}>Settlement Type</Text>
-                <View style={{ flexDirection: 'row', gap: 10, marginTop: 4 }}>
+                <View style={{ flexDirection: 'row', gap: 10, marginTop: 4, flexWrap: 'wrap' }}>
                   <RadioButton
                     label="Computer"
                     selected={settlementType === 'computer'}
@@ -322,6 +328,11 @@ export default function SettlementReportsScreen() {
                     label="Manual"
                     selected={settlementType === 'manual'}
                     onPress={() => setSettlementType('manual')}
+                  />
+                  <RadioButton
+                    label="Comparison"
+                    selected={settlementType === 'comparison'}
+                    onPress={() => setSettlementType('comparison')}
                   />
                 </View>
               </View>

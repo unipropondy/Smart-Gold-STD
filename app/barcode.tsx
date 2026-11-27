@@ -294,8 +294,10 @@ export default function BarcodeScreen() {
       const json = await response.json();
       if (json.success) {
         setPrintData(json);
-        setShowPrintModal(true);
+        setShowPrintModal(false);
         showToast(json.message || 'Barcode printed successfully!', 'success');
+        // Handle clear for the next item entry matching frmBarcode.vb
+        handleClear(true);
       } else {
         showToast(json.message || 'Error in updation.', 'error');
       }
