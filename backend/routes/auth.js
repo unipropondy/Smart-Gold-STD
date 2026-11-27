@@ -4,13 +4,30 @@ const os = require("os");
 const router = express.Router();
 
 // Endpoint to retrieve client PC name
-router.get("/client-pc-name", (req, res) => {
+router.get("/client-pc-name", async (req, res) => {
   try {
+    const dns = require("dns").promises;
+    let clientIp = req.headers["x-forwarded-for"] || req.socket.remoteAddress || "";
+    if (clientIp.includes(",")) clientIp = clientIp.split(",")[0].trim();
+    if (clientIp.startsWith("::ffff:")) clientIp = clientIp.replace("::ffff:", "");
+
+    const isLocalClient = clientIp === "127.0.0.1" || clientIp === "::1" || clientIp === "localhost" || clientIp === "";
+
+    if (isLocalClient) {
+      const pcName = process.env.COMPUTERNAME || os.hostname() || "";
+      return res.status(200).json({ success: true, pcName: pcName.trim(), clientIp });
+    }
+
+    try {
+      const hostnames = await dns.reverse(clientIp);
+      if (hostnames && hostnames.length > 0) {
+        const clientHost = hostnames[0].split(".")[0].toUpperCase();
+        return res.status(200).json({ success: true, pcName: clientHost, clientIp });
+      }
+    } catch (_) {}
+
     const pcName = process.env.COMPUTERNAME || os.hostname() || "";
-    return res.status(200).json({
-      success: true,
-      pcName: pcName.trim(),
-    });
+    return res.status(200).json({ success: true, pcName: pcName.trim(), clientIp });
   } catch (err) {
     return res.status(500).json({ success: false, pcName: "", error: err.message });
   }

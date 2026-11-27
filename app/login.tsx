@@ -78,7 +78,7 @@ const PremiumInput = ({ icon, placeholder, secureTextEntry, value, onChangeText,
   );
 };
 
-// Helper function to dynamically retrieve client system / PC name
+// Helper function to dynamically retrieve client system / PC name across LAN, Static Public IP, and Local environments
 const getSystemPcName = async (): Promise<string> => {
   // 1. Process environment (Electron / Node / desktop wrapper)
   if (typeof process !== 'undefined' && process.env) {
@@ -112,12 +112,14 @@ const getSystemPcName = async (): Promise<string> => {
       }
     } catch (_) {}
 
-    // 4. Query local server endpoints
+    // 4. Query client-pc-name endpoint across current host, LAN IP, and configured API
+    const currentHost = window.location.hostname;
+    const currentProtocol = window.location.protocol;
     const endpoints = [
-      'http://localhost:3000/api/client-pc-name',
-      'http://localhost:5000/api/client-pc-name',
-      'http://127.0.0.1:3000/api/client-pc-name',
+      `${currentProtocol}//${currentHost}:3000/api/client-pc-name`,
       `${API_BASE_URL}/client-pc-name`,
+      'http://localhost:3000/api/client-pc-name',
+      'http://127.0.0.1:3000/api/client-pc-name',
     ];
 
     for (const ep of endpoints) {
