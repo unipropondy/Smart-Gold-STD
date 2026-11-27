@@ -159,13 +159,8 @@ const getSystemPcName = async (): Promise<string> => {
     if (asyncCached && asyncCached.trim() && !isCloudContainerId(asyncCached)) return asyncCached.trim();
   } catch (_) {}
 
-  // If running in browser connected to cloud and local storage has client name, fallback to DURAIRAJ or prompt
-  if (Platform.OS === 'web' && typeof window !== 'undefined') {
-    const fallback = window.localStorage.getItem('clientPcName');
-    if (fallback && !isCloudContainerId(fallback)) return fallback;
-  }
-
-  return 'DURAIRAJ';
+  // 6. Return dynamic client identifier or empty if not resolved
+  return '';
 };
 
 export default function LoginScreen() {
