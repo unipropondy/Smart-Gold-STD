@@ -112,14 +112,9 @@ const getSystemPcName = async (): Promise<string> => {
       }
     } catch (_) {}
 
-    // 4. Query client-pc-name endpoint across current host, LAN IP, and configured API
-    const currentHost = window.location.hostname;
-    const currentProtocol = window.location.protocol;
+    // 4. Query client-pc-name endpoint (Railway / active API server)
     const endpoints = [
-      `${currentProtocol}//${currentHost}:3000/api/client-pc-name`,
       `${API_BASE_URL}/client-pc-name`,
-      'http://localhost:3000/api/client-pc-name',
-      'http://127.0.0.1:3000/api/client-pc-name',
     ];
 
     for (const ep of endpoints) {
