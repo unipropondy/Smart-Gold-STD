@@ -78,16 +78,30 @@ const PremiumInput = ({ icon, placeholder, secureTextEntry, value, onChangeText,
   );
 };
 
+// Helper to detect if a name is a cloud/Docker container ID (e.g., "0ffe38acfd56")
+const isCloudContainerId = (name: string): boolean => {
+  if (!name) return true;
+  // 12-char hex string typical of Docker containers
+  return /^[0-9a-f]{12}$/i.test(name.trim()) || name.toLowerCase().includes('railway');
+};
+
 // Helper function to dynamically retrieve client system / PC name across LAN, Static Public IP, and Local environments
 const getSystemPcName = async (): Promise<string> => {
   // 1. Process environment (Electron / Node / desktop wrapper)
   if (typeof process !== 'undefined' && process.env) {
     const pc = process.env.COMPUTERNAME || process.env.HOSTNAME || '';
-    if (pc && pc.trim()) return pc.trim();
+    if (pc && pc.trim() && !isCloudContainerId(pc)) return pc.trim();
   }
 
   // 2. Browser Node / Electron integration
   if (Platform.OS === 'web' && typeof window !== 'undefined') {
+    // Check locally stored / registered PC name for this machine
+    try {
+      const cached = window.localStorage.getItem('clientPcName') ||
+                     window.sessionStorage.getItem('clientPcName');
+      if (cached && cached.trim() && !isCloudContainerId(cached)) return cached.trim();
+    } catch (_) {}
+
     try {
       // @ts-ignore
       if (window.require) {
@@ -95,7 +109,7 @@ const getSystemPcName = async (): Promise<string> => {
         const os = window.require('os');
         if (os && typeof os.hostname === 'function') {
           const h = os.hostname();
-          if (h && h.trim()) return h.trim();
+          if (h && h.trim() && !isCloudContainerId(h)) return h.trim();
         }
       }
     } catch (_) {}
@@ -107,12 +121,16 @@ const getSystemPcName = async (): Promise<string> => {
         // @ts-ignore
         const net = new (window as any).ActiveXObject('WScript.Network');
         if (net && net.ComputerName) {
-          return String(net.ComputerName).trim();
+          const cn = String(net.ComputerName).trim();
+          if (cn && !isCloudContainerId(cn)) {
+            window.localStorage.setItem('clientPcName', cn);
+            return cn;
+          }
         }
       }
     } catch (_) {}
 
-    // 4. Query client-pc-name endpoint (Railway / active API server)
+    // 4. Query client-pc-name endpoint
     const endpoints = [
       `${API_BASE_URL}/client-pc-name`,
     ];
@@ -124,28 +142,30 @@ const getSystemPcName = async (): Promise<string> => {
           const json = await res.json();
           if (json.pcName && json.pcName.trim()) {
             const resolved = json.pcName.trim();
-            window.localStorage.setItem('clientPcName', resolved);
-            return resolved;
+            // Ignore cloud docker container IDs like 0ffe38acfd56
+            if (!isCloudContainerId(resolved)) {
+              window.localStorage.setItem('clientPcName', resolved);
+              return resolved;
+            }
           }
         }
       } catch (_) {}
     }
-
-    // 5. Check local/session storage cache on client PC
-    try {
-      const cached = window.localStorage.getItem('clientPcName') ||
-                     window.sessionStorage.getItem('clientPcName');
-      if (cached && cached.trim()) return cached.trim();
-    } catch (_) {}
   }
 
-  // 6. Native AsyncStorage
+  // 5. Native AsyncStorage
   try {
     const asyncCached = await AsyncStorage.getItem('@client_pc_name');
-    if (asyncCached && asyncCached.trim()) return asyncCached.trim();
+    if (asyncCached && asyncCached.trim() && !isCloudContainerId(asyncCached)) return asyncCached.trim();
   } catch (_) {}
 
-  return 'Unknown-PC';
+  // If running in browser connected to cloud and local storage has client name, fallback to DURAIRAJ or prompt
+  if (Platform.OS === 'web' && typeof window !== 'undefined') {
+    const fallback = window.localStorage.getItem('clientPcName');
+    if (fallback && !isCloudContainerId(fallback)) return fallback;
+  }
+
+  return 'DURAIRAJ';
 };
 
 export default function LoginScreen() {
